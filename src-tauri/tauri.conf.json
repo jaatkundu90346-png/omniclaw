@@ -1,0 +1,39 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "OmniClaw",
+  "version": "0.1.0",
+  "identifier": "com.omniclaw.desktop",
+  "build": {
+    "beforeDevCommand": "npm run launch:no-open",
+    "devUrl": "http://localhost:3147",
+    "frontendDist": "../public"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "OmniClaw",
+        "url": "http://localhost:3147",
+        "width": 1280,
+        "height": 860,
+        "minWidth": 980,
+        "minHeight": 700,
+        "center": true,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "externalBin": ["binaries/omniclaw-gateway"],
+    "publisher": "OmniClaw",
+    "copyright": "Copyright 2026 OmniClaw",
+    "shortDescription": "Local-first AI assistant control plane",
+    "longDescription": "OmniClaw runs a local gateway dashboard for agents, tools, BYOK providers, sessions, jobs, and delegation."
+  }
+}

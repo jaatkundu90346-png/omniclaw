@@ -1,0 +1,312 @@
+{
+  "app": {
+    "name": "OmniClaw",
+    "tagline": "Lightweight local-first assistant runtime"
+  },
+  "runtime": {
+    "activeProfile": "balanced",
+    "profiles": {
+      "lite": {
+        "description": "Minimum overhead for simple chat, notes, and planning.",
+        "maxRecentConversations": 6,
+        "allowToolExecution": true,
+        "enableTasks": true,
+        "enableSkillMatching": true
+      },
+      "balanced": {
+        "description": "Recommended default profile with memory, skills, tools, and tasks.",
+        "maxRecentConversations": 12,
+        "allowToolExecution": true,
+        "enableTasks": true,
+        "enableSkillMatching": true
+      },
+      "power": {
+        "description": "Richer context window for more advanced orchestration.",
+        "maxRecentConversations": 20,
+        "allowToolExecution": true,
+        "enableTasks": true,
+        "enableSkillMatching": true
+      }
+    }
+  },
+  "provider": {
+    "mode": "mock",
+    "baseUrl": "https://api.openai.com/v1",
+    "model": "gpt-4o-mini",
+    "mockDelayMs": 0,
+    "apiKeyEnv": "OPENAI_API_KEY",
+    "apiKeyProviderId": "openai-compatible",
+    "temperature": 0.2,
+    "maxTokens": 1600,
+    "plannerMaxTokens": 700,
+    "timeoutMs": 45000,
+    "systemPrompt": "You are OmniClaw, a practical local-first assistant focused on user needs, planning, execution, safety, and clarity."
+  },
+  "providerProfiles": {
+    "openai": {
+      "mode": "openai-compatible",
+      "baseUrl": "https://api.openai.com/v1",
+      "model": "gpt-4o-mini",
+      "apiKeyProviderId": "openai"
+    },
+    "anthropic": {
+      "mode": "openai-compatible",
+      "baseUrl": "https://api.anthropic.com/v1",
+      "model": "claude-3-7-sonnet-latest",
+      "apiKeyProviderId": "anthropic"
+    },
+    "gemini": {
+      "mode": "openai-compatible",
+      "baseUrl": "https://generativelanguage.googleapis.com/v1beta/openai",
+      "model": "gemini-1.5-pro",
+      "apiKeyProviderId": "gemini"
+    },
+    "groq": {
+      "mode": "openai-compatible",
+      "baseUrl": "https://api.groq.com/openai/v1",
+      "model": "llama-3.1-70b-versatile",
+      "apiKeyProviderId": "groq"
+    },
+    "openrouter": {
+      "mode": "openai-compatible",
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "model": "openai/gpt-4o-mini",
+      "apiKeyProviderId": "openrouter",
+      "httpReferer": "http://localhost:3147",
+      "appTitle": "OmniClaw"
+    },
+    "nvidia": {
+      "mode": "openai-compatible",
+      "baseUrl": "https://integrate.api.nvidia.com/v1",
+      "model": "z-ai/glm-5.1",
+      "apiKeyProviderId": "nvidia",
+      "httpReferer": "http://localhost:3147",
+      "appTitle": "OmniClaw"
+    },
+    "codex-cli": {
+      "mode": "codex-cli",
+      "baseUrl": "",
+      "model": "",
+      "apiKeyProviderId": "codex-cli",
+      "httpReferer": "",
+      "appTitle": "OmniClaw",
+      "codexCommand": "codex",
+      "codexSandbox": "read-only",
+      "timeoutMs": 120000
+    },
+    "local-compatible": {
+      "mode": "openai-compatible",
+      "baseUrl": "http://localhost:11434/v1",
+      "model": "llama3.2",
+      "apiKeyProviderId": "local-compatible"
+    }
+  },
+  "session": {
+    "detailMessageLimit": 80,
+    "previewChars": 140,
+    "autoResetIdleMinutes": 0
+  },
+  "agents": {
+    "main": {
+      "name": "Main Agent",
+      "description": "Primary orchestrator for chat, memory, and routing.",
+      "profile": "power",
+      "blockedPermissions": [],
+      "channels": [
+        "webchat"
+      ]
+    },
+    "research": {
+      "name": "Research Agent",
+      "description": "Focused on planning, research memory, and evidence gathering.",
+      "profile": "balanced",
+      "blockedPermissions": [
+        "allowFileWrite",
+        "allowShellPlanning"
+      ],
+      "allowedSkillIds": [
+        "research-planner"
+      ],
+      "channels": [
+        "webchat"
+      ]
+    },
+    "builder": {
+      "name": "Builder Agent",
+      "description": "Focused on implementation work, generated artifacts, and code-facing tasks.",
+      "profile": "power",
+      "blockedPermissions": [
+        "allowShellPlanning"
+      ],
+      "channels": [
+        "webchat"
+      ]
+    },
+    "ops": {
+      "name": "Ops Agent",
+      "description": "Focused on runtime operations, approvals, and workspace inspection.",
+      "profile": "power",
+      "allowedTools": [
+        "time_now",
+        "runtime_summary",
+        "layer_status",
+        "computer_access_status",
+        "list_files",
+        "read_file",
+        "list_computer_directory",
+        "read_computer_file",
+        "write_computer_file",
+        "create_computer_directory",
+        "delete_computer_path",
+        "open_browser_url",
+        "run_terminal_command",
+        "exec",
+        "process",
+        "code_execution",
+        "browser",
+        "web_search",
+        "x_search",
+        "web_fetch",
+        "read",
+        "write",
+        "edit",
+        "apply_patch",
+        "message",
+        "sessions_list",
+        "sessions_history",
+        "sessions_send",
+        "sessions_spawn",
+        "sessions_yield",
+        "session_status",
+        "subagents",
+        "agents_list",
+        "memory_search",
+        "memory_get",
+        "nodes",
+        "canvas",
+        "cron",
+        "gateway",
+        "image",
+        "image_generate",
+        "music_generate",
+        "video_generate",
+        "tts",
+        "plan_shell_command",
+        "list_tasks",
+        "run_task",
+        "list_long_term_memory",
+        "promote_memory",
+        "dream_memory_sweep",
+        "scan_file_drop",
+        "cleanup_attachment_cache",
+        "analyze_attachment_media",
+        "analyze_pending_media_attachments"
+      ],
+      "allowedSkillIds": [
+        "openclaw-tool-loop",
+        "filesystem-operator",
+        "web-browser-operator",
+        "session-agent-operator",
+        "gateway-ops",
+        "media-generation",
+        "safety-governance",
+        "reviewer"
+      ],
+      "channels": [
+        "webchat"
+      ]
+    }
+  },
+  "tools": {
+    "permissions": {
+      "allowNoteWrite": true,
+      "allowTaskWrite": true,
+      "allowFileRead": true,
+      "allowDirectoryList": true,
+      "allowFileWrite": true,
+      "allowShellPlanning": true,
+      "allowWebResearch": true,
+      "allowTaskRunner": true,
+      "allowSkillWrite": true,
+      "allowConfigWrite": true,
+      "allowShellExecution": true,
+      "allowMemoryPromotion": true,
+      "allowDreamSweep": true,
+      "allowConnectorWrite": true,
+      "allowComputerAccess": true,
+      "allowBrowserControl": true
+    },
+    "filesystem": {
+      "workspaceRoot": ".",
+      "maxReadBytes": 65536,
+      "writableRoots": [
+        "data/generated",
+        "docs/drafts",
+        "notes"
+      ]
+    },
+    "computerAccess": {
+      "enabled": true,
+      "allowedRoots": [
+        "~"
+      ],
+      "allowWrite": true,
+      "allowDelete": true,
+      "allowPermanentDelete": false,
+      "trashDir": "data/trash",
+      "maxReadBytes": 131072,
+      "blockedPathPatterns": [
+        "^[A-Z]:/$",
+        "^[A-Z]:/Windows(?:/|$)",
+        "^[A-Z]:/Program Files(?:/|$)",
+        "^[A-Z]:/Program Files \\(x86\\)(?:/|$)",
+        "^[A-Z]:/ProgramData(?:/|$)"
+      ]
+    },
+    "research": {
+      "maxResults": 5,
+      "timeoutMs": 10000
+    },
+    "shellExecution": {
+      "cwd": ".",
+      "allowlistMode": "advisory",
+      "trustLevel": "balanced",
+      "timeoutMs": 15000,
+      "maxOutputBytes": 12000,
+      "allowlistPatterns": [
+        "^node\\s+(-v|--version)$",
+        "^npm\\s+(-v|--version)$",
+        "^npm\\.cmd\\s+(?:run\\s+)?(build|test|portable:build|release:windows|sidecar:build)$",
+        "^pnpm\\s+(-v|--version)$",
+        "^git\\s+(status|branch|log|show|diff)\\b",
+        "^(dir|ls)(\\s+.*)?$",
+        "^Get-ChildItem\\b",
+        "^Get-Content\\b",
+        "^Select-String\\b",
+        "^New-Item\\b",
+        "^Copy-Item\\b",
+        "^Move-Item\\b",
+        "^Start-Process\\b",
+        "^python\\s+(-V|--version)$",
+        "^where\\.exe\\b",
+        "^winget\\s+search\\b",
+        "^Get-Date$",
+        "^pwd$"
+      ],
+      "blockedPatterns": [
+        "\\brm\\s+-rf\\b",
+        "\\bRemove-Item\\b[\\s\\S]*-Recurse\\b[\\s\\S]*-Force\\b",
+        "\\bdel\\s+/[sq]\\b",
+        "\\brmdir\\s+/[sq]\\b",
+        "\\bformat\\b",
+        "\\bdiskpart\\b",
+        "\\bshutdown\\b",
+        "\\bRestart-Computer\\b",
+        "\\bgit\\s+reset\\s+--hard\\b",
+        "\\bgit\\s+clean\\s+-fd\\b"
+      ]
+    }
+  },
+  "pluginConfig": {},
+  "pluginState": {}
+}

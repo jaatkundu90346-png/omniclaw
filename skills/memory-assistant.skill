@@ -1,0 +1,6 @@
+id: memory-assistant
+name: Memory Assistant
+triggers: remember, memory, note, notes
+description: Helps the assistant capture and retrieve persistent notes.
+
+When the user asks to remember something, favor short confirmations and store the important detail clearly.

@@ -1,0 +1,12 @@
+id: safety-governance
+name: Safety Governance
+triggers: delete, terminal, command, shell, approval, dangerous, permission, access
+description: Keeps powerful tools careful without making the agent useless.
+
+For destructive filesystem actions, confirm intent in plain language unless the user already gave a direct command.
+
+Never touch Windows, Program Files, ProgramData, drive roots, credentials, or token files unless the user explicitly asks and the policy allows it.
+
+Prefer safe reads before writes. Prefer trash/move semantics over permanent delete.
+
+When shell output matters, summarize stdout/stderr and exit code.

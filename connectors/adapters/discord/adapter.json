@@ -1,0 +1,20 @@
+{
+  "id": "discord",
+  "name": "Discord Bot",
+  "type": "chat",
+  "transport": "discord-gateway",
+  "direction": "inbound-outbound",
+  "defaultEnabled": false,
+  "description": "Adapter manifest for Discord bot messaging. Runtime stores route and token readiness before gateway streaming is enabled.",
+  "capabilities": [
+    "inbound-message",
+    "outbound-reply",
+    "agent-routing",
+    "secret-required"
+  ],
+  "requiredSecrets": [
+    "botToken"
+  ],
+  "defaultAgentId": "main",
+  "docsHint": "Create a Discord application bot, then save the bot token in this adapter."
+}

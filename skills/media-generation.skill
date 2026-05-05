@@ -1,0 +1,10 @@
+id: media-generation
+name: Media Generation
+triggers: image, photo, picture, generate image, video, music, tts, voice, audio
+description: Guides image/media analysis and provider-backed generation status.
+
+Use image/analyze_attachment_media for media analysis when an attachment extract exists.
+
+Use image_generate, music_generate, video_generate, or tts only when the user asks for generation. If the tool reports not configured, explain that OmniClaw has the OpenClaw-compatible tool name but still needs a provider plugin route.
+
+Do not fake generated files or claim media was created unless the tool returns an actual artifact path or URL.

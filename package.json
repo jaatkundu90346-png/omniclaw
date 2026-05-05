@@ -1,0 +1,31 @@
+{
+  "name": "omniclaw",
+  "version": "0.1.0",
+  "description": "Local-first lightweight OpenClaw-inspired assistant scaffold for Windows.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "launch": "node scripts/windows-launcher.mjs",
+    "launch:no-open": "node scripts/windows-launcher.mjs --no-open",
+    "install:shortcut": "node scripts/install-windows-shortcut.mjs",
+    "desktop:check": "node scripts/check-desktop-prereqs.mjs",
+    "desktop:dev": "npm run desktop:check -- --strict && tauri dev",
+    "desktop:build": "npm run desktop:check -- --strict && npm run sidecar:build && tauri build",
+    "sidecar:build": "node scripts/build-gateway-sidecar.mjs --build",
+    "sidecar:check": "node scripts/build-gateway-sidecar.mjs --check-only",
+    "portable:build": "node scripts/build-windows-portable.mjs",
+    "release:windows": "node scripts/build-windows-portable.mjs",
+    "build": "node --check server.js && node --check public/app.js",
+    "test": "node scripts/health-smoke.mjs",
+    "test:chat-agent": "node scripts/chat-agent-smoke.mjs",
+    "test:ws": "node scripts/ws-smoke.mjs",
+    "test:auth-provider": "node scripts/auth-provider-smoke.mjs"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.10.1",
+    "@yao-pkg/pkg": "^6.19.0",
+    "esbuild": "^0.28.0"
+  }
+}

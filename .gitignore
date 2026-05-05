@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# Runtime state, private memory, local auth, and secrets
+data/
+notes/
+logs/
+.env
+.env.*
+!.env.example
+openrouter api key/
+
+# Build outputs and packaged apps
+dist/
+src-tauri/target/
+src-tauri/binaries/
+
+# Local scratch/research artifacts
+scratch/
+.research/
+docs/drafts/*
+!docs/drafts/.gitkeep
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+*.log
+*.tmp

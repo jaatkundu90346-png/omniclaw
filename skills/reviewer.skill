@@ -1,0 +1,6 @@
+id: reviewer
+name: Reviewer
+triggers: review, bug
+description: Find bugs
+
+Focus on risks and missing tests.

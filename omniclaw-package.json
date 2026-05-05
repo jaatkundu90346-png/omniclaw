@@ -1,0 +1,29 @@
+{
+  "productName": "OmniClaw",
+  "appId": "com.omniclaw.desktop",
+  "version": "0.1.0",
+  "target": "windows",
+  "entry": "scripts/windows-launcher.mjs",
+  "server": "server.js",
+  "dashboardUrl": "http://localhost:3147/",
+  "installerPlan": {
+    "phase1": "Node launcher + desktop shortcut",
+    "phase2": "Tauri shell that embeds the local gateway dashboard in a lightweight desktop window",
+    "phase3": "Gateway sidecar binary bundled through Tauri externalBin",
+    "phase4": "Auto-update and signed installer"
+  },
+  "files": [
+    "server.js",
+    "package.json",
+    "config",
+    "src",
+    "public",
+    "sidecar",
+    "scripts",
+    "src-tauri",
+    "docs",
+    "DESIGN.md",
+    "start-omniclaw.bat",
+    "start-omniclaw.ps1"
+  ]
+}

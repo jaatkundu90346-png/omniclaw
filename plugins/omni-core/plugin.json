@@ -1,0 +1,87 @@
+{
+  "id": "omni-core",
+  "name": "Omni Core Plugin",
+  "version": "0.2.0",
+  "description": "Starter plugin that proves OmniClaw can discover manifest-backed plugins, validate plugin-owned config, and run runtime-declared tools.",
+  "enabled": true,
+  "capabilities": [
+    "tools",
+    "background-jobs",
+    "config-schema"
+  ],
+  "setup": {
+    "kind": "local-manifest",
+    "summary": "Local manifest plugin loaded from the OmniClaw plugins directory.",
+    "requires": [
+      "plugin-config"
+    ],
+    "steps": [
+      "Load plugin.json",
+      "Merge defaults with persisted plugin config",
+      "Expose runtime tools when config is valid"
+    ],
+    "health": {
+      "mode": "config-backed",
+      "summary": "Ready when manifest validation and plugin config validation both pass."
+    }
+  },
+  "runtime": {
+    "defaultToolId": "plugin_echo",
+    "jobs": {
+      "enabled": true,
+      "queue": "plugin-runtime",
+      "concurrency": 1
+    },
+    "tools": [
+      {
+        "id": "plugin_echo",
+        "description": "Echo a message through the plugin runtime.",
+        "permission": "plugin",
+        "defaultInput": {
+          "message": "hello from plugin job"
+        },
+        "response": "{{echoPrefix}}: {{message}}"
+      },
+      {
+        "id": "plugin_status_card",
+        "description": "Return a small status card from the plugin runtime.",
+        "permission": "plugin",
+        "response": "{{pluginName}} is active for {{surface}}{{statusSuffix}}."
+      }
+    ]
+  },
+  "configDefaults": {
+    "surface": "dashboard",
+    "echoPrefix": "Plugin echo",
+    "statusBadge": true
+  },
+  "configSchema": {
+    "surface": {
+      "type": "string",
+      "label": "Surface",
+      "description": "Primary control surface where the plugin presents itself.",
+      "enum": [
+        "dashboard",
+        "control",
+        "chat"
+      ],
+      "default": "dashboard",
+      "required": true
+    },
+    "echoPrefix": {
+      "type": "string",
+      "label": "Echo prefix",
+      "description": "Prefix used by plugin echo responses.",
+      "default": "Plugin echo",
+      "minLength": 2,
+      "maxLength": 40,
+      "placeholder": "Plugin echo"
+    },
+    "statusBadge": {
+      "type": "boolean",
+      "label": "Status badge",
+      "description": "Append a ready badge suffix to the status card response.",
+      "default": true
+    }
+  }
+}

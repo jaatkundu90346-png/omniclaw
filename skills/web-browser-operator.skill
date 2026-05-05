@@ -1,0 +1,10 @@
+id: web-browser-operator
+name: Web Browser Operator
+triggers: browser, website, url, search, research, web, fetch, open
+description: Guides OpenClaw-style web search, fetch, and browser opening.
+
+Use web_search for public research queries and web_fetch/read_url for a known URL.
+
+Use browser with action=open/navigate/goto when the user asks to open a page on the laptop. Use browser with action=read/fetch when the user asks for page contents.
+
+Be honest about current limits: OmniClaw can open/fetch pages through runtime tools, while full click/screenshot Chromium automation is still a plugin upgrade.
