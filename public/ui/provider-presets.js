@@ -4,8 +4,14 @@ export const PROVIDER_PRESETS = {
   gemini: { providerId: "gemini" },
   groq: { providerId: "groq" },
   openrouter: { providerId: "openrouter" },
+  nvidia: { providerId: "nvidia" },
   "codex-cli": { providerId: "codex-cli" },
   "local-compatible": { providerId: "local-compatible" },
+  ollama: { providerId: "ollama" },
+  mistral: { providerId: "mistral" },
+  deepseek: { providerId: "deepseek" },
+  together: { providerId: "together" },
+  fireworks: { providerId: "fireworks" },
 };
 
 export function inferProfileFromProviderId(providerId = "") {
