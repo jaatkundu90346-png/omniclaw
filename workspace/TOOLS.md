@@ -2,7 +2,7 @@
 
 OmniClaw runtime tools include:
 - time_now
-- runtime_summary
+- runtime_summary, provider_status, capability_demo
 - list_files, read_file, write_file, append_file
 - OpenClaw-compatible aliases: read, write, edit, apply_patch
 - exec, process, code_execution

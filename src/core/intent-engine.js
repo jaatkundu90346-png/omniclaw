@@ -21,6 +21,20 @@ export class IntentEngine {
     }
 
     if (
+      lowered.includes("auth") ||
+      lowered.includes("authentication") ||
+      lowered.includes("login") ||
+      lowered.includes("reply nhi") ||
+      lowered.includes("reply nahi") ||
+      lowered.includes("model kam nhi") ||
+      lowered.includes("model kaam nhi") ||
+      lowered.includes("codex cli")
+    ) {
+      intents.push("api-setup");
+      intents.push("provider-status");
+    }
+
+    if (
       lowered.includes("codex") ||
       lowered.includes("openclaw") ||
       lowered.includes("omniclaw") ||
@@ -61,6 +75,16 @@ export class IntentEngine {
       lowered.includes("apni skills")
     ) {
       intents.push("capabilities");
+    }
+
+    if (
+      lowered.includes("provider status") ||
+      lowered.includes("brain status") ||
+      lowered.includes("model status") ||
+      lowered.includes("auth status") ||
+      lowered.includes("codex status")
+    ) {
+      intents.push("provider-status");
     }
 
     if (

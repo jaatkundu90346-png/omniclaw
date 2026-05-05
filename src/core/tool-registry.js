@@ -184,6 +184,101 @@ export class ToolRegistry {
           };
         },
       },
+      provider_status: {
+        description: "Diagnose the active model/provider brain, auth readiness, command path, and next fix.",
+        permission: null,
+        group: "runtime",
+        run: async ({ verify } = {}) => {
+          const info = this.agentRuntime?.getProviderInfo?.() || {};
+          let live = null;
+          if (verify && this.agentRuntime?.provider?.testConnection) {
+            try {
+              live = await this.agentRuntime.provider.testConnection({
+                verifyAuth: true,
+                timeoutMs: 30000,
+                prompt: "Reply with exactly: ok",
+              });
+            } catch (error) {
+              live = {
+                ok: false,
+                error: error.message,
+              };
+            }
+          }
+          const ready = Boolean(info.ready);
+          const liveOk = live ? Boolean(live.ok) : null;
+          const needsAuth = (live && !liveOk) || (!ready && /auth|login|codex|key|not found|could not run/i.test(String(info.message || "")));
+          return {
+            ready: live ? liveOk : ready,
+            provider: info.id || "unknown",
+            mode: info.mode || "",
+            model: info.model || "",
+            command: info.command || "",
+            commandPath: info.commandPath || "",
+            commandVersion: info.commandVersion || "",
+            apiKeyConfigured: Boolean(info.apiKeyConfigured),
+            apiKeySource: info.apiKeySource || "",
+            message: info.message || "",
+            verified: Boolean(live),
+            live,
+            needsAuth,
+            nextFix: needsAuth
+              ? "Open a terminal and run codex login for ChatGPT/Codex bridge, or switch to an OpenAI-compatible BYOK provider with base URL, model, and API key."
+              : live
+                ? "Provider live reply test passed."
+                : ready
+                ? "Provider brain is ready."
+                : "Check provider profile, base URL, model name, command path, and saved API key.",
+          };
+        },
+      },
+      capability_demo: {
+        description: "Return a practical demo of the active agent's real tools, skills, and example tasks.",
+        permission: null,
+        group: "runtime",
+        run: async (_, context) => {
+          const agentId = this.getAgentId(context);
+          const tools = this.getAll({ agentId });
+          const skills = this.agentRegistry
+            ? this.agentRegistry.filterSkills(this.customizationEngine?.skillRegistry?.getAll?.() || [], agentId)
+            : [];
+          const toolIds = tools.map((tool) => tool.id);
+          return {
+            agentId,
+            toolCount: tools.length,
+            skillCount: skills.length,
+            coreTools: toolIds.filter((id) => [
+              "exec",
+              "process",
+              "code_execution",
+              "browser",
+              "web_search",
+              "web_fetch",
+              "read",
+              "write",
+              "edit",
+              "sessions_list",
+              "sessions_history",
+              "memory_search",
+              "gateway",
+              "cron",
+              "nodes",
+            ].includes(id)),
+            skills: skills.map((skill) => ({
+              id: skill.id,
+              name: skill.name,
+              triggers: skill.triggers,
+            })),
+            demos: [
+              "Ask: 'laptop status check karo' -> computer_system_status runs.",
+              "Ask: 'list files' or 'read file README.md' -> filesystem tools run.",
+              "Ask: 'search web OpenClaw tools' -> web_search/web_research runs.",
+              "Ask: 'gateway status' -> gateway/provider/session diagnostics run.",
+              "Ask: 'run terminal command \"Get-Date\"' -> governed exec runs with audit logs.",
+            ],
+          };
+        },
+      },
       layer_status: {
         description: "Report OmniClaw's OpenClaw-style layer 1-5 architecture status, gaps, and next upgrades.",
         permission: null,

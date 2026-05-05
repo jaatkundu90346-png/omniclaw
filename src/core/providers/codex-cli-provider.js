@@ -240,13 +240,51 @@ export class CodexCliProvider {
         error: `Codex CLI was found but could not run: ${usable.error || "unknown error"}`,
       };
     }
+
+    if (input.verifyAuth) {
+      const outputPath = path.join(os.tmpdir(), `omniclaw-codex-test-${Date.now()}-${Math.random().toString(36).slice(2)}.txt`);
+      const args = this.buildExecArgs(outputPath, {
+        ...options,
+        timeoutMs: Number(input.timeoutMs || options.timeoutMs || 30000),
+      });
+      const result = await runProcess(options.command, args, {
+        cwd: options.cwd,
+        stdin: input.prompt || "Reply with exactly: ok",
+        timeoutMs: Number(input.timeoutMs || 30000),
+        maxOutputBytes: 12000,
+      });
+      const fileText = fs.existsSync(outputPath) ? fs.readFileSync(outputPath, "utf8").trim() : "";
+      fs.rmSync(outputPath, { force: true });
+      if (!result.ok) {
+        return {
+          ok: false,
+          command: options.command,
+          commandPath: detected.path,
+          commandVersion: usable.version,
+          authVerified: false,
+          exitCode: result.exitCode,
+          error: String(result.stderr || result.error || "Codex CLI live auth test failed. Run codex login.").trim(),
+        };
+      }
+      return {
+        ok: true,
+        command: options.command,
+        commandPath: detected.path,
+        commandVersion: usable.version,
+        authVerified: true,
+        responsePreview: (fileText || result.stdout || "").trim().slice(0, 140),
+        message: "Codex CLI live auth test passed.",
+      };
+    }
+
     return {
       ok: true,
       command: options.command,
       commandPath: detected.path,
       commandVersion: usable.version,
+      authVerified: false,
       model: options.model || "codex default",
-      message: "Codex CLI is installed. If chat replies fail, run codex login and choose Sign in with ChatGPT.",
+      message: "Codex CLI is installed. Use verifyAuth=true or send a chat to confirm ChatGPT account authentication.",
     };
   }
 

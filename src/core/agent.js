@@ -1570,7 +1570,14 @@ export class OmniClawAgent {
       intents,
       session,
       profileUpdated: Boolean(profileUpdate?.updated),
-    }) || this.buildDirectRuntimeReply({ intents });
+    }) || this.buildDirectRuntimeReply({
+      intents,
+      message,
+      agent: routedAgent,
+      profile,
+      tools: availableTools,
+      skills: matchedSkills,
+    });
     let plan = forcedResponse
       ? {
           summary: "OpenClaw-style onboarding response.",
@@ -1900,24 +1907,36 @@ export class OmniClawAgent {
         omittedItems: contextBundle.report.omittedItems,
       });
       const runtimeToolReply = this.buildRuntimeToolReply({ intents, toolOutputs });
-      const response = forcedResponse || runtimeToolReply || await this.provider.respond({
-        message,
-        intents,
-        agent: contextBundle.agent,
-        profile,
-        skills: contextBundle.skills,
-        plan,
-        toolOutputs: contextBundle.toolOutputs,
-        workspaceContext: contextBundle.workspaceContext,
-        recentConversations: contextBundle.recentConversations,
-        notes: contextBundle.notes,
-        longTermMemory: contextBundle.longTermMemory,
-        research: contextBundle.research,
-        artifacts: contextBundle.artifacts,
-        tasks: contextBundle.tasks,
-        tools: contextBundle.tools,
-        contextBundle,
-      });
+      let response = forcedResponse || runtimeToolReply;
+      if (!response) {
+        const providerResponse = await this.provider.respond({
+          message,
+          intents,
+          agent: contextBundle.agent,
+          profile,
+          skills: contextBundle.skills,
+          plan,
+          toolOutputs: contextBundle.toolOutputs,
+          workspaceContext: contextBundle.workspaceContext,
+          recentConversations: contextBundle.recentConversations,
+          notes: contextBundle.notes,
+          longTermMemory: contextBundle.longTermMemory,
+          research: contextBundle.research,
+          artifacts: contextBundle.artifacts,
+          tasks: contextBundle.tasks,
+          tools: contextBundle.tools,
+          contextBundle,
+        });
+        response = this.buildProviderFailureFallback({
+          providerResponse,
+          intents,
+          message,
+          agent: routedAgent,
+          tools: availableTools,
+          skills: matchedSkills,
+          toolOutputs,
+        }) || providerResponse;
+      }
 
       const assistantAt = new Date().toISOString();
       this.sessions.appendMessage(session.id, {
@@ -2369,8 +2388,8 @@ export class OmniClawAgent {
     ].join("\n");
   }
 
-  buildDirectRuntimeReply({ intents = [] } = {}) {
-    if (intents.includes("api-setup")) {
+  buildDirectRuntimeReply({ intents = [], agent = {}, tools = [], skills = [] } = {}) {
+    if (intents.includes("api-setup") && !intents.includes("provider-status")) {
       return [
         "API key OmniClaw ke active agent ko real LLM brain deti hai.",
         "Provider model reasoning karta hai; OmniClaw platform hands, eyes, memory, tools, skills, sessions, channels, aur approvals deta hai.",
@@ -2379,11 +2398,79 @@ export class OmniClawAgent {
       ].join(" ");
     }
 
+    if (intents.includes("greeting") && intents.length === 1) {
+      const profileFacts = this.readAgentProfileFacts(agent.id || "main");
+      const assistantName = profileFacts.assistantName || agent.name || "Main Agent";
+      const userName = profileFacts.userName || "Mankush";
+      return `Haan ${userName}, main online hoon. Main ${assistantName} agent hoon, OmniClaw runtime ke andar chal raha hoon. Agar provider brain auth fail bhi ho, local tools, memory, sessions, gateway, files aur terminal policy yahin available hain.`;
+    }
+
+    if (intents.includes("capabilities")) {
+      const toolIds = tools.map((tool) => tool.id);
+      const usefulTools = [
+        "exec",
+        "browser",
+        "web_search",
+        "web_fetch",
+        "read",
+        "write",
+        "edit",
+        "sessions_history",
+        "memory_search",
+        "gateway",
+        "cron",
+        "nodes",
+      ].filter((id) => toolIds.includes(id));
+      const skillNames = skills.map((skill) => skill.name || skill.id).filter(Boolean);
+      return [
+        `Main ${agent.name || agent.id || "active agent"} hoon, OmniClaw mujhe tools aur skills provide karta hai.`,
+        `Visible tools: ${tools.length}. Core hands/eyes: ${usefulTools.join(", ") || "runtime tools unavailable"}.`,
+        `Matched skills: ${skillNames.join(", ") || "is request ke liye koi special skill match nahi hui"}.`,
+        "Demo prompts: 'laptop status check karo', 'read file README.md', 'search web OpenClaw tools', 'gateway status', ya 'run terminal command \"Get-Date\"'.",
+      ].join(" ");
+    }
+
     return "";
   }
 
   buildRuntimeToolReply({ intents = [], toolOutputs = [] } = {}) {
     const byTool = new Map(toolOutputs.map((item) => [item.tool, item.output || {}]));
+    if (intents.includes("provider-status") && byTool.has("provider_status")) {
+      const status = byTool.get("provider_status");
+      const live = status.live || {};
+      return [
+        `Provider brain status: ${status.ready ? "ready" : "not ready"}.`,
+        `Provider: ${status.provider || "unknown"}${status.model ? `, model: ${status.model}` : ""}.`,
+        status.command ? `Command: ${status.command}${status.commandVersion ? ` (${status.commandVersion})` : ""}.` : "",
+        status.verified ? `Live auth test: ${live.ok ? "passed" : "failed"}${live.error ? ` (${String(live.error).slice(0, 260)})` : ""}.` : "",
+        status.message ? `Detail: ${status.message}` : "",
+        `Next fix: ${status.nextFix || "provider config check karo"}`,
+      ].filter(Boolean).join(" ");
+    }
+
+    if (intents.includes("capabilities") && byTool.has("capability_demo")) {
+      const demo = byTool.get("capability_demo");
+      const coreTools = Array.isArray(demo.coreTools) ? demo.coreTools : [];
+      const demos = Array.isArray(demo.demos) ? demo.demos : [];
+      return [
+        `Capability demo ready: agent ${demo.agentId || "main"} ke paas ${demo.toolCount || 0} tools aur ${demo.skillCount || 0} skills visible hain.`,
+        `Core tools: ${coreTools.join(", ") || "none"}.`,
+        `Try: ${demos.slice(0, 3).join(" | ")}`,
+      ].join(" ");
+    }
+
+    if (intents.includes("layer-status") && byTool.has("layer_status")) {
+      const report = byTool.get("layer_status");
+      const summary = report.summary || {};
+      const next = Array.isArray(report.nextUpgrades) ? report.nextUpgrades.slice(0, 3) : [];
+      return [
+        "OpenClaw-style layer audit ready.",
+        `Status: ${summary.readyLayers || 0} ready, ${summary.partialLayers || 0} partial, ${summary.missingLayers || 0} missing.`,
+        `Provider: ${summary.provider || "unknown"} (${summary.providerReady ? "ready" : "not ready"}), tools: ${summary.tools || 0}, skills: ${summary.skills || 0}, sessions: ${summary.sessions || 0}.`,
+        next.length ? `Next upgrades: ${next.join(" | ")}` : "",
+      ].filter(Boolean).join(" ");
+    }
+
     if (intents.includes("system-status") && byTool.has("computer_system_status")) {
       const status = byTool.get("computer_system_status");
       const memory = status.memory || {};
@@ -2414,6 +2501,43 @@ export class OmniClawAgent {
     }
 
     return "";
+  }
+
+  buildProviderFailureFallback({ providerResponse = "", intents = [], agent = {}, tools = [], skills = [], toolOutputs = [] } = {}) {
+    const text = String(providerResponse || "").trim();
+    if (!this.looksLikeProviderFailure(text)) {
+      return "";
+    }
+
+    const toolSummary = toolOutputs.length > 0
+      ? `Local tools ran: ${toolOutputs.map((item) => item.tool).join(", ")}.`
+      : "Is request me local tool ki zarurat nahi thi.";
+
+    if (intents.includes("capabilities")) {
+      return this.buildDirectRuntimeReply({ intents: ["capabilities"], agent, tools, skills });
+    }
+
+    return [
+      `Provider brain abhi auth/config issue de raha hai, isliye remote model reply nahi aaya.`,
+      toolSummary,
+      `Main ${agent.name || agent.id || "active agent"} as OmniClaw local runtime abhi bhi sessions, memory, tools, gateway aur safe computer access sambhal sakta hoon.`,
+      `Fix: BYOK panel se provider switch karo ya terminal me codex login chalao. Detail: ${text.slice(0, 420)}`,
+    ].join(" ");
+  }
+
+  looksLikeProviderFailure(text = "") {
+    return /Codex CLI provider failed|Codex CLI bridge|codex command|Provider request failed|Provider connection failed|API key missing|authentication|auth|login/i.test(String(text || ""));
+  }
+
+  readAgentProfileFacts(agentId = "main") {
+    const profilePath = this.getAgentProfilePath(agentId);
+    if (!fs.existsSync(profilePath)) {
+      return {};
+    }
+    const text = fs.readFileSync(profilePath, "utf8");
+    const assistantName = text.match(/Assistant name:\s*([^\r\n]+)/i)?.[1]?.trim() || "";
+    const userName = text.match(/User name:\s*([^\r\n]+)/i)?.[1]?.trim() || "";
+    return { assistantName, userName };
   }
 
   updateProfileFromMessage(agentId = "main", message = "") {

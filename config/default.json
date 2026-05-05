@@ -149,6 +149,8 @@
       "allowedTools": [
         "time_now",
         "runtime_summary",
+        "provider_status",
+        "capability_demo",
         "layer_status",
         "computer_access_status",
         "list_files",

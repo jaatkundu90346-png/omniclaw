@@ -93,6 +93,24 @@ export class Planner {
       });
     }
 
+    if (intents.includes("provider-status")) {
+      steps.push({
+        type: "tool",
+        tool: "provider_status",
+        input: { verify: true },
+        reason: "User reported provider/model/auth trouble or asked for active brain status.",
+      });
+    }
+
+    if (intents.includes("capabilities") && !intents.includes("provider-status")) {
+      steps.push({
+        type: "tool",
+        tool: "capability_demo",
+        input: {},
+        reason: "User asked what tools and skills the active agent really has.",
+      });
+    }
+
     if (intents.includes("system-status")) {
       steps.push({
         type: "tool",
