@@ -23,10 +23,17 @@ This pass adds the V2 control layer:
 - `v2-audit` intent detection for weak/improve/upgrade messages
 - runtime replies that summarize V2 score, weak features, and repair actions
 
+## V2.1 Added
+
+- Provider-guided repeated tool loop with JSON tool requests.
+- Runtime executes allowed extra tool calls and appends observations before the final answer.
+- Safety limits: max rounds, max calls per round, no unknown tools, no direct message/session-send recursion.
+- Conservative default: skips simple replies and skips when heuristic tools already handled the request.
+
 ## Current V2 Milestones
 
 1. V2.1 Provider-native repeated tool calling
-   Model should call tools in JSON, runtime executes them, observations return to model, and loop repeats until the task is complete.
+   Initial provider-guided JSON loop is implemented. Future work: provider-native function schemas for OpenAI-compatible APIs.
 
 2. V2.2 Browser automation
    Add Chromium click/type/screenshot/page-observation tools instead of only URL open/fetch.

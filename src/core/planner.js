@@ -372,6 +372,15 @@ export class Planner {
       return heuristic;
     }
 
+    if (heuristic.steps.some((step) => step.type === "tool")) {
+      return {
+        ...heuristic,
+        source: "heuristic",
+        modelPlanningSkipped: true,
+        modelPlanningReason: "Heuristic planner already selected concrete runtime tools.",
+      };
+    }
+
     const providerInfo = typeof provider.getInfo === "function" ? provider.getInfo() : {};
     if (providerInfo.ready === false || providerInfo.apiKeySource === "missing") {
       return {

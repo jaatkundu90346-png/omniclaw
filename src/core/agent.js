@@ -1798,6 +1798,25 @@ export class OmniClawAgent {
       }
     }
 
+    const modelToolLoop = await this.runModelToolLoop({
+      message,
+      intents,
+      profile,
+      agent: routedAgent,
+      tools: availableTools,
+      toolOutputs,
+      forcedResponse,
+      session,
+      run,
+    });
+    if (modelToolLoop.toolOutputs.length > 0) {
+      toolOutputs.push(...modelToolLoop.toolOutputs);
+      plan.modelToolLoop = modelToolLoop.report;
+      this.gateway.updateRun(run.id, {
+        modelToolLoop: modelToolLoop.report,
+      });
+    }
+
     for (const item of toolOutputs) {
       if (item.tool === "web_research" && item.output && !item.output.error) {
         this.memory.addResearch({
@@ -2032,6 +2051,216 @@ export class OmniClawAgent {
       });
       throw error;
     }
+  }
+
+  getModelToolLoopSettings() {
+    const config = this.config.getConfig();
+    const loop = config.runtime?.modelToolLoop || {};
+    return {
+      enabled: loop.enabled !== false,
+      maxRounds: Math.max(0, Math.min(5, Number(loop.maxRounds || 2))),
+      maxToolCallsPerRound: Math.max(1, Math.min(8, Number(loop.maxToolCallsPerRound || 3))),
+      runWhenHeuristicHasTools: Boolean(loop.runWhenHeuristicHasTools),
+    };
+  }
+
+  shouldRunModelToolLoop({ forcedResponse = "", runtimeToolReply = "", profile = {}, toolOutputs = [], intents = [] } = {}) {
+    const settings = this.getModelToolLoopSettings();
+    if (!settings.enabled || !profile.allowToolExecution || forcedResponse || runtimeToolReply) {
+      return false;
+    }
+    if (!this.provider || typeof this.provider.complete !== "function") {
+      return false;
+    }
+    const providerInfo = this.provider.getInfo?.() || {};
+    if (providerInfo.ready === false || providerInfo.id === "mock/local-rule-engine") {
+      return false;
+    }
+    const directIntents = new Set([
+      "greeting",
+      "api-setup",
+      "provider-status",
+      "capabilities",
+      "layer-status",
+      "v2-audit",
+      "system-status",
+      "computer-access",
+      "project-test",
+      "project-build",
+      "project-release",
+    ]);
+    if (intents.every((intent) => directIntents.has(intent))) {
+      return false;
+    }
+    if (toolOutputs.length > 0 && !settings.runWhenHeuristicHasTools) {
+      return false;
+    }
+    return true;
+  }
+
+  buildModelToolLoopPrompt({ message, intents, tools, toolOutputs, round }) {
+    const toolLines = (tools || [])
+      .filter((tool) => tool.id && !["message", "sessions_send"].includes(tool.id))
+      .slice(0, 80)
+      .map((tool) => `- ${tool.id}: ${tool.description || ""}`)
+      .join("\n");
+    const observations = JSON.stringify(
+      (toolOutputs || []).map((item) => ({
+        tool: item.tool,
+        output: item.output,
+      })),
+      null,
+      2,
+    ).slice(0, 8000);
+    return [
+      "You are controlling OmniClaw runtime tools.",
+      "Return only valid JSON. Do not use markdown.",
+      "If more runtime evidence is needed, return: {\"toolCalls\":[{\"tool\":\"tool_id\",\"input\":{},\"reason\":\"why\"}]}",
+      "If no more tools are needed, return: {\"toolCalls\":[],\"finalReady\":true,\"reason\":\"why\"}",
+      "Rules: use the fewest safe tool calls; never request destructive tools unless the user explicitly asked; do not call unknown tools.",
+      "",
+      `Round: ${round}`,
+      `User message: ${message}`,
+      `Detected intents: ${(intents || []).join(", ") || "general"}`,
+      "",
+      "Available tools:",
+      toolLines || "(none)",
+      "",
+      "Previous observations:",
+      observations || "[]",
+      "",
+      "JSON:",
+    ].join("\n");
+  }
+
+  parseModelToolCalls(text, allowedToolIds, maxCalls) {
+    const raw = String(text || "").trim();
+    if (!raw) {
+      return [];
+    }
+    let parsed = null;
+    try {
+      parsed = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || raw);
+    } catch {
+      return [];
+    }
+    const calls = Array.isArray(parsed.toolCalls) ? parsed.toolCalls : Array.isArray(parsed.tools) ? parsed.tools : [];
+    return calls
+      .map((call) => ({
+        tool: String(call.tool || call.name || "").trim(),
+        input: call.input && typeof call.input === "object" ? call.input : call.arguments && typeof call.arguments === "object" ? call.arguments : {},
+        reason: String(call.reason || "Provider requested this tool.").trim(),
+      }))
+      .filter((call) => call.tool && allowedToolIds.has(call.tool))
+      .slice(0, maxCalls);
+  }
+
+  async runModelToolLoop({
+    message,
+    intents,
+    profile,
+    agent,
+    tools,
+    toolOutputs,
+    forcedResponse,
+    session,
+    run,
+  }) {
+    const runtimeToolReply = this.buildRuntimeToolReply({ intents, toolOutputs });
+    const settings = this.getModelToolLoopSettings();
+    const report = {
+      enabled: settings.enabled,
+      attempted: false,
+      rounds: 0,
+      toolCallCount: 0,
+      skippedReason: "",
+      errors: [],
+    };
+    if (!this.shouldRunModelToolLoop({ forcedResponse, runtimeToolReply, profile, toolOutputs, intents })) {
+      report.skippedReason = "not-needed-or-not-eligible";
+      return { report, toolOutputs: [] };
+    }
+
+    const allowedToolIds = new Set((tools || []).map((tool) => tool.id));
+    const extraOutputs = [];
+    report.attempted = true;
+
+    for (let round = 1; round <= settings.maxRounds; round += 1) {
+      report.rounds = round;
+      let completion;
+      try {
+        completion = await this.provider.complete([
+          {
+            role: "system",
+            content: "You are an OmniClaw tool-call planner. Return only valid JSON.",
+          },
+          {
+            role: "user",
+            content: this.buildModelToolLoopPrompt({
+              message,
+              intents,
+              tools,
+              toolOutputs: [...toolOutputs, ...extraOutputs],
+              round,
+            }),
+          },
+        ]);
+      } catch (error) {
+        report.errors.push(error.message);
+        break;
+      }
+
+      const calls = this.parseModelToolCalls(completion?.text || "", allowedToolIds, settings.maxToolCallsPerRound);
+      if (calls.length === 0) {
+        break;
+      }
+
+      for (const call of calls) {
+        this.gateway.addEvent("model_tool_loop.tool_started", {
+          runId: run.id,
+          sessionId: session.id,
+          agentId: agent.id,
+          round,
+          tool: call.tool,
+          reason: call.reason,
+        });
+        let output;
+        try {
+          output = await this.tools.run(call.tool, call.input, {
+            agentId: agent.id,
+            sessionId: session.id,
+            runId: run.id,
+            source: "model-tool-loop",
+          });
+        } catch (error) {
+          output = {
+            error: true,
+            message: error.message,
+            agentId: agent.id,
+          };
+        }
+        extraOutputs.push({
+          tool: call.tool,
+          input: call.input,
+          reason: call.reason,
+          source: "model-tool-loop",
+          round,
+          output,
+        });
+        report.toolCallCount += 1;
+        this.gateway.addEvent("model_tool_loop.tool_completed", {
+          runId: run.id,
+          sessionId: session.id,
+          agentId: agent.id,
+          round,
+          tool: call.tool,
+          blocked: Boolean(output?.blocked),
+          error: Boolean(output?.error),
+        });
+      }
+    }
+
+    return { report, toolOutputs: extraOutputs };
   }
 
   async executeApprovedShellPlan(approval) {

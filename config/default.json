@@ -5,6 +5,12 @@
   },
   "runtime": {
     "activeProfile": "balanced",
+    "modelToolLoop": {
+      "enabled": true,
+      "maxRounds": 2,
+      "maxToolCallsPerRound": 3,
+      "runWhenHeuristicHasTools": false
+    },
     "profiles": {
       "lite": {
         "description": "Minimum overhead for simple chat, notes, and planning.",

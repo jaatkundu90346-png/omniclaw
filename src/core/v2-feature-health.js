@@ -60,6 +60,7 @@ export class V2FeatureHealth {
     const memory = runtime.memory.getOverview();
     const agents = runtime.agents.getAll();
     const pluginTools = runtime.plugins.getToolDefinitions();
+    const modelToolLoop = runtime.getModelToolLoopSettings?.() || {};
 
     const features = [
       feature({
@@ -103,11 +104,13 @@ export class V2FeatureHealth {
         id: "tool-loop",
         name: "Tool execute-observe loop",
         layer: "runtime",
-        status: toolIds.has("provider_status") && toolIds.has("exec") && toolIds.has("web_search") ? "partial" : "missing",
+        status: modelToolLoop.enabled && toolIds.has("provider_status") && toolIds.has("exec") && toolIds.has("web_search") ? "ready" : "partial",
         priority: "critical",
-        evidence: [`tools=${tools.length}`, `provider_status=${toolIds.has("provider_status")}`, `exec=${toolIds.has("exec")}`],
-        gaps: ["Provider-native repeated function calling is not implemented yet."],
-        nextAction: "Add model tool-call protocol: model -> tool JSON -> execute -> observation -> model until done.",
+        evidence: [`tools=${tools.length}`, `provider_status=${toolIds.has("provider_status")}`, `exec=${toolIds.has("exec")}`, `modelToolLoop=${Boolean(modelToolLoop.enabled)}`, `maxRounds=${modelToolLoop.maxRounds || 0}`],
+        gaps: modelToolLoop.enabled
+          ? ["Uses provider-guided JSON tool calls; provider-native API function schemas are still a future optimization."]
+          : ["Model tool loop is disabled."],
+        nextAction: modelToolLoop.enabled ? "Broaden loop coverage and add provider-native tool schemas." : "Enable runtime.modelToolLoop.",
       }),
       feature({
         id: "filesystem",
