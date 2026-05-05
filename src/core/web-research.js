@@ -123,4 +123,37 @@ export class WebResearch {
       results: [...results, ...wikiResults].slice(0, limit),
     };
   }
+
+  // ─── URL Fetch ────────────────────────────────────────────────
+  async fetchUrl(url, maxChars = 5000) {
+    const timeoutMs = Number(this.configStore?.getConfig?.()?.tools?.research?.timeoutMs || 10000);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(url, {
+        signal: controller.signal,
+        headers: { "User-Agent": "OmniClaw/0.1 research", Accept: "text/html,text/plain,application/json" },
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const text = await response.text();
+      // Simple text extraction: strip HTML tags if present
+      const cleaned = text.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      return {
+        url,
+        status: response.status,
+        contentType: response.headers.get("content-type") || "unknown",
+        text: cleaned.slice(0, maxChars),
+        truncated: cleaned.length > maxChars,
+        totalChars: cleaned.length,
+      };
+    } catch (error) {
+      return { url, error: error.message, text: "", truncated: false, totalChars: 0 };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
 }

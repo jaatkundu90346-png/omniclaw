@@ -505,4 +505,50 @@ ${JSON.stringify(candidates.map(c => ({ id: c.id, title: c.title, text: c.text }
       candidates,
     };
   }
+
+  // ─── Search Methods ───────────────────────────────────────────
+  searchNotes(query, agentId = "") {
+    const q = String(query || "").toLowerCase().trim();
+    if (!q) return [];
+    return this.filterByAgent(this.read().notes, agentId).filter(note =>
+      note.text.toLowerCase().includes(q)
+    );
+  }
+
+  searchLongTerm(query, agentId = "") {
+    const q = String(query || "").toLowerCase().trim();
+    if (!q) return [];
+    return this.filterByAgent(this.read().longTerm, agentId).filter(item =>
+      (item.title || "").toLowerCase().includes(q) ||
+      (item.text || "").toLowerCase().includes(q) ||
+      (item.tags || []).some(tag => tag.toLowerCase().includes(q))
+    );
+  }
+
+  searchResearch(query, agentId = "") {
+    const q = String(query || "").toLowerCase().trim();
+    if (!q) return [];
+    return this.filterByAgent(this.read().research, agentId).filter(item =>
+      (item.query || "").toLowerCase().includes(q) ||
+      JSON.stringify(item.results || []).toLowerCase().includes(q)
+    );
+  }
+
+  searchArtifacts(query, agentId = "") {
+    const q = String(query || "").toLowerCase().trim();
+    if (!q) return [];
+    return this.filterByAgent(this.read().artifacts, agentId).filter(item =>
+      (item.path || "").toLowerCase().includes(q) ||
+      (item.kind || "").toLowerCase().includes(q)
+    );
+  }
+
+  searchAll(query, agentId = "") {
+    return {
+      notes: this.searchNotes(query, agentId),
+      longTerm: this.searchLongTerm(query, agentId),
+      research: this.searchResearch(query, agentId),
+      artifacts: this.searchArtifacts(query, agentId),
+    };
+  }
 }

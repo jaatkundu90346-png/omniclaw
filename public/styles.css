@@ -1,25 +1,25 @@
 :root {
-  color-scheme: light;
-  --bg: #FAFBFC;
-  --bg-strong: #F0F2F5;
-  --surface: #FFFFFF;
-  --surface-strong: #FFFFFF;
-  --surface-muted: #F6F8FA;
-  --line: #E1E4E8;
-  --line-strong: #D1D5DA;
-  --text: #24292E;
-  --text-strong: #1B1F23;
-  --muted: #6A737D;
-  --muted-strong: #586069;
-  --accent: #E53935;
-  --accent-soft: #FFEBEE;
-  --ok: #28A745;
-  --ok-soft: #EAFFEA;
-  --warn: #DBAB0A;
-  --warn-soft: #FFFBEA;
-  --danger: #CB2431;
-  --danger-soft: #FFEFEF;
-  --shadow: 0 4px 12px rgba(27, 31, 35, 0.05);
+  color-scheme: dark;
+  --bg: #0d1117;
+  --bg-strong: #010409;
+  --surface: #161b22;
+  --surface-strong: #1c2128;
+  --surface-muted: #21262d;
+  --line: #30363d;
+  --line-strong: #484f58;
+  --text: #e6edf3;
+  --text-strong: #f0f6fc;
+  --muted: #8b949e;
+  --muted-strong: #9198a1;
+  --accent: #58a6ff;
+  --accent-soft: #1c2541;
+  --ok: #3fb950;
+  --ok-soft: #12261e;
+  --warn: #d29922;
+  --warn-soft: #27200d;
+  --danger: #f85149;
+  --danger-soft: #2d1113;
+  --shadow: 0 4px 12px rgba(0,0,0,0.3);
   --radius-xl: 12px;
   --radius-lg: 10px;
   --radius-md: 8px;
@@ -2455,4 +2455,65 @@ body.is-dark .console-output {
   .surface-tools {
     grid-column: 1 / -1;
   }
+}
+
+/* ─── Streaming indicator ──────────────────────────────────────── */
+.chat-bubble.streaming {
+  border-left: 3px solid var(--accent);
+  animation: pulse-border 1.5s ease-in-out infinite;
+}
+@keyframes pulse-border {
+  0%, 100% { border-left-color: var(--accent); }
+  50% { border-left-color: transparent; }
+}
+
+/* ─── Markdown in chat bubbles ─────────────────────────────────── */
+.chat-bubble .md-code {
+  background: var(--bg-strong);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 0.9em;
+}
+.chat-bubble .md-pre {
+  background: var(--bg-strong);
+  padding: 12px;
+  border-radius: 8px;
+  overflow-x: auto;
+  font-family: var(--mono);
+  font-size: 0.85em;
+  margin: 8px 0;
+}
+.chat-bubble .md-p { margin: 4px 0; }
+.chat-bubble .md-ul, .chat-bubble .md-ol {
+  margin: 4px 0;
+  padding-left: 20px;
+}
+
+/* ─── Toast notifications ──────────────────────────────────────── */
+.toast-container {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.toast {
+  padding: 12px 20px;
+  border-radius: var(--radius-md);
+  background: var(--surface-strong);
+  color: var(--text);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  font-size: 14px;
+  animation: toast-in 0.3s ease;
+}
+.toast.toast-ok { border-left: 4px solid var(--ok); }
+.toast.toast-warn { border-left: 4px solid var(--warn); }
+.toast.toast-error { border-left: 4px solid var(--danger); }
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(40px); }
+  to { opacity: 1; transform: translateX(0); }
 }

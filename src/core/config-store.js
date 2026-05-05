@@ -95,4 +95,43 @@ export class ConfigStore {
     const provider = { ...profile };
     return this.updateUserConfig({ provider });
   }
+
+  // ─── Config Validation ────────────────────────────────────────
+  validateConfig(config) {
+    const errors = [];
+    const warnings = [];
+    if (!config || typeof config !== "object") {
+      errors.push("Config must be an object");
+      return { valid: false, errors, warnings };
+    }
+    // Provider validation
+    if (config.provider) {
+      const validModes = ["mock", "openai-compatible", "codex-cli"];
+      if (!validModes.includes(config.provider.mode)) {
+        errors.push(`provider.mode "${config.provider.mode}" is not valid. Use: ${validModes.join(", ")}`);
+      }
+      if (config.provider.mode === "openai-compatible" && !config.provider.baseUrl) {
+        errors.push("provider.baseUrl is required for openai-compatible mode");
+      }
+      if (config.provider.temperature !== undefined && (config.provider.temperature < 0 || config.provider.temperature > 2)) {
+        warnings.push("provider.temperature should be between 0 and 2");
+      }
+      if (config.provider.maxTokens !== undefined && config.provider.maxTokens < 1) {
+        errors.push("provider.maxTokens must be positive");
+      }
+    }
+    // Session validation
+    if (config.session) {
+      if (config.session.detailMessageLimit !== undefined && config.session.detailMessageLimit < 1) {
+        errors.push("session.detailMessageLimit must be positive");
+      }
+    }
+    // Tools validation
+    if (config.tools?.shellExecution) {
+      if (config.tools.shellExecution.timeoutMs !== undefined && config.tools.shellExecution.timeoutMs < 1000) {
+        warnings.push("shellExecution.timeoutMs is very low (<1s), may cause premature timeouts");
+      }
+    }
+    return { valid: errors.length === 0, errors, warnings };
+  }
 }

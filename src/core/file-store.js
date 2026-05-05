@@ -220,4 +220,17 @@ export class FileStore {
       restoreHint: "Move this path back from data/trash to restore it.",
     };
   }
+
+  // ─── Path Security ────────────────────────────────────────────
+  sanitizePath(inputPath) {
+    const text = String(inputPath || "").trim();
+    if (text.includes("\0") || text.includes("..")) {
+      throw new Error("Invalid path: contains null bytes or directory traversal");
+    }
+    const resolved = path.resolve(this.rootDir, text);
+    if (!resolved.startsWith(path.resolve(this.rootDir))) {
+      throw new Error("Path traversal blocked: path escapes workspace root");
+    }
+    return resolved;
+  }
 }

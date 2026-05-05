@@ -4473,3 +4473,98 @@ document.querySelectorAll(".nav-link").forEach((link) => {
 
 window.addEventListener("hashchange", () => applyRoute(window.location.hash));
 applyRoute(window.location.hash);
+
+// ─── Toast Notifications ─────────────────────────────────────────
+function showToast(message, type = "ok") {
+  const container = document.getElementById("toast-container");
+  if (!container) return;
+  const toast = document.createElement("div");
+  toast.className = "toast toast-" + type;
+  toast.textContent = message;
+  container.appendChild(toast);
+  setTimeout(() => { toast.remove(); }, 4000);
+}
+
+// ─── Simple Markdown Renderer ────────────────────────────────────
+function renderMarkdown(text) {
+  if (!text) return "";
+  return text
+    .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre class="md-pre"><code>$2</code></pre>')
+    .replace(/`([^`]+)`/g, '<code class="md-code">$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+    .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+    .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+    .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+    .replace(/^- (.+)$/gm, '<li>$1</li>')
+    .replace(/\n/g, '<br>');
+}
+
+// ─── SSE Streaming Chat ──────────────────────────────────────────
+async function sendStreamingChat(message, sessionId, label, agentId) {
+  try {
+    const response = await fetch("/api/chat/stream", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message, sessionId, label, agentId }),
+    });
+    if (!response.ok || !response.body) {
+      throw new Error("Stream failed: " + response.status);
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let fullText = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+      for (const line of lines) {
+        if (line.startsWith("data: ")) {
+          try {
+            const event = JSON.parse(line.slice(6));
+            if (event.type === "token") {
+              fullText += event.content;
+              updateStreamingBubble(fullText);
+            } else if (event.type === "done") {
+              finalizeStreamingBubble(fullText, event);
+              showToast("Response complete", "ok");
+            } else if (event.type === "error") {
+              showToast(event.error, "error");
+            }
+          } catch {}
+        }
+      }
+    }
+    return fullText;
+  } catch (error) {
+    showToast("Stream error: " + error.message, "error");
+    return "";
+  }
+}
+
+function updateStreamingBubble(text) {
+  let bubble = document.getElementById("streaming-bubble");
+  if (!bubble) {
+    bubble = document.createElement("div");
+    bubble.id = "streaming-bubble";
+    bubble.className = "chat-bubble assistant streaming";
+    const container = document.querySelector(".chat-messages")
+      || document.querySelector("[data-chat-messages]")
+      || document.getElementById("chat-output");
+    if (container) container.appendChild(bubble);
+  }
+  bubble.innerHTML = renderMarkdown(text);
+  if (typeof scrollChatToBottom === "function") scrollChatToBottom();
+  else if (bubble.parentElement) bubble.parentElement.scrollTop = bubble.parentElement.scrollHeight;
+}
+
+function finalizeStreamingBubble(text, meta) {
+  const bubble = document.getElementById("streaming-bubble");
+  if (bubble) {
+    bubble.id = "";
+    bubble.classList.remove("streaming");
+  }
+}

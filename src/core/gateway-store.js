@@ -267,4 +267,27 @@ export class GatewayStore {
       lastEvent: data.events[data.events.length - 1] || null,
     };
   }
+
+  // ─── Approval Timeout ─────────────────────────────────────────
+  expireOldApprovals(timeoutMinutes = 30) {
+    const data = this.read();
+    const now = Date.now();
+    let expired = 0;
+    for (const approval of data.approvals) {
+      if (approval.status !== "pending") continue;
+      const age = (now - Date.parse(approval.createdAt || approval.updatedAt || 0)) / 60_000;
+      if (age > timeoutMinutes) {
+        approval.status = "expired";
+        approval.expiredAt = new Date().toISOString();
+        approval.updatedAt = new Date().toISOString();
+        approval.expiryReason = `Auto-expired after ${timeoutMinutes} minutes`;
+        expired++;
+      }
+    }
+    if (expired > 0) {
+      this.write(data);
+      this.addEvent("approval.expired_batch", { count: expired, timeoutMinutes });
+    }
+    return { expired, checked: data.approvals.filter(a => a.status === "pending" || a.status === "expired").length };
+  }
 }

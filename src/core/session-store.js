@@ -610,4 +610,42 @@ export class SessionStore {
       transcriptEntryCount: transcript.length,
     };
   }
+
+  // ─── Session Compaction ───────────────────────────────────────
+  getSessionSize(sessionId) {
+    const data = this.read();
+    const session = this.findSession(data, sessionId);
+    if (!session) return 0;
+    return this.readTranscriptEntries(session).length;
+  }
+
+  compactSession(sessionId, maxEntries = 80) {
+    const data = this.read();
+    const session = this.findSession(data, sessionId);
+    if (!session) throw new Error(`Session not found: ${sessionId}`);
+    const entries = this.readTranscriptEntries(session);
+    if (entries.length <= maxEntries) return { compacted: false, totalEntries: entries.length };
+    const keepCount = Math.floor(maxEntries * 0.6);
+    const kept = entries.slice(-keepCount);
+    const removed = entries.slice(0, entries.length - keepCount);
+    const summary = removed
+      .filter(e => e.type === "message")
+      .map(e => `${e.role}: ${String(e.text || "").slice(0, 100)}`)
+      .join("\n");
+    const compactionEntry = {
+      type: "compaction",
+      sessionId,
+      at: new Date().toISOString(),
+      removedCount: removed.length,
+      summary: summary.slice(0, 2000),
+    };
+    const transcriptPath = this.getTranscriptAbsolutePath(session);
+    const lines = [JSON.stringify(compactionEntry), ...kept.map(e => JSON.stringify(e))];
+    fs.writeFileSync(transcriptPath, lines.join("\n") + "\n");
+    const index = this.findSessionIndex(data, sessionId);
+    data.sessions[index].messageCount = kept.filter(e => e.type === "message").length;
+    data.sessions[index].updatedAt = new Date().toISOString();
+    this.write(data);
+    return { compacted: true, removedCount: removed.length, keptCount: kept.length };
+  }
 }

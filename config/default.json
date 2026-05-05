@@ -105,6 +105,36 @@
       "baseUrl": "http://localhost:11434/v1",
       "model": "llama3.2",
       "apiKeyProviderId": "local-compatible"
+    },
+    "ollama": {
+      "mode": "openai-compatible",
+      "baseUrl": "http://localhost:11434/v1",
+      "model": "llama3.1",
+      "apiKeyProviderId": "ollama"
+    },
+    "mistral": {
+      "mode": "openai-compatible",
+      "baseUrl": "https://api.mistral.ai/v1",
+      "model": "mistral-small-latest",
+      "apiKeyProviderId": "mistral"
+    },
+    "deepseek": {
+      "mode": "openai-compatible",
+      "baseUrl": "https://api.deepseek.com/v1",
+      "model": "deepseek-chat",
+      "apiKeyProviderId": "deepseek"
+    },
+    "together": {
+      "mode": "openai-compatible",
+      "baseUrl": "https://api.together.xyz/v1",
+      "model": "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
+      "apiKeyProviderId": "together"
+    },
+    "fireworks": {
+      "mode": "openai-compatible",
+      "baseUrl": "https://api.fireworks.ai/inference/v1",
+      "model": "accounts/fireworks/models/llama-v3p1-8b-instruct",
+      "apiKeyProviderId": "fireworks"
     }
   },
   "session": {

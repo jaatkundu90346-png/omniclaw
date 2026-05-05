@@ -7,6 +7,52 @@ import { spawn } from "node:child_process";
 import { OmniClawAgent } from "./src/core/agent.js";
 import { attachWsGateway } from "./src/core/ws-gateway.js";
 
+// ─── CORS ──────────────────────────────────────────────────────────
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Omniclaw-Token, X-Connector-Token",
+  "Access-Control-Max-Age": "86400",
+};
+
+// ─── Rate Limiter ───────────────────────────────────────────────────
+const rateLimitMap = new Map();
+const RATE_WINDOW = 60_000;
+const RATE_MAX = 60;
+function checkRateLimit(ip) {
+  const now = Date.now();
+  const entry = rateLimitMap.get(ip);
+  if (!entry || now - entry.start > RATE_WINDOW) {
+    rateLimitMap.set(ip, { start: now, count: 1 });
+    return { allowed: true, remaining: RATE_MAX - 1 };
+  }
+  entry.count++;
+  if (entry.count > RATE_MAX) return { allowed: false, remaining: 0 };
+  return { allowed: true, remaining: RATE_MAX - entry.count };
+}
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, e] of rateLimitMap) {
+    if (now - e.start > RATE_WINDOW * 2) rateLimitMap.delete(ip);
+  }
+}, 120_000);
+
+// ─── Graceful Shutdown ──────────────────────────────────────────────
+let isShuttingDown = false;
+function gracefulShutdown(sig) {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+  console.log(`\nOmniClaw shutting down (${sig})...`);
+  if (typeof server !== "undefined") {
+    server.close(() => { console.log("All connections closed."); process.exit(0); });
+    setTimeout(() => { console.log("Force exit (5s timeout)."); process.exit(1); }, 5000);
+  } else {
+    process.exit(0);
+  }
+}
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const runtimeDir = process.pkg ? process.cwd() : __dirname;
@@ -23,8 +69,18 @@ function sendJson(res, statusCode, payload) {
   res.writeHead(statusCode, {
     "Content-Type": "application/json; charset=utf-8",
     "Cache-Control": "no-store",
+    ...CORS_HEADERS,
   });
   res.end(JSON.stringify(payload, null, 2));
+}
+
+function sendSSEHeaders(res, statusCode = 200) {
+  res.writeHead(statusCode, {
+    "Content-Type": "text/event-stream; charset=utf-8",
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+    ...CORS_HEADERS,
+  });
 }
 
 function broadcastEvent(record) {
@@ -171,20 +227,45 @@ async function cacheAdapterAttachment(input = {}) {
 }
 
 const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
-  const pathname = url.pathname;
+ if (isShuttingDown) {
+ res.writeHead(503, { "Content-Type": "application/json" });
+ res.end(JSON.stringify({ error: "Server is shutting down" }));
+ return;
+ }
 
-  if (req.method === "GET" && pathname === "/api/health") {
-    sendJson(res, 200, {
-      ok: true,
-      name: "OmniClaw",
-      provider: agent.getProviderInfo(),
-      time: new Date().toISOString(),
-    });
-    return;
-  }
+ const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+ const pathname = url.pathname;
+ const clientIp = req.socket.remoteAddress || "unknown";
 
-  if (req.method === "GET" && pathname === "/api/state") {
+ // CORS preflight
+ if (req.method === "OPTIONS") {
+ res.writeHead(204, CORS_HEADERS);
+ res.end();
+ return;
+ }
+
+ // Rate limiting
+ const rl = checkRateLimit(clientIp);
+ if (!rl.allowed) {
+ sendJson(res, 429, { error: "Rate limit exceeded (60 req/min)", retryAfter: 60 });
+ return;
+ }
+
+ // Improved health endpoint
+ if (req.method === "GET" && pathname === "/api/health") {
+ sendJson(res, 200, {
+ ok: true,
+ status: "ok",
+ name: "OmniClaw",
+ version: "0.1.0",
+ uptime: Math.round(process.uptime()),
+ provider: agent.getProviderInfo(),
+ timestamp: new Date().toISOString(),
+ });
+ return;
+ }
+
+ if (req.method === "GET" && pathname === "/api/state") {
     sendJson(res, 200, agent.getState());
     return;
   }
@@ -1623,7 +1704,69 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (req.method === "GET" && pathname === "/") {
+  
+ // Streaming chat endpoint (SSE)
+ if (req.method === "POST" && pathname === "/api/chat/stream") {
+ try {
+ const body = await parseBody(req);
+ const message = String(body.message || "").trim();
+ if (!message) { sendJson(res, 400, { error: "message is required" }); return; }
+ sendSSEHeaders(res);
+ res.write("data: " + JSON.stringify({ type: "start", timestamp: new Date().toISOString() }) + "\n\n");
+ const result = await agent.handleMessage(message, { sessionId: body.sessionId, label: body.label, agentId: body.agentId, channel: body.channel });
+ const reply = result.reply || "";
+ const chunkSize = 8;
+ for (let i = 0; i < reply.length; i += chunkSize) {
+ res.write("data: " + JSON.stringify({ type: "token", content: reply.slice(i, i + chunkSize) }) + "\n\n");
+ }
+ if (result.toolOutputs && result.toolOutputs.length > 0) {
+ res.write("data: " + JSON.stringify({ type: "tools", toolOutputs: result.toolOutputs }) + "\n\n");
+ }
+ res.write("data: " + JSON.stringify({ type: "done", runId: result.run?.id || "", sessionId: result.session?.id || "" }) + "\n\n");
+ } catch (error) { try { res.write("data: " + JSON.stringify({ type: "error", error: error.message }) + "\n\n"); } catch {} }
+ res.end();
+ return;
+ }
+ // Memory search
+ if (req.method === "GET" && pathname === "/api/memory/search") {
+ const query = String(url.searchParams.get("q") || "").trim();
+ const agentId = String(url.searchParams.get("agentId") || "").trim();
+ if (!query) { sendJson(res, 400, { error: "q parameter required" }); return; }
+ const results = agent.memory.searchAll ? agent.memory.searchAll(query, agentId) : { notes: [], longTerm: [], research: [], artifacts: [] };
+ sendJson(res, 200, { query, agentId, results });
+ return;
+ }
+ // Config validate
+ if (req.method === "POST" && pathname === "/api/config/validate") {
+ try {
+ const body = await parseBody(req);
+ const result = agent.config.validateConfig(body);
+ sendJson(res, result.valid ? 200 : 400, result);
+ } catch (error) { sendJson(res, 400, { error: error.message }); }
+ return;
+ }
+ // Session compact
+ if (req.method === "POST" && pathname === "/api/sessions/compact") {
+ try {
+ const body = await parseBody(req);
+ const sessionId = String(body.sessionId || "").trim();
+ if (!sessionId) { sendJson(res, 400, { error: "sessionId required" }); return; }
+ const result = agent.sessions.compactSession(sessionId, Number(body.maxEntries || 80));
+ agent.gateway.addEvent("session.compacted", { sessionId, ...result });
+ sendJson(res, 200, result);
+ } catch (error) { sendJson(res, 400, { error: error.message }); }
+ return;
+ }
+ // Approvals expire
+ if (req.method === "POST" && pathname === "/api/approvals/expire") {
+ try {
+ const body = await parseBody(req);
+ const result = agent.gateway.expireOldApprovals(Number(body.timeoutMinutes || 30));
+ sendJson(res, 200, result);
+ } catch (error) { sendJson(res, 400, { error: error.message }); }
+ return;
+ }
+if (req.method === "GET" && pathname === "/") {
     sendFile(res, path.join(publicDir, "index.html"));
     return;
   }
