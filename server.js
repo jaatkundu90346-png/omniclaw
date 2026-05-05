@@ -223,6 +223,11 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (req.method === "GET" && pathname === "/api/v2") {
+    sendJson(res, 200, agent.getV2Report());
+    return;
+  }
+
   if (req.method === "GET" && pathname === "/api/delegations") {
     sendJson(res, 200, {
       delegations: agent.gateway.listDelegations({

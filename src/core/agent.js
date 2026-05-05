@@ -34,6 +34,7 @@ import { DiscordGatewayWorker } from "./discord-gateway-worker.js";
 import { SummarizationEngine } from "./summarization-engine.js";
 import { BrowserOperator } from "./browser-operator.js";
 import { SystemMonitor } from "./system-monitor.js";
+import { V2FeatureHealth } from "./v2-feature-health.js";
 
 function truncateAttachmentImport(value, maxChars = 12000) {
   const text = String(value || "").trim();
@@ -99,6 +100,7 @@ export class OmniClawAgent {
     this.contextEngine = new ContextEngine(this.config);
     this.browserOperator = new BrowserOperator();
     this.systemMonitor = new SystemMonitor();
+    this.v2Health = new V2FeatureHealth(this);
 
     this.tools = new ToolRegistry({
       memoryStore: this.memory,
@@ -512,6 +514,10 @@ export class OmniClawAgent {
     };
   }
 
+  getV2Report() {
+    return this.v2Health.build();
+  }
+
   getAgentContext(agentId = "") {
     const agent = this.agents.resolveAgent(agentId);
     const profile = this.agents.getProfileForAgent(agent.id);
@@ -549,6 +555,7 @@ export class OmniClawAgent {
       },
       gateway: this.gateway.getOverview(),
       layers: this.getOpenClawLayerReport(),
+      v2: this.getV2Report(),
       delegations: this.gateway.listDelegations({ limit: 20 }),
       agents: this.agents.summarizeAgents({
         sessions: this.sessions.listSessions(200),
@@ -2445,6 +2452,24 @@ export class OmniClawAgent {
         status.verified ? `Live auth test: ${live.ok ? "passed" : "failed"}${live.error ? ` (${String(live.error).slice(0, 260)})` : ""}.` : "",
         status.message ? `Detail: ${status.message}` : "",
         `Next fix: ${status.nextFix || "provider config check karo"}`,
+      ].filter(Boolean).join(" ");
+    }
+
+    if (intents.includes("v2-audit") && byTool.has("v2_status")) {
+      const report = byTool.get("v2_status");
+      const repair = byTool.get("v2_repair_plan") || {};
+      const weakest = Array.isArray(report.weakest) ? report.weakest.slice(0, 4) : [];
+      const repairs = Array.isArray(repair.immediateRepairs) ? repair.immediateRepairs.slice(0, 4) : [];
+      return [
+        `OmniClaw V2 audit ready hai. Current V2 score: ${report.score || 0}/100, critical score: ${report.criticalScore || 0}/100.`,
+        `Feature status: ${report.summary?.ready || 0} ready, ${report.summary?.partial || 0} partial, ${report.summary?.missing || 0} missing.`,
+        weakest.length
+          ? `Sabse weak areas: ${weakest.map((item) => `${item.name} (${item.status})`).join(", ")}.`
+          : "Weak areas list empty hai.",
+        repairs.length
+          ? `Next repair actions: ${repairs.map((item) => `${item.feature}: ${item.nextAction}`).join(" | ")}`
+          : "",
+        "V2 rule: jahan backend/plugin/provider missing hai, OmniClaw fake claim nahi karega; status + proof + next action dikhayega.",
       ].filter(Boolean).join(" ");
     }
 

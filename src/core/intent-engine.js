@@ -38,6 +38,11 @@ export class IntentEngine {
       lowered.includes("codex") ||
       lowered.includes("openclaw") ||
       lowered.includes("omniclaw") ||
+      lowered.includes("v2") ||
+      lowered.includes("weak") ||
+      lowered.includes("kami") ||
+      lowered.includes("improve") ||
+      lowered.includes("upgrade") ||
       lowered.includes("khud ko build") ||
       lowered.includes("self build") ||
       lowered.includes("scratch build") ||
@@ -45,6 +50,18 @@ export class IntentEngine {
       lowered.includes("brain")
     ) {
       intents.push("self-build");
+    }
+
+    if (
+      lowered.includes("v2") ||
+      lowered.includes("weak") ||
+      lowered.includes("kami") ||
+      lowered.includes("improve") ||
+      lowered.includes("upgrade") ||
+      lowered.includes("pura omniclaw") ||
+      lowered.includes("sabhi feature")
+    ) {
+      intents.push("v2-audit");
     }
 
     if (

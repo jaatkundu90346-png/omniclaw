@@ -150,6 +150,8 @@
         "time_now",
         "runtime_summary",
         "provider_status",
+        "v2_status",
+        "v2_repair_plan",
         "capability_demo",
         "layer_status",
         "computer_access_status",

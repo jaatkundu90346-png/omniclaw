@@ -75,6 +75,21 @@ export class Planner {
       });
     }
 
+    if (intents.includes("v2-audit")) {
+      steps.push({
+        type: "tool",
+        tool: "v2_status",
+        input: {},
+        reason: "User says OmniClaw is weak and wants a V2 upgrade across all features.",
+      });
+      steps.push({
+        type: "tool",
+        tool: "v2_repair_plan",
+        input: {},
+        reason: "Generate the next implementation plan from the weakest V2 features.",
+      });
+    }
+
     if (intents.includes("layer-status")) {
       steps.push({
         type: "tool",
@@ -223,7 +238,7 @@ export class Planner {
       });
     }
 
-    if (intents.includes("project-build")) {
+    if (intents.includes("project-build") && !intents.includes("v2-audit") && !intents.includes("self-build")) {
       steps.push({
         type: "tool",
         tool: "plan_shell_command",

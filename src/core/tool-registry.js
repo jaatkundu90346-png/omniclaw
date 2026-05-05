@@ -232,6 +232,41 @@ export class ToolRegistry {
           };
         },
       },
+      v2_status: {
+        description: "OmniClaw V2 feature health report with scores, weak features, evidence, and gaps.",
+        permission: null,
+        group: "runtime",
+        run: async () => this.agentRuntime?.getV2Report?.() || {
+          version: "v2-unavailable",
+          score: 0,
+          features: [],
+          weakest: [],
+        },
+      },
+      v2_repair_plan: {
+        description: "Generate a prioritized OmniClaw V2 repair plan from the live feature health report.",
+        permission: null,
+        group: "runtime",
+        run: async () => {
+          const report = this.agentRuntime?.getV2Report?.() || { weakest: [], nextMilestones: [] };
+          const weakest = Array.isArray(report.weakest) ? report.weakest : [];
+          return {
+            version: report.version || "v2-foundation",
+            score: report.score || 0,
+            criticalScore: report.criticalScore || 0,
+            immediateRepairs: weakest.slice(0, 5).map((item, index) => ({
+              rank: index + 1,
+              feature: item.name,
+              status: item.status,
+              priority: item.priority,
+              gaps: item.gaps,
+              nextAction: item.nextAction,
+            })),
+            milestones: report.nextMilestones || [],
+            rule: "Do not claim a feature is done unless status is ready and evidence is present.",
+          };
+        },
+      },
       capability_demo: {
         description: "Return a practical demo of the active agent's real tools, skills, and example tasks.",
         permission: null,
