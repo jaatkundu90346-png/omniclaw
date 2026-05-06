@@ -1712,6 +1712,51 @@ const server = http.createServer(async (req, res) => {
  const message = String(body.message || "").trim();
  if (!message) { sendJson(res, 400, { error: "message is required" }); return; }
  sendSSEHeaders(res);
+ // Try real provider streaming first
+ const provider = agent.provider;
+ if (provider && typeof provider.respondStream === "function") {
+ try {
+ const context = {
+ message,
+ intents: [],
+ toolOutputs: [],
+ tools: agent.tools.getAll({ includeAllAgents: true }),
+ skills: agent.skills.getAll(),
+ profile: agent.config.getActiveProfile(),
+ contextBundle: {
+   tools: agent.tools.getAll({ includeAllAgents: true }),
+   skills: agent.skills.getAll(),
+   toolOutputs: [],
+   workspaceContext: null,
+   report: null,
+   recentConversations: [],
+   notes: [],
+   longTermMemory: [],
+   research: [],
+   artifacts: [],
+   tasks: [],
+   agent: null,
+ },
+ workspaceContext: null,
+ recentConversations: [],
+ notes: [],
+ longTermMemory: [],
+ research: [],
+ artifacts: [],
+ tasks: [],
+};
+ const stream = await provider.respondStream(context);
+ const reader = stream.getReader();
+ while (true) {
+ const { done, value } = await reader.read();
+ if (done) break;
+ res.write(value);
+ }
+ } catch (streamErr) {
+ try { res.write("data: " + JSON.stringify({ type: "error", error: streamErr.message }) + "\n\n"); } catch {}
+ }
+ } else {
+ // Fallback: simulate streaming from normal response
  res.write("data: " + JSON.stringify({ type: "start", timestamp: new Date().toISOString() }) + "\n\n");
  const result = await agent.handleMessage(message, { sessionId: body.sessionId, label: body.label, agentId: body.agentId, channel: body.channel });
  const reply = result.reply || "";
@@ -1723,6 +1768,7 @@ const server = http.createServer(async (req, res) => {
  res.write("data: " + JSON.stringify({ type: "tools", toolOutputs: result.toolOutputs }) + "\n\n");
  }
  res.write("data: " + JSON.stringify({ type: "done", runId: result.run?.id || "", sessionId: result.session?.id || "" }) + "\n\n");
+ }
  } catch (error) { try { res.write("data: " + JSON.stringify({ type: "error", error: error.message }) + "\n\n"); } catch {} }
  res.end();
  return;

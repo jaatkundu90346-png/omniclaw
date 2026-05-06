@@ -309,4 +309,71 @@ export class OpenAICompatibleProvider {
     const text = data.choices?.[0]?.message?.content || "";
     return { text };
   }
+
+  async respondStream(context) {
+    const config = this.configStore.getConfig();
+    const apiKey = this.getResolvedApiKey(config);
+    if (!apiKey) {
+      throw new Error(`API key missing for provider: ${config.provider.apiKeyEnv}`);
+    }
+    const self = this;
+    return new ReadableStream({
+      async start(controller) {
+        const encoder = new TextEncoder();
+        try {
+          const response = await fetchWithTimeout(self.getChatCompletionsUrl(config), {
+            method: "POST",
+            headers: self.getHeaders(config, apiKey),
+            body: JSON.stringify({
+              model: config.provider.model,
+              temperature: config.provider.temperature,
+              max_tokens: Number(config.provider.maxTokens || 1600),
+              stream: true,
+              messages: [{
+                role: "system",
+                content: [config.provider.systemPrompt, "", buildOmniClawSystemPrompt(context)].join("\n"),
+              }, {
+                role: "user",
+                content: `User message: ${context.message}\n\nWrite the final human response now.`,
+              }],
+            }),
+          }, Number(config.provider.timeoutMs || 45000));
+          if (!response.ok) {
+            const err = await self.parseProviderError(response);
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "error", error: err })}\n\n`));
+            controller.close();
+            return;
+          }
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n");
+            buffer = lines.pop() || "";
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (!trimmed || trimmed === "data: [DONE]") continue;
+              if (trimmed.startsWith("data: ")) {
+                try {
+                  const parsed = JSON.parse(trimmed.slice(6));
+                  const content = parsed.choices?.[0]?.delta?.content || "";
+                  if (content) {
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "token", content })}\n\n`));
+                  }
+                } catch {}
+              }
+            }
+          }
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "done" })}\n\n`));
+          controller.close();
+        } catch (error) {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "error", error: error.message })}\n\n`));
+          controller.close();
+        }
+      },
+    });
+  }
 }

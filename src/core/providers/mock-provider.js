@@ -267,4 +267,20 @@ export class MockProvider {
 
     return { text };
   }
+
+  async respondStream(context) {
+    const self = this;
+    const reply = await this.respond(context);
+    return new ReadableStream({
+      start(controller) {
+        const encoder = new TextEncoder();
+        const chunkSize = 8;
+        for (let i = 0; i < reply.length; i += chunkSize) {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "token", content: reply.slice(i, i + chunkSize) })}\n\n`));
+        }
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "done" })}\n\n`));
+        controller.close();
+      },
+    });
+  }
 }

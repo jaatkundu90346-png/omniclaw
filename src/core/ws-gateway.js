@@ -1170,6 +1170,7 @@ class WsConnection {
 }
 
 export function attachWsGateway({ server, agent, pathname = "/ws" }) {
+ let pingInterval = null;
   const connections = new Set();
 
   agent.gateway.onEvent((record) => {
