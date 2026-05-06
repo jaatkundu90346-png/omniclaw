@@ -44,6 +44,59 @@ function parseOpenClawSkill(contents, filePath, rootDir) {
   };
 }
 
+const OPENCLAW_COMPAT_SKILL_PACKS = {
+  v2_core: [
+    {
+      name: "browser-automation",
+      path: "vendor/openclaw/extensions/browser/skills/browser-automation/SKILL.md",
+      importName: "OpenClaw Browser Automation",
+      triggers: ["browser", "automation", "web page", "click", "tab", "screenshot", "login"],
+      agents: ["main", "ops", "research"],
+      reason: "Gives the agent an OpenClaw-style browser operating loop: status, tabs, snapshot, narrow action, observe.",
+    },
+    {
+      name: "coding-agent",
+      path: "vendor/openclaw/skills/coding-agent/SKILL.md",
+      importName: "OpenClaw Coding Agent",
+      triggers: ["coding agent", "build", "implement", "review", "refactor", "codex", "opencode"],
+      agents: ["main", "builder", "ops"],
+      reason: "Documents how OpenClaw delegates implementation work to background coding CLIs.",
+    },
+    {
+      name: "github",
+      path: "vendor/openclaw/skills/github/SKILL.md",
+      importName: "OpenClaw GitHub Operator",
+      triggers: ["github", "repo", "pull request", "issue", "branch", "commit"],
+      agents: ["main", "builder", "ops"],
+      reason: "Adds GitHub workflow behavior for repo/PR/issue operations.",
+    },
+    {
+      name: "healthcheck",
+      path: "vendor/openclaw/skills/healthcheck/SKILL.md",
+      importName: "OpenClaw Healthcheck",
+      triggers: ["healthcheck", "diagnostics", "status", "doctor", "runtime"],
+      agents: ["main", "ops"],
+      reason: "Helps the agent inspect runtime health before claiming a feature works.",
+    },
+    {
+      name: "session-logs",
+      path: "vendor/openclaw/skills/session-logs/SKILL.md",
+      importName: "OpenClaw Session Logs",
+      triggers: ["session logs", "history", "transcript", "chat history", "conversation"],
+      agents: ["main", "ops", "research"],
+      reason: "Strengthens session-history behavior so the agent checks prior messages instead of starting fresh.",
+    },
+    {
+      name: "skill-creator",
+      path: "vendor/openclaw/skills/skill-creator/SKILL.md",
+      importName: "OpenClaw Skill Creator",
+      triggers: ["create skill", "new skill", "skill file", "capability"],
+      agents: ["main", "builder", "ops"],
+      reason: "Adds OpenClaw-style skill authoring guidance for growing OmniClaw capabilities.",
+    },
+  ],
+};
+
 export class ToolRegistry {
   constructor({
     memoryStore,
@@ -666,6 +719,12 @@ export class ToolRegistry {
         permission: "allowSkillWrite",
         group: "openclaw",
         run: async (input = {}, context) => this.importOpenClawSkill(input, context),
+      },
+      openclaw_skill_pack_import: {
+        description: "Import a curated OpenClaw compatibility skill pack into OmniClaw agents.",
+        permission: "allowSkillWrite",
+        group: "openclaw",
+        run: async (input = {}, context) => this.importOpenClawSkillPack(input, context),
       },
       update_runtime_settings: {
         description: "Update OmniClaw runtime profile or provider mode.",
@@ -1325,6 +1384,80 @@ export class ToolRegistry {
     };
   }
 
+  importOpenClawSkillPack(input = {}, context = {}) {
+    const packId = String(input.pack || "v2_core").trim();
+    const pack = OPENCLAW_COMPAT_SKILL_PACKS[packId];
+    if (!pack) {
+      return {
+        imported: false,
+        reason: `Unknown OpenClaw skill pack: ${packId}`,
+        availablePacks: Object.keys(OPENCLAW_COMPAT_SKILL_PACKS),
+      };
+    }
+
+    const dryRun = Boolean(input.dryRun);
+    const defaultAgentId = input.agentId || this.getAgentId(context);
+    const items = pack.map((item) => ({
+      ...item,
+      agents: Array.isArray(input.agents) && input.agents.length > 0 ? input.agents : item.agents,
+    }));
+
+    if (dryRun) {
+      return {
+        imported: false,
+        dryRun: true,
+        pack: packId,
+        count: items.length,
+        skills: items.map(({ name, path: skillPath, importName, triggers, agents, reason }) => ({
+          name,
+          path: skillPath,
+          importName,
+          triggers,
+          agents,
+          reason,
+        })),
+      };
+    }
+
+    const results = [];
+    for (const item of items) {
+      try {
+        results.push({
+          ok: true,
+          reason: item.reason,
+          result: this.importOpenClawSkill({
+            path: item.path,
+            importName: item.importName,
+            triggers: item.triggers,
+            agents: item.agents,
+            agentId: defaultAgentId,
+            description: `${item.reason} Imported from OpenClaw ${item.path}.`,
+          }, context),
+        });
+      } catch (error) {
+        results.push({
+          ok: false,
+          name: item.name,
+          path: item.path,
+          reason: item.reason,
+          error: error.message,
+        });
+      }
+    }
+
+    return {
+      imported: results.filter((item) => item.ok && item.result?.imported).length,
+      failed: results.filter((item) => !item.ok || item.result?.imported === false).length,
+      pack: packId,
+      results,
+      nextActions: [
+        "Ask 'tumhare paas kaun si skills hain demo do' to force capability_demo.",
+        "Use imported skills only as operating guidance; tools still execute through OmniClaw runtime definitions.",
+        "Keep transplanting OpenClaw features selectively from docs/OPENCLAW_TO_OMNICLAW_TRANSPLANT_MAP.md.",
+      ],
+    };
+  }
+
   importOpenClawSkill(input = {}, context = {}) {
     const rootDir = this.getRootDir();
     const requestedPath = String(input.path || "").trim().replace(/\\/g, "/");
@@ -1358,11 +1491,14 @@ export class ToolRegistry {
       triggers: [...new Set(triggers.map((item) => item.toLowerCase()))],
       description: input.description || `Imported from OpenClaw ${skill.path}. ${skill.description}`.trim(),
       instructions: [
+        "Compatibility note: this skill was imported from the vendored OpenClaw reference. Map OpenClaw tool names to OmniClaw runtime tools that are visible in the current prompt; do not claim missing plugins are installed.",
+        "",
         `Imported from OpenClaw vendor path: ${skill.path}`,
         "",
         skill.instructions,
       ].join("\n"),
       agentId: input.agentId || this.getAgentId(context),
+      agents: input.agents,
     });
     return {
       imported: true,

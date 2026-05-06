@@ -1,8 +1,9 @@
 import http from "node:http";
+import https from "node:https";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawn } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
 
 import { OmniClawAgent } from "./src/core/agent.js";
 import { attachWsGateway } from "./src/core/ws-gateway.js";
@@ -1983,14 +1984,12 @@ setInterval(() => {
 // ─── HTTPS Option ──────────────────────────────────────────────
 if (String(process.env.OMNICLAW_HTTPS || "").toLowerCase() === "true") {
  try {
-   const { execSync } = await import("node:child_process");
    const certDir = path.join(process.cwd(), "data", "certs");
    if (!fs.existsSync(path.join(certDir, "key.pem"))) {
      fs.mkdirSync(certDir, { recursive: true });
      execSync(`openssl req -x509 -newkey rsa:2048 -keyout "${path.join(certDir, "key.pem")}" -out "${path.join(certDir, "cert.pem")}" -days 365 -nodes -subj "/O=OmniClaw/CN=localhost"`, { stdio: "pipe" });
    }
-   const httpsModule = await import("node:https");
-   const tlsServer = httpsModule.default.createServer({
+   const tlsServer = https.createServer({
      key: fs.readFileSync(path.join(certDir, "key.pem")),
      cert: fs.readFileSync(path.join(certDir, "cert.pem")),
    }, server._events.request[0]); // reuse the request handler

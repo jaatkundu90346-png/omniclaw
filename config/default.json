@@ -193,6 +193,7 @@
         "openclaw_vendor_status",
         "openclaw_skill_scan",
         "openclaw_skill_import",
+        "openclaw_skill_pack_import",
         "capability_demo",
         "layer_status",
         "computer_access_status",

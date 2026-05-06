@@ -2673,31 +2673,6 @@ export class OmniClawAgent {
       return `Haan ${userName}, main online hoon. Main ${assistantName} agent hoon, OmniClaw runtime ke andar chal raha hoon. Agar provider brain auth fail bhi ho, local tools, memory, sessions, gateway, files aur terminal policy yahin available hain.`;
     }
 
-    if (intents.includes("capabilities")) {
-      const toolIds = tools.map((tool) => tool.id);
-      const usefulTools = [
-        "exec",
-        "browser",
-        "web_search",
-        "web_fetch",
-        "read",
-        "write",
-        "edit",
-        "sessions_history",
-        "memory_search",
-        "gateway",
-        "cron",
-        "nodes",
-      ].filter((id) => toolIds.includes(id));
-      const skillNames = skills.map((skill) => skill.name || skill.id).filter(Boolean);
-      return [
-        `Main ${agent.name || agent.id || "active agent"} hoon, OmniClaw mujhe tools aur skills provide karta hai.`,
-        `Visible tools: ${tools.length}. Core hands/eyes: ${usefulTools.join(", ") || "runtime tools unavailable"}.`,
-        `Matched skills: ${skillNames.join(", ") || "is request ke liye koi special skill match nahi hui"}.`,
-        "Demo prompts: 'laptop status check karo', 'read file README.md', 'search web OpenClaw tools', 'gateway status', ya 'run terminal command \"Get-Date\"'.",
-      ].join(" ");
-    }
-
     return "";
   }
 
@@ -2738,9 +2713,13 @@ export class OmniClawAgent {
       const demo = byTool.get("capability_demo");
       const coreTools = Array.isArray(demo.coreTools) ? demo.coreTools : [];
       const demos = Array.isArray(demo.demos) ? demo.demos : [];
+      const skillNames = Array.isArray(demo.skills)
+        ? demo.skills.map((skill) => skill.name || skill.id).filter(Boolean).slice(0, 10)
+        : [];
       return [
         `Capability demo ready: agent ${demo.agentId || "main"} ke paas ${demo.toolCount || 0} tools aur ${demo.skillCount || 0} skills visible hain.`,
         `Core tools: ${coreTools.join(", ") || "none"}.`,
+        `Loaded skills: ${skillNames.join(", ") || "none"}.`,
         `Try: ${demos.slice(0, 3).join(" | ")}`,
       ].join(" ");
     }

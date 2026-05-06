@@ -334,6 +334,7 @@ export class CustomizationEngine {
       name: input.name || "Custom Skill",
       triggers: input.triggers || [],
       agentId: input.agentId || "",
+      agents: input.agents,
       description: input.description || "",
       instructions: input.instructions || "",
     });
