@@ -188,6 +188,7 @@
         "time_now",
         "runtime_summary",
         "provider_status",
+        "prompt_trace",
         "v2_status",
         "v2_repair_plan",
         "openclaw_vendor_status",

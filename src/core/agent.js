@@ -66,6 +66,57 @@ function buildAttachmentExtractImportMessage(extract = {}, maxChars = 12000) {
   ].join("\n");
 }
 
+function redactTraceString(value = "") {
+  return String(value || "")
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]{12,}/gi, "Bearer [redacted]")
+    .replace(/\b(?:sk|sk-or-v1|nvapi|ghp|github_pat|xox[baprs])-[A-Za-z0-9._-]{16,}\b/gi, "[redacted-token]")
+    .replace(/\b[A-Za-z0-9._%+-]+:[A-Za-z0-9._%+-]{12,}@/g, "[redacted-auth]@")
+    .replace(/((?:api[_-]?key|authorization|bearer|password|secret|token)\s*[:=]\s*)[^\s,"']+/gi, "$1[redacted]");
+}
+
+function isTraceSecretKey(key = "") {
+  return /api[_-]?key|authorization|bearer|password|secret|token|cookie|credential/i.test(String(key || ""));
+}
+
+function truncateTraceText(value, maxChars = 1200) {
+  const text = redactTraceString(value);
+  if (text.length <= maxChars) {
+    return text;
+  }
+  return `${text.slice(0, Math.max(0, maxChars - 32)).trimEnd()}...[truncated ${text.length - maxChars} chars]`;
+}
+
+function sanitizeTraceValue(value, options = {}, depth = 0) {
+  const maxString = Number(options.maxString || 1200);
+  const maxArray = Number(options.maxArray || 8);
+  const maxDepth = Number(options.maxDepth || 4);
+
+  if (value == null || typeof value === "number" || typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "string") {
+    return truncateTraceText(value, maxString);
+  }
+  if (Array.isArray(value)) {
+    const items = value.slice(0, maxArray).map((item) => sanitizeTraceValue(item, options, depth + 1));
+    if (value.length > maxArray) {
+      items.push({ omittedItems: value.length - maxArray });
+    }
+    return items;
+  }
+  if (typeof value === "object") {
+    if (depth >= maxDepth) {
+      return truncateTraceText(JSON.stringify(value), maxString);
+    }
+    const output = {};
+    for (const [key, item] of Object.entries(value)) {
+      output[key] = isTraceSecretKey(key) ? "[redacted]" : sanitizeTraceValue(item, options, depth + 1);
+    }
+    return output;
+  }
+  return truncateTraceText(String(value), maxString);
+}
+
 export class OmniClawAgent {
   constructor({ rootDir }) {
     this.rootDir = rootDir;
@@ -696,6 +747,66 @@ export class OmniClawAgent {
         artifacts: this.memory.getArtifacts(),
       },
       tasks: profile.enableTasks ? this.tasks.listTasks() : [],
+    };
+  }
+
+  buildPromptTrace(contextBundle = {}, run = {}) {
+    const workspaceFiles = (contextBundle.workspaceContext?.files || []).map((file) => ({
+      name: file.name || "",
+      scope: file.scope || "",
+      path: file.path || "",
+      contentPreview: truncateTraceText(file.content || "", 900),
+    }));
+    return {
+      version: "prompt-trace-v1",
+      runId: run.id || "",
+      sessionId: run.sessionId || "",
+      agentId: run.agentId || contextBundle.agent?.id || "main",
+      createdAt: new Date().toISOString(),
+      report: sanitizeTraceValue(contextBundle.report || {}, { maxString: 900, maxArray: 20, maxDepth: 5 }),
+      agent: sanitizeTraceValue(contextBundle.agent || {}, { maxString: 700, maxArray: 10, maxDepth: 4 }),
+      profile: sanitizeTraceValue(contextBundle.profile || {}, { maxString: 700, maxArray: 10, maxDepth: 4 }),
+      workspace: {
+        agentId: contextBundle.workspaceContext?.agentId || "main",
+        fileCount: workspaceFiles.length,
+        heartbeatPrompt: truncateTraceText(contextBundle.workspaceContext?.heartbeatPrompt || "", 700),
+        files: workspaceFiles,
+      },
+      tools: sanitizeTraceValue(contextBundle.tools || [], { maxString: 500, maxArray: 80, maxDepth: 3 }),
+      skills: sanitizeTraceValue(contextBundle.skills || [], { maxString: 900, maxArray: 24, maxDepth: 3 }),
+      memory: {
+        recentConversations: sanitizeTraceValue(contextBundle.recentConversations || [], { maxString: 700, maxArray: 8, maxDepth: 3 }),
+        notes: sanitizeTraceValue(contextBundle.notes || [], { maxString: 700, maxArray: 8, maxDepth: 3 }),
+        longTermMemory: sanitizeTraceValue(contextBundle.longTermMemory || [], { maxString: 900, maxArray: 8, maxDepth: 3 }),
+        research: sanitizeTraceValue(contextBundle.research || [], { maxString: 700, maxArray: 6, maxDepth: 3 }),
+        artifacts: sanitizeTraceValue(contextBundle.artifacts || [], { maxString: 500, maxArray: 6, maxDepth: 3 }),
+        tasks: sanitizeTraceValue(contextBundle.tasks || [], { maxString: 500, maxArray: 8, maxDepth: 3 }),
+      },
+      toolOutputs: sanitizeTraceValue(contextBundle.toolOutputs || [], { maxString: 1000, maxArray: 12, maxDepth: 4 }),
+      sessionSummary: sanitizeTraceValue(contextBundle.sessionSummary || null, { maxString: 1200, maxArray: 6, maxDepth: 3 }),
+      safety: {
+        redacted: true,
+        note: "Secret-like keys and token-looking strings are redacted before this trace is stored.",
+      },
+    };
+  }
+
+  getPromptTrace(runId = "") {
+    const id = String(runId || "").trim();
+    const run = id ? this.gateway.getRun(id) : null;
+    if (!run) {
+      return null;
+    }
+    return {
+      runId: run.id,
+      sessionId: run.sessionId || "",
+      agentId: run.agentId || "main",
+      status: run.status,
+      createdAt: run.createdAt || "",
+      updatedAt: run.updatedAt || "",
+      available: Boolean(run.promptTrace),
+      promptTrace: run.promptTrace || null,
+      context: run.context || null,
     };
   }
 
@@ -1953,8 +2064,14 @@ export class OmniClawAgent {
         tools: availableTools,
         sessionSummary,
       });
+      const promptTrace = this.buildPromptTrace(contextBundle, {
+        ...run,
+        sessionId: session.id,
+        agentId: routedAgent.id,
+      });
       this.gateway.updateRun(run.id, {
         context: contextBundle.report,
+        promptTrace,
       });
       this.gateway.addEvent("context.compacted", {
         runId: run.id,

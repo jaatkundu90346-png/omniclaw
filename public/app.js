@@ -44,6 +44,7 @@ const skillOutput = document.querySelector("#skill-output");
 const skillLibraryOutput = document.querySelector("#skill-library-output");
 const gatewayOutput = document.querySelector("#gateway-output");
 const runOutput = document.querySelector("#run-output");
+const promptTraceOutput = document.querySelector("#prompt-trace-output");
 const sessionOutput = document.querySelector("#session-output");
 const sessionDetailOutput = document.querySelector("#session-detail-output");
 const agentOutput = document.querySelector("#agent-output");
@@ -694,6 +695,48 @@ function formatChatResponse(data) {
   return lines.join("\n");
 }
 
+async function fetchPromptTrace(runId) {
+  if (!runId || !promptTraceOutput) {
+    return null;
+  }
+  promptTraceOutput.textContent = `Loading prompt trace for ${runId}...`;
+  const response = await fetch(`/api/runs/${encodeURIComponent(runId)}/prompt-trace`);
+  const data = await response.json();
+  if (!response.ok) {
+    promptTraceOutput.textContent = data.error || "Prompt trace is not available for this run.";
+    return null;
+  }
+  renderPromptTrace(data);
+  return data;
+}
+
+function renderPromptTrace(data) {
+  if (!promptTraceOutput) {
+    return;
+  }
+  const trace = data.promptTrace || {};
+  const report = trace.report || data.context || {};
+  const lines = [
+    `RUN ${data.runId || trace.runId || "unknown"} | ${data.status || "unknown"}`,
+    `AGENT ${data.agentId || trace.agentId || "main"} | SESSION ${data.sessionId || trace.sessionId || ""}`,
+    report.summary ? `CONTEXT ${report.summary}` : "",
+    `WORKSPACE ${(trace.workspace?.files || []).length || 0} file(s) | TOOLS ${(trace.tools || []).length || 0} | SKILLS ${(trace.skills || []).length || 0}`,
+    "",
+    "REPORT",
+    formatJson(report),
+    "",
+    "WORKSPACE FILES",
+    formatJson(trace.workspace?.files || []),
+    "",
+    "MEMORY",
+    formatJson(trace.memory || {}),
+    "",
+    "TOOL OUTPUTS",
+    formatJson(trace.toolOutputs || []),
+  ].filter((line) => line !== "");
+  promptTraceOutput.textContent = lines.join("\n");
+}
+
 function syncRuntimeControls(state) {
   const config = state.config || {};
   const runtimeProfile = (state.runtime && state.runtime.profile && state.runtime.profile.id) || config.runtime?.activeProfile;
@@ -1073,10 +1116,17 @@ function renderRuns(gateway) {
           `</div>`,
           `<p>${escapeHtml(summary)}</p>`,
           `<small>${escapeHtml(`${item.id} | ${item.agentId || "main"} | ${item.channel || "webchat"} | ${wait}${shellMeta}`)}</small>`,
+          `<div class="hero-actions"><button type="button" class="button button-ghost button-small" data-prompt-trace-run="${escapeHtml(item.id)}" ${item.promptTrace ? "" : "disabled"}>Trace</button></div>`,
           `</div>`,
         ].join("");
       })
       .join("") || emptyState("No runs tracked yet.");
+
+  for (const button of runOutput.querySelectorAll("[data-prompt-trace-run]")) {
+    button.addEventListener("click", async () => {
+      await fetchPromptTrace(button.dataset.promptTraceRun || "");
+    });
+  }
 }
 
 function renderBackgroundJobs(state) {
@@ -3516,6 +3566,9 @@ form.addEventListener("submit", async (event) => {
     const data = await response.json();
     chatOutput.textContent = formatChatResponse(data);
     messageInput.value = "";
+    if (data.run?.id) {
+      await fetchPromptTrace(data.run.id);
+    }
 
     if (data.session?.id) {
       selectedSessionId = data.session.id;
