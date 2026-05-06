@@ -1348,7 +1348,44 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (req.method === "GET" && pathname === "/api/workspace") {
+  // ── MCP Server Endpoints ──────────────────────────────────────
+ if (req.method === "GET" && pathname === "/api/mcp/status") {
+   try { sendJson(res, 200, agent.mcp.getStatus()); } catch (e) { sendJson(res, 500, { error: e.message }); }
+   return;
+ }
+ if (req.method === "POST" && pathname.startsWith("/api/mcp/connect/")) {
+   const serverId = pathname.split("/").filter(Boolean).pop();
+   try {
+     const client = await agent.mcp.connectServer(serverId);
+     sendJson(res, 200, { connected: true, serverId, tools: client.tools.map(t => t.name) });
+   } catch (e) { sendJson(res, 500, { error: e.message }); }
+   return;
+ }
+ if (req.method === "POST" && pathname.startsWith("/api/mcp/disconnect/")) {
+   const serverId = pathname.split("/").filter(Boolean).pop();
+   try {
+     const client = agent.mcp.clients.get(serverId);
+     if (client) client.disconnect();
+     agent.mcp.clients.delete(serverId);
+     sendJson(res, 200, { disconnected: true, serverId });
+   } catch (e) { sendJson(res, 500, { error: e.message }); }
+   return;
+ }
+ if (req.method === "GET" && pathname === "/api/mcp/tools") {
+   sendJson(res, 200, { tools: agent.mcp.getAllTools() });
+   return;
+ }
+ if (req.method === "POST" && pathname === "/api/mcp/call") {
+   try {
+     const body = await parseBody(req);
+     if (!body.toolId) { sendJson(res, 400, { error: "toolId required" }); return; }
+     const result = await agent.mcp.callTool(body.toolId, body.args || {});
+     sendJson(res, 200, { result });
+   } catch (e) { sendJson(res, 500, { error: e.message }); }
+   return;
+ }
+
+if (req.method === "GET" && pathname === "/api/workspace") {
     sendJson(res, 200, {
       ...agent.getWorkspaceState(),
     });
@@ -1943,6 +1980,27 @@ setInterval(() => {
     }
   } catch {}
 }, 300000);
+// ─── HTTPS Option ──────────────────────────────────────────────
+if (String(process.env.OMNICLAW_HTTPS || "").toLowerCase() === "true") {
+ try {
+   const { execSync } = await import("node:child_process");
+   const certDir = path.join(process.cwd(), "data", "certs");
+   if (!fs.existsSync(path.join(certDir, "key.pem"))) {
+     fs.mkdirSync(certDir, { recursive: true });
+     execSync(`openssl req -x509 -newkey rsa:2048 -keyout "${path.join(certDir, "key.pem")}" -out "${path.join(certDir, "cert.pem")}" -days 365 -nodes -subj "/O=OmniClaw/CN=localhost"`, { stdio: "pipe" });
+   }
+   const httpsModule = await import("node:https");
+   const tlsServer = httpsModule.default.createServer({
+     key: fs.readFileSync(path.join(certDir, "key.pem")),
+     cert: fs.readFileSync(path.join(certDir, "cert.pem")),
+   }, server._events.request[0]); // reuse the request handler
+   agent.gateway.addEvent("server.https_enabled", { port });
+   // Use tlsServer for WS upgrade too
+ } catch (err) {
+   agent.gateway.addEvent("server.https_failed", { error: err.message });
+ }
+}
+
 server.listen(port, () => {
   console.log(`OmniClaw listening on http://localhost:${port}`);
 });

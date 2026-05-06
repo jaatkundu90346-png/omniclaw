@@ -4581,6 +4581,48 @@ function renderEventLogEntry(event) {
   while (container.children.length > 100) container.removeChild(container.lastChild);
 }
 
+// ─── TTS via Web Speech API ─────────────────────────────────────
+function speakText(text, voice, rate, pitch) {
+  if (!window.speechSynthesis) return false;
+  const utterance = new SpeechSynthesisUtterance(text);
+  if (voice) {
+    const voices = speechSynthesis.getVoices();
+    const match = voices.find(v => v.name.includes(voice) || v.lang.includes(voice));
+    if (match) utterance.voice = match;
+  }
+  utterance.rate = Number(rate || 1);
+  utterance.pitch = Number(pitch || 1);
+  speechSynthesis.speak(utterance);
+  return true;
+}
+
+// ─── Canvas Surface Manager ─────────────────────────────────────
+const canvasSurfaces = new Map();
+function createCanvasSurface(id, url, html, width, height) {
+  let container = document.getElementById("canvas-container-" + id);
+  if (!container) {
+    container = document.createElement("div");
+    container.id = "canvas-container-" + id;
+    container.className = "canvas-surface";
+    container.style.cssText = "position:relative;width:" + (width || 800) + "px;height:" + (height || 600) + "px;border:1px solid var(--color-border-default);border-radius:8px;overflow:hidden;margin:8px 0;";
+    const chatOutput = document.getElementById("chat-output");
+    if (chatOutput) chatOutput.appendChild(container);
+  }
+  if (url) {
+    const iframe = document.createElement("iframe");
+    iframe.src = url;
+    iframe.style.cssText = "width:100%;height:100%;border:none;";
+    iframe.sandbox = "allow-scripts allow-same-origin";
+    container.innerHTML = "";
+    container.appendChild(iframe);
+  } else if (html) {
+    container.innerHTML = html;
+  }
+  canvasSurfaces.set(id, { id, url, html, width, height });
+  return container;
+}
+
+
 // ─── Loading Helpers ────────────────────────────────────────────
 function showLoading(element, message) {
   if (!element) return;

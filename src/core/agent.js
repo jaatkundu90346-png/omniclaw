@@ -37,6 +37,7 @@ import { SystemMonitor } from "./system-monitor.js";
 import { V2FeatureHealth } from "./v2-feature-health.js";
 import { EventBus } from "./event-bus.js";
 import { Heartbeat } from "./heartbeat.js";
+import { McpRegistry } from "./mcp-client.js";
 
 function truncateAttachmentImport(value, maxChars = 12000) {
   const text = String(value || "").trim();
@@ -137,6 +138,9 @@ export class OmniClawAgent {
   this.heartbeat.addCheck({ id: "approval-expiry", description: "Expire old pending approvals", fn: (a) => a.gateway.expireOldApprovals?.(30) });
   this.heartbeat.addCheck({ id: "session-cleanup", description: "Auto-compact large sessions", fn: (a) => { const sessions = a.sessions.listSessions(100); let compacted = 0; for (const s of sessions) { if (s.messageCount > 150) { try { a.sessions.compactSession(s.id, 80); compacted++; } catch {} } } return { compacted }; } });
   this.heartbeat.start();
+
+  // ─── MCP Server Registry ────────────────────────────────────────
+  this.mcp = new McpRegistry(this.rootDir);
 
   // ─── Load Workspace Identity Files ──────────────────────────────
   this.workspaceIdentity = {};
