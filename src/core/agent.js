@@ -117,6 +117,10 @@ function sanitizeTraceValue(value, options = {}, depth = 0) {
   return truncateTraceText(String(value), maxString);
 }
 
+function createToolTraceId() {
+  return `tool_trace_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
 export class OmniClawAgent {
   constructor({ rootDir }) {
     this.rootDir = rootDir;
@@ -807,6 +811,70 @@ export class OmniClawAgent {
       available: Boolean(run.promptTrace),
       promptTrace: run.promptTrace || null,
       context: run.context || null,
+    };
+  }
+
+  upsertRunToolTrace(runId = "", entry = {}) {
+    const id = String(runId || "").trim();
+    const run = id ? this.gateway.getRun(id) : null;
+    if (!run) {
+      return null;
+    }
+    const now = new Date().toISOString();
+    const traceId = entry.id || createToolTraceId();
+    const sanitized = sanitizeTraceValue(
+      {
+        ...entry,
+        id: traceId,
+        input: entry.input,
+        output: entry.output,
+        updatedAt: now,
+      },
+      { maxString: 1000, maxArray: 16, maxDepth: 5 },
+    );
+    const toolTrace = Array.isArray(run.toolTrace) ? [...run.toolTrace] : [];
+    const index = toolTrace.findIndex((item) => item.id === traceId);
+    if (index >= 0) {
+      toolTrace[index] = {
+        ...toolTrace[index],
+        ...sanitized,
+      };
+    } else {
+      toolTrace.push({
+        createdAt: now,
+        ...sanitized,
+      });
+    }
+    const cappedTrace = toolTrace.slice(-80);
+    const activeTool = [...cappedTrace].reverse().find((item) => item.status === "running");
+    this.gateway.updateRun(id, {
+      toolTrace: cappedTrace,
+      toolTraceCount: cappedTrace.length,
+      toolExecutionStatus: activeTool ? "running" : sanitized.status || run.toolExecutionStatus || "",
+      currentTool: activeTool?.tool || "",
+    });
+    return cappedTrace.find((item) => item.id === traceId) || null;
+  }
+
+  getToolTrace(runId = "") {
+    const id = String(runId || "").trim();
+    const run = id ? this.gateway.getRun(id) : null;
+    if (!run) {
+      return null;
+    }
+    const toolTrace = Array.isArray(run.toolTrace) ? run.toolTrace : [];
+    return {
+      runId: run.id,
+      sessionId: run.sessionId || "",
+      agentId: run.agentId || "main",
+      status: run.status,
+      available: toolTrace.length > 0,
+      toolTrace,
+      toolTraceCount: toolTrace.length,
+      currentTool: run.currentTool || "",
+      toolExecutionStatus: run.toolExecutionStatus || "",
+      modelToolLoop: run.modelToolLoop || null,
+      shellExecutions: sanitizeTraceValue(run.shellExecutions || [], { maxString: 1000, maxArray: 12, maxDepth: 4 }),
     };
   }
 
@@ -1776,6 +1844,20 @@ export class OmniClawAgent {
           continue;
         }
 
+        const toolTraceId = createToolTraceId();
+        const toolStartedAt = new Date().toISOString();
+        this.upsertRunToolTrace(run.id, {
+          id: toolTraceId,
+          runId: run.id,
+          sessionId: session.id,
+          agentId: routedAgent.id,
+          source: "runtime-plan",
+          status: "running",
+          tool: step.tool,
+          input: step.input || {},
+          reason: step.reason || "",
+          startedAt: toolStartedAt,
+        });
         this.gateway.addEvent("tool.started", {
           runId: run.id,
           sessionId: session.id,
@@ -1938,6 +2020,23 @@ export class OmniClawAgent {
             // ignore missing session
           }
         }
+        this.upsertRunToolTrace(run.id, {
+          id: toolTraceId,
+          runId: run.id,
+          sessionId: session.id,
+          agentId: routedAgent.id,
+          source: "runtime-plan",
+          status: output?.error || output?.blocked ? "failed" : "completed",
+          tool: step.tool,
+          input: step.input || {},
+          output,
+          reason: step.reason || "",
+          startedAt: toolStartedAt,
+          completedAt: new Date().toISOString(),
+          durationMs: Date.now() - Date.parse(toolStartedAt),
+          blocked: Boolean(output?.blocked),
+          error: Boolean(output?.error),
+        });
       }
     }
 
@@ -2381,6 +2480,21 @@ export class OmniClawAgent {
       }
 
       for (const call of calls) {
+        const toolTraceId = createToolTraceId();
+        const toolStartedAt = new Date().toISOString();
+        this.upsertRunToolTrace(run.id, {
+          id: toolTraceId,
+          runId: run.id,
+          sessionId: session.id,
+          agentId: agent.id,
+          source: "model-tool-loop",
+          status: "running",
+          round,
+          tool: call.tool,
+          input: call.input || {},
+          reason: call.reason || "",
+          startedAt: toolStartedAt,
+        });
         this.gateway.addEvent("model_tool_loop.tool_started", {
           runId: run.id,
           sessionId: session.id,
@@ -2419,6 +2533,24 @@ export class OmniClawAgent {
           agentId: agent.id,
           round,
           tool: call.tool,
+          blocked: Boolean(output?.blocked),
+          error: Boolean(output?.error),
+        });
+        this.upsertRunToolTrace(run.id, {
+          id: toolTraceId,
+          runId: run.id,
+          sessionId: session.id,
+          agentId: agent.id,
+          source: "model-tool-loop",
+          status: output?.error || output?.blocked ? "failed" : "completed",
+          round,
+          tool: call.tool,
+          input: call.input || {},
+          output,
+          reason: call.reason || "",
+          startedAt: toolStartedAt,
+          completedAt: new Date().toISOString(),
+          durationMs: Date.now() - Date.parse(toolStartedAt),
           blocked: Boolean(output?.blocked),
           error: Boolean(output?.error),
         });

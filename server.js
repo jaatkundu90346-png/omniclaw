@@ -327,9 +327,11 @@ const server = http.createServer(async (req, res) => {
     sendJson(res, 200, {
       overview: agent.gateway.getOverview(),
       events: agent.gateway.listEvents(50),
-      runs: agent.gateway.listRuns(20).map(({ promptTrace, ...run }) => ({
+      runs: agent.gateway.listRuns(20).map(({ promptTrace, toolTrace, ...run }) => ({
         ...run,
         promptTrace: Boolean(promptTrace),
+        toolTrace: Boolean(Array.isArray(toolTrace) && toolTrace.length > 0),
+        toolTraceCount: Array.isArray(toolTrace) ? toolTrace.length : Number(run.toolTraceCount || 0),
       })),
       approvals: agent.gateway.listApprovals(),
       delegations: agent.gateway.listDelegations({ limit: 20 }),
@@ -346,6 +348,18 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     sendJson(res, trace.available ? 200 : 404, trace.available ? trace : { ...trace, error: "Prompt trace not available for this run" });
+    return;
+  }
+
+  if (req.method === "GET" && pathname.startsWith("/api/runs/") && pathname.endsWith("/tool-trace")) {
+    const parts = pathname.split("/").filter(Boolean);
+    const runId = parts[2] || "";
+    const trace = agent.getToolTrace(runId);
+    if (!trace) {
+      sendJson(res, 404, { error: "Run not found" });
+      return;
+    }
+    sendJson(res, trace.available ? 200 : 404, trace.available ? trace : { ...trace, error: "Tool trace not available for this run" });
     return;
   }
 

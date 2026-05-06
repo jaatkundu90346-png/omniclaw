@@ -341,6 +341,24 @@ export class ToolRegistry {
           };
         },
       },
+      tool_trace: {
+        description: "Inspect the per-run tool execution ledger with inputs, outputs, status, and timing.",
+        permission: null,
+        group: "runtime",
+        run: async ({ runId }) => {
+          const trace = this.agentRuntime?.getToolTrace?.(String(runId || "").trim());
+          if (!trace) {
+            return {
+              found: false,
+              message: "Run not found.",
+            };
+          }
+          return {
+            found: true,
+            ...trace,
+          };
+        },
+      },
       v2_status: {
         description: "OmniClaw V2 feature health report with scores, weak features, evidence, and gaps.",
         permission: null,

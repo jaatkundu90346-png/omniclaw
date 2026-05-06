@@ -45,6 +45,7 @@ const skillLibraryOutput = document.querySelector("#skill-library-output");
 const gatewayOutput = document.querySelector("#gateway-output");
 const runOutput = document.querySelector("#run-output");
 const promptTraceOutput = document.querySelector("#prompt-trace-output");
+const toolTraceOutput = document.querySelector("#tool-trace-output");
 const sessionOutput = document.querySelector("#session-output");
 const sessionDetailOutput = document.querySelector("#session-detail-output");
 const agentOutput = document.querySelector("#agent-output");
@@ -737,6 +738,57 @@ function renderPromptTrace(data) {
   promptTraceOutput.textContent = lines.join("\n");
 }
 
+async function fetchToolTrace(runId) {
+  if (!runId || !toolTraceOutput) {
+    return null;
+  }
+  toolTraceOutput.textContent = `Loading tool trace for ${runId}...`;
+  const response = await fetch(`/api/runs/${encodeURIComponent(runId)}/tool-trace`);
+  const data = await response.json();
+  if (!response.ok) {
+    toolTraceOutput.textContent = data.error || "Tool trace is not available for this run.";
+    return null;
+  }
+  renderToolTrace(data);
+  return data;
+}
+
+function renderToolTrace(data) {
+  if (!toolTraceOutput) {
+    return;
+  }
+  const trace = Array.isArray(data.toolTrace) ? data.toolTrace : [];
+  const lines = [
+    `RUN ${data.runId || "unknown"} | ${data.status || "unknown"}`,
+    `AGENT ${data.agentId || "main"} | SESSION ${data.sessionId || ""}`,
+    `TOOLS ${data.toolTraceCount || trace.length} | STATUS ${data.toolExecutionStatus || "idle"}${data.currentTool ? ` | CURRENT ${data.currentTool}` : ""}`,
+    "",
+    ...trace.map((item, index) => {
+      const header = [
+        `${index + 1}. ${item.tool || "tool"}`,
+        item.status || "unknown",
+        item.source || "runtime",
+        item.round ? `round ${item.round}` : "",
+        Number.isFinite(Number(item.durationMs)) ? `${item.durationMs}ms` : "",
+      ].filter(Boolean).join(" | ");
+      return [
+        header,
+        item.reason ? `reason: ${item.reason}` : "",
+        `input: ${formatJson(item.input || {})}`,
+        `output: ${formatJson(item.output || {})}`,
+      ].filter(Boolean).join("\n");
+    }),
+    trace.length === 0 ? "No tool executions captured yet." : "",
+    "",
+    "MODEL TOOL LOOP",
+    formatJson(data.modelToolLoop || {}),
+    "",
+    "SHELL EXECUTIONS",
+    formatJson(data.shellExecutions || []),
+  ].filter((line) => line !== "");
+  toolTraceOutput.textContent = lines.join("\n\n");
+}
+
 function syncRuntimeControls(state) {
   const config = state.config || {};
   const runtimeProfile = (state.runtime && state.runtime.profile && state.runtime.profile.id) || config.runtime?.activeProfile;
@@ -1116,7 +1168,7 @@ function renderRuns(gateway) {
           `</div>`,
           `<p>${escapeHtml(summary)}</p>`,
           `<small>${escapeHtml(`${item.id} | ${item.agentId || "main"} | ${item.channel || "webchat"} | ${wait}${shellMeta}`)}</small>`,
-          `<div class="hero-actions"><button type="button" class="button button-ghost button-small" data-prompt-trace-run="${escapeHtml(item.id)}" ${item.promptTrace ? "" : "disabled"}>Trace</button></div>`,
+          `<div class="hero-actions"><button type="button" class="button button-ghost button-small" data-prompt-trace-run="${escapeHtml(item.id)}" ${item.promptTrace ? "" : "disabled"}>Prompt</button><button type="button" class="button button-ghost button-small" data-tool-trace-run="${escapeHtml(item.id)}" ${item.toolTrace ? "" : "disabled"}>Tools${item.toolTraceCount ? ` ${escapeHtml(String(item.toolTraceCount))}` : ""}</button></div>`,
           `</div>`,
         ].join("");
       })
@@ -1125,6 +1177,11 @@ function renderRuns(gateway) {
   for (const button of runOutput.querySelectorAll("[data-prompt-trace-run]")) {
     button.addEventListener("click", async () => {
       await fetchPromptTrace(button.dataset.promptTraceRun || "");
+    });
+  }
+  for (const button of runOutput.querySelectorAll("[data-tool-trace-run]")) {
+    button.addEventListener("click", async () => {
+      await fetchToolTrace(button.dataset.toolTraceRun || "");
     });
   }
 }
@@ -3568,6 +3625,9 @@ form.addEventListener("submit", async (event) => {
     messageInput.value = "";
     if (data.run?.id) {
       await fetchPromptTrace(data.run.id);
+      if (Array.isArray(data.toolOutputs) && data.toolOutputs.length > 0) {
+        await fetchToolTrace(data.run.id);
+      }
     }
 
     if (data.session?.id) {
