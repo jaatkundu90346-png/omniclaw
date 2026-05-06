@@ -30,13 +30,20 @@ This pass adds the V2 control layer:
 - Safety limits: max rounds, max calls per round, no unknown tools, no direct message/session-send recursion.
 - Conservative default: skips simple replies and skips when heuristic tools already handled the request.
 
+## V2.2 Added
+
+- Dependency-free Chrome/Edge DevTools automation runtime.
+- Browser tools now support status, navigate, screenshot, page text, links, click, and type/fill.
+- Screenshots are saved as artifacts under `data/generated/browser-screenshots`.
+- V2 health now scores browser automation from real tool/capability evidence.
+
 ## Current V2 Milestones
 
 1. V2.1 Provider-native repeated tool calling
    Initial provider-guided JSON loop is implemented. Future work: provider-native function schemas for OpenAI-compatible APIs.
 
 2. V2.2 Browser automation
-   Add Chromium click/type/screenshot/page-observation tools instead of only URL open/fetch.
+   Initial Chromium/Edge click/type/screenshot/page-observation tools are implemented. Future work: form-aware workflows, persistent visible sessions, and richer DOM observations.
 
 3. V2.3 Channel plugin packs
    Telegram, Discord, WhatsApp, Slack, Signal, iMessage, webhook, and file-drop should become first-class plugins with inbox/outbox/auth/attachments.
@@ -52,4 +59,4 @@ This pass adds the V2 control layer:
 
 ## V2 Rule
 
-OmniClaw should never say “I can do X” unless the V2 report marks X as ready or partial with clear limitations. If a user asks for a missing feature, the agent must answer with the missing backend/plugin and the next repair step.
+OmniClaw should never say "I can do X" unless the V2 report marks X as ready or partial with clear limitations. If a user asks for a missing feature, the agent must answer with the missing backend/plugin and the next repair step.

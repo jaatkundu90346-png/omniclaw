@@ -102,7 +102,7 @@ export class OmniClawAgent {
       secretStore: this.secrets,
     });
     this.contextEngine = new ContextEngine(this.config);
-    this.browserOperator = new BrowserOperator();
+    this.browserOperator = new BrowserOperator({ rootDir });
     this.systemMonitor = new SystemMonitor();
     this.v2Health = new V2FeatureHealth(this);
 

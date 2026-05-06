@@ -13,7 +13,7 @@ OmniClaw runtime tools include:
 - computer_access_status
 - list_computer_directory, read_computer_file, write_computer_file, create_computer_directory
 - delete_computer_path, which moves deleted items to data/trash unless permanent delete is explicitly enabled
-- browser and open_browser_url for the laptop default browser / URL fetch surface
+- browser, browser_status, browser_screenshot, browser_text, and open_browser_url for browser automation / URL fetch
 - run_terminal_command and plan_shell_command through governed shell execution and audit logs
 - message, sessions_list, sessions_history, sessions_send, sessions_spawn, sessions_yield, session_status
 - subagents and agents_list

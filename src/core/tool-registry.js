@@ -452,6 +452,7 @@ export class ToolRegistry {
             browser: {
               openUrl: true,
               readUrl: true,
+              automation: this.browserOperator.getStatus?.() || {},
             },
           };
         },
@@ -670,23 +671,48 @@ export class ToolRegistry {
         },
       },
       browser: {
-        description: "OpenClaw-compatible browser helper for URL open/fetch status. Full click/screenshot automation is a next plugin upgrade.",
+        description: "OpenClaw-compatible browser helper for URL open/fetch and DevTools automation actions.",
         permission: "allowBrowserControl",
         group: "ui",
-        run: async ({ action, url }) => {
+        run: async (input = {}) => {
+          const { action, url } = input;
           const normalizedAction = String(action || "open").trim().toLowerCase();
+          if (["status", "screenshot", "capture", "text", "links", "click", "type", "fill"].includes(normalizedAction)) {
+            return this.browserOperator.automate(input);
+          }
+          if (["navigate", "goto"].includes(normalizedAction)) {
+            return this.browserOperator.automate(input);
+          }
           if (["fetch", "read", "read_url"].includes(normalizedAction)) {
             return this.browserOperator.readUrl(String(url || "").trim());
           }
-          if (["open", "navigate", "goto"].includes(normalizedAction)) {
+          if (["open"].includes(normalizedAction)) {
             return this.browserOperator.openUrl(String(url || "").trim());
           }
           return {
             ok: false,
             action: normalizedAction,
-            message: "Supported browser actions right now: open, navigate, goto, fetch, read.",
+            message: "Supported browser actions: status, open, navigate/goto, fetch/read, screenshot, text, links, click, type/fill.",
           };
         },
+      },
+      browser_status: {
+        description: "Check real browser automation availability and current browser session.",
+        permission: null,
+        group: "ui",
+        run: async () => this.browserOperator.getStatus?.() || {},
+      },
+      browser_screenshot: {
+        description: "Capture a screenshot from the current automated browser page.",
+        permission: "allowBrowserControl",
+        group: "ui",
+        run: async (input = {}) => this.browserOperator.automate({ ...input, action: "screenshot" }),
+      },
+      browser_text: {
+        description: "Extract visible text from the current automated browser page.",
+        permission: "allowBrowserControl",
+        group: "ui",
+        run: async (input = {}) => this.browserOperator.automate({ ...input, action: "text" }),
       },
       web_search: {
         description: "OpenClaw-compatible web search alias.",

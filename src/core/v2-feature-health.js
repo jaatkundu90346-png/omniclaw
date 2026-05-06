@@ -61,6 +61,17 @@ export class V2FeatureHealth {
     const agents = runtime.agents.getAll();
     const pluginTools = runtime.plugins.getToolDefinitions();
     const modelToolLoop = runtime.getModelToolLoopSettings?.() || {};
+    const browserStatus = runtime.browserOperator?.getStatus?.() || {};
+    const browserAutomationReady = Boolean(
+      toolIds.has("browser")
+      && toolIds.has("browser_status")
+      && toolIds.has("browser_screenshot")
+      && toolIds.has("browser_text")
+      && browserStatus.capabilities?.devtoolsNavigate
+      && browserStatus.capabilities?.screenshot
+      && browserStatus.capabilities?.click
+      && browserStatus.capabilities?.type,
+    );
 
     const features = [
       feature({
@@ -133,11 +144,22 @@ export class V2FeatureHealth {
         id: "web-browser",
         name: "Web + browser eyes",
         layer: "tools",
-        status: toolIds.has("web_search") && toolIds.has("web_fetch") && toolIds.has("browser") ? "partial" : "missing",
+        status: browserAutomationReady ? "ready" : toolIds.has("web_search") && toolIds.has("web_fetch") && toolIds.has("browser") ? "partial" : "missing",
         priority: "high",
-        evidence: [`web_search=${toolIds.has("web_search")}`, `web_fetch=${toolIds.has("web_fetch")}`, `browser=${toolIds.has("browser")}`],
-        gaps: ["Full Chromium click/type/screenshot automation is missing."],
-        nextAction: "Add browser automation provider with screenshot observations.",
+        evidence: [
+          `web_search=${toolIds.has("web_search")}`,
+          `web_fetch=${toolIds.has("web_fetch")}`,
+          `browser=${toolIds.has("browser")}`,
+          `browser_status=${toolIds.has("browser_status")}`,
+          `screenshot=${Boolean(browserStatus.capabilities?.screenshot)}`,
+          `click=${Boolean(browserStatus.capabilities?.click)}`,
+          `type=${Boolean(browserStatus.capabilities?.type)}`,
+          `path=${browserStatus.browserPath || "not-found"}`,
+        ],
+        gaps: browserAutomationReady ? [] : [browserStatus.message || "Chrome/Edge browser automation is not ready."],
+        nextAction: browserAutomationReady
+          ? "Add form-aware workflows, persistent visible sessions, and DOM observation summaries."
+          : "Install Chrome/Edge or set OMNICLAW_BROWSER_PATH, then rerun browser_status.",
       }),
       feature({
         id: "connectors",
