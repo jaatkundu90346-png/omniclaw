@@ -267,10 +267,13 @@ export class MemoryStore {
 
   promoteMemory(input = {}) {
     const data = this.read();
+    const agentId = normalizeAgentId(input.agentId);
     const sourceType = String(input.sourceType || "manual").trim();
     const sourceId = String(input.sourceId || "").trim();
     const sourceRef = sourceId ? `${sourceType}:${sourceId}` : `manual:${createId("source")}`;
-    const existing = data.longTerm.find((item) => item.sourceRef === sourceRef);
+    const existing = data.longTerm.find(
+      (item) => item.sourceRef === sourceRef && normalizeAgentId(item.agentId) === agentId,
+    );
     if (existing) {
       return {
         created: false,
@@ -281,7 +284,7 @@ export class MemoryStore {
 
     const record = {
       id: createId("memory"),
-      agentId: normalizeAgentId(input.agentId),
+      agentId,
       title: truncate(input.title || "Promoted memory", 140),
       text: truncate(input.text || "", 2000),
       sourceType,
