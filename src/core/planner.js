@@ -1,4 +1,20 @@
 export class Planner {
+  normalizeToolInput(step = {}) {
+    const raw = step.input ?? step.arguments ?? {};
+    if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+      return raw;
+    }
+    if (typeof raw === "string" && raw.trim()) {
+      try {
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+      } catch {
+        return {};
+      }
+    }
+    return {};
+  }
+
   normalizeModelStep(step = {}) {
     const type = String(step.type || step.kind || "").trim();
     const tool = String(step.tool || step.name || step.function || "").trim();
@@ -7,7 +23,7 @@ export class Planner {
       return {
         type: "tool",
         tool,
-        input: step.input && typeof step.input === "object" ? step.input : step.arguments || {},
+        input: this.normalizeToolInput(step),
         reason: step.reason || "Model requested this runtime tool.",
       };
     }

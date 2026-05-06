@@ -57,7 +57,7 @@ function assert(condition, message) {
 async function run() {
   const suffix = Date.now().toString(36);
   const child = spawn(process.execPath, ["server.js"], {
-    env: { ...process.env, PORT: String(port) },
+    env: { ...process.env, PORT: String(port), OMNICLAW_DISABLE_USER_CONFIG: "1" },
     stdio: ["ignore", "pipe", "pipe"],
   });
 

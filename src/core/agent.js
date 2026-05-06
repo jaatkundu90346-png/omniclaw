@@ -2180,11 +2180,27 @@ export class OmniClawAgent {
     return calls
       .map((call) => ({
         tool: String(call.tool || call.name || "").trim(),
-        input: call.input && typeof call.input === "object" ? call.input : call.arguments && typeof call.arguments === "object" ? call.arguments : {},
+        input: this.normalizeModelToolInput(call),
         reason: String(call.reason || "Provider requested this tool.").trim(),
       }))
       .filter((call) => call.tool && allowedToolIds.has(call.tool))
       .slice(0, maxCalls);
+  }
+
+  normalizeModelToolInput(call = {}) {
+    const raw = call.input ?? call.arguments ?? {};
+    if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+      return raw;
+    }
+    if (typeof raw === "string" && raw.trim()) {
+      try {
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+      } catch {
+        return {};
+      }
+    }
+    return {};
   }
 
   async runModelToolLoop({

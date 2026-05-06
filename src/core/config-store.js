@@ -33,6 +33,9 @@ export class ConfigStore {
   }
 
   readUserConfig() {
+    if (String(process.env.OMNICLAW_DISABLE_USER_CONFIG || "").toLowerCase() === "1") {
+      return {};
+    }
     if (!fs.existsSync(this.userPath)) {
       return {};
     }
