@@ -8,6 +8,35 @@
   </head>
   <body>
 <div class="toast-container" id="toast-container"></div>
+<nav class="sidebar" id="sidebar">
+ <div class="sidebar-header">
+  <span class="sidebar-logo">🦀</span>
+  <span class="sidebar-title">OmniClaw</span>
+ </div>
+ <ul class="sidebar-nav">
+  <li><a href="#chat-panel" class="nav-link" data-route="chat-panel"><span class="nav-icon">💬</span><span class="nav-label">Chat</span></a></li>
+  <li><a href="#overview-panel" class="nav-link" data-route="overview-panel"><span class="nav-icon">📊</span><span class="nav-label">Overview</span></a></li>
+  <li><a href="#sessions-panel" class="nav-link" data-route="sessions-panel"><span class="nav-icon">📋</span><span class="nav-label">Sessions</span></a></li>
+  <li><a href="#execution-panel" class="nav-link" data-route="execution-panel"><span class="nav-icon">🔧</span><span class="nav-label">Execution</span></a></li>
+  <li><a href="#connectors-panel" class="nav-link" data-route="connectors-panel"><span class="nav-icon">🔌</span><span class="nav-label">Connectors</span></a></li>
+  <li><a href="#agents-panel" class="nav-link" data-route="agents-panel"><span class="nav-icon">🤖</span><span class="nav-label">Agents</span></a></li>
+  <li><a href="#skill-panel" class="nav-link" data-route="skill-panel"><span class="nav-icon">⚡</span><span class="nav-label">Skills</span></a></li>
+  <li><a href="#tools-panel" class="nav-link" data-route="tools-panel"><span class="nav-icon">🛠</span><span class="nav-label">Tools</span></a></li>
+  <li><a href="#memory-panel" class="nav-link" data-route="memory-panel"><span class="nav-icon">🧠</span><span class="nav-label">Memory</span></a></li>
+  <li><a href="#research-panel" class="nav-link" data-route="research-panel"><span class="nav-icon">🔬</span><span class="nav-label">Research</span></a></li>
+  <li><a href="#trust-panel" class="nav-link" data-route="trust-panel"><span class="nav-icon">🔐</span><span class="nav-label">Trust</span></a></li>
+  <li><a href="#scheduler-panel" class="nav-link" data-route="scheduler-panel"><span class="nav-icon">⏰</span><span class="nav-label">Scheduler</span></a></li>
+  <li><a href="#provider-panel" class="nav-link" data-route="provider-panel"><span class="nav-icon">🧪</span><span class="nav-label">Providers</span></a></li>
+  <li><a href="#runtime-panel" class="nav-link" data-route="runtime-panel"><span class="nav-icon">⚙️</span><span class="nav-label">Config</span></a></li>
+  <li><a href="#plugin-panel" class="nav-link" data-route="plugin-panel"><span class="nav-icon">🧩</span><span class="nav-label">Plugins</span></a></li>
+  <li><a href="#design-panel" class="nav-link" data-route="design-panel"><span class="nav-icon">🎨</span><span class="nav-label">Design</span></a></li>
+ </ul>
+ <div class="sidebar-footer">
+  <button id="sidebar-collapse" type="button" class="icon-button" aria-label="Collapse sidebar">☰</button>
+ </div>
+</nav>
+<button id="mobile-menu-btn" type="button" class="mobile-menu-btn" aria-label="Menu">☰</button>
+
     <div id="boot-screen" class="gateway-overlay">
       <div class="gateway-card">
         <div class="gateway-header">
@@ -180,7 +209,8 @@
             <button id="topbar-theme" type="button" class="icon-button" aria-label="Dark mode">☾</button>
           </div>
         </div>
-        <header class="hero">
+        <div class="main-content" id="main-content">
+<header class="hero">
           <div class="hero-copy">
             <p class="eyebrow">Gateway control</p>
             <h2>OmniClaw Control</h2>
@@ -213,7 +243,8 @@
         </header>
 
         <main class="dashboard">
-          <section id="overview-panel" class="surface surface-overview">
+          <section id="overview-panel"
+<div id="event-log" class="event-log"><h3 class="event-log-title">Live Events</h3><div id="event-log-entries" class="event-log-entries"></div></div> class="surface surface-overview">
             <div class="surface-header">
               <div>
                 <p class="section-kicker">Overview</p>
@@ -1241,5 +1272,6 @@
     </div>
 
     <script type="module" src="/app.js"></script>
-  </body>
+  </div><!-- /main-content -->
+</body>
 </html>

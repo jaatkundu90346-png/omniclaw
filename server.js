@@ -153,6 +153,34 @@ function sendFile(res, filePath) {
   }
 }
 
+
+// ─── Auth Middleware ──────────────────────────────────────────────
+const PUBLIC_ENDPOINTS = new Set(["/api/health", "/api/events", "/api/auth/overview", "/api/auth/pairing/request"]);
+
+function checkAuth(req, pathname) {
+  // Public endpoints skip auth
+  if (PUBLIC_ENDPOINTS.has(pathname)) return true;
+  // Static files skip auth
+  if (!pathname.startsWith("/api/")) return true;
+  // OPTIONS skip auth
+  if (req.method === "OPTIONS") return true;
+
+  const config = agent.config.getConfig();
+  const requireAuth = config.security?.requireApiAuth ?? false;
+  if (!requireAuth) return true;
+
+  const gwToken = agent.trust.getGatewayToken?.() || "";
+  if (!gwToken) return true; // No token configured = open access
+
+  const bearer = String(req.headers.authorization || "").trim();
+  const headerToken = bearer.toLowerCase().startsWith("bearer ") ? bearer.slice(7).trim() : "";
+  const queryToken = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`).searchParams.get("token") || "";
+  const customHeader = req.headers["x-omniclaw-token"] || "";
+
+  const provided = headerToken || queryToken || customHeader;
+  return provided === gwToken;
+}
+
 function parseBody(req) {
   return new Promise((resolve, reject) => {
     let body = "";
@@ -248,6 +276,12 @@ const server = http.createServer(async (req, res) => {
  const rl = checkRateLimit(clientIp);
  if (!rl.allowed) {
  sendJson(res, 429, { error: "Rate limit exceeded (60 req/min)", retryAfter: 60 });
+ return;
+ }
+
+ // Auth check
+ if (!checkAuth(req, pathname)) {
+ sendJson(res, 401, { error: "Unauthorized. Provide gateway token via Authorization: Bearer <token> or ?token=<token>" });
  return;
  }
 
@@ -942,7 +976,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (req.method === "GET" && pathname.startsWith("/api/sessions/")) {
+  if (req.method === "GET" && pathname.startsWith("/api/sessions/") && !pathname.endsWith("/export") && !pathname.endsWith("/summary") && pathname !== "/api/sessions/search") {
     const sessionId = pathname.slice("/api/sessions/".length);
     const session = agent.sessions.getSession(sessionId, {
       messageLimit: Number(url.searchParams.get("messageLimit") || 80),
@@ -1680,7 +1714,57 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (req.method === "POST" && pathname === "/api/chat") {
+  // ── Session Export ──────────────────────────────────────────────
+ if (req.method === "GET" && pathname.startsWith("/api/sessions/") && pathname.endsWith("/export")) {
+   const parts = pathname.split("/").filter(Boolean);
+   const sessionId = parts[2];
+   if (!sessionId) { sendJson(res, 400, { error: "sessionId required" }); return; }
+   try {
+     const session = agent.sessions.getSession(sessionId, { messageLimit: 10000 });
+     if (!session) { sendJson(res, 404, { error: "Session not found" }); return; }
+     sendJson(res, 200, { session, transcript: session.transcript || [], exportedAt: new Date().toISOString(), version: "0.1.0" });
+   } catch (error) { sendJson(res, 500, { error: error.message }); }
+   return;
+ }
+
+ // ── Session Import ──────────────────────────────────────────────
+ if (req.method === "POST" && pathname === "/api/sessions/import") {
+   try {
+     const body = await parseBody(req);
+     if (!body.session) { sendJson(res, 400, { error: "session object required" }); return; }
+     const session = agent.sessions.createSession({
+       label: body.session.label || "imported",
+       agentId: body.session.agentId || "main",
+       channel: body.session.channel || "import",
+     });
+     if (body.transcript && Array.isArray(body.transcript)) {
+       for (const entry of body.transcript) {
+         try { agent.sessions.appendMessage(session.id, entry); } catch {}
+       }
+     }
+     sendJson(res, 200, { sessionId: session.id, imported: true, transcriptCount: body.transcript?.length || 0 });
+   } catch (error) { sendJson(res, 500, { error: error.message }); }
+   return;
+ }
+
+ // ── Session Search ──────────────────────────────────────────────
+ if (req.method === "GET" && pathname === "/api/sessions/search") {
+   const query = String(url.searchParams.get("q") || "").trim().toLowerCase();
+   const limit = Math.min(Number(url.searchParams.get("limit") || 20), 100);
+   if (!query) { sendJson(res, 400, { error: "q parameter required" }); return; }
+   try {
+     const all = agent.sessions.listSessions(500);
+     const results = all.filter(s => {
+       return String(s.label || "").toLowerCase().includes(query) ||
+              String(s.agentId || "").toLowerCase().includes(query) ||
+              String(s.channel || "").toLowerCase().includes(query);
+     }).slice(0, limit);
+     sendJson(res, 200, { query, count: results.length, results });
+   } catch (error) { sendJson(res, 500, { error: error.message }); }
+   return;
+ }
+
+if (req.method === "POST" && pathname === "/api/chat") {
     try {
       const body = await parseBody(req);
       const message = String(body.message || "").trim();
@@ -1830,6 +1914,35 @@ if (req.method === "GET" && pathname === "/") {
 
 attachWsGateway({ server, agent, pathname: "/ws" });
 
+
+// ─── Session Auto-Compaction (every 10 min) ──────────────────────
+setInterval(() => {
+  try {
+    const sessions = agent.sessions.listSessions(200);
+    let compacted = 0;
+    for (const session of sessions) {
+      if (session.messageCount > 120) {
+        try {
+          const result = agent.sessions.compactSession(session.id, 80);
+          if (result.compacted) compacted++;
+        } catch {}
+      }
+    }
+    if (compacted > 0) {
+      agent.gateway.addEvent("session.auto_compacted", { count: compacted });
+    }
+  } catch {}
+}, 600000);
+
+// ─── Approval Auto-Expiry (every 5 min) ─────────────────────────
+setInterval(() => {
+  try {
+    const result = agent.gateway.expireOldApprovals(30);
+    if (result.expired > 0) {
+      agent.gateway.addEvent("approval.auto_expired", { count: result.expired });
+    }
+  } catch {}
+}, 300000);
 server.listen(port, () => {
   console.log(`OmniClaw listening on http://localhost:${port}`);
 });

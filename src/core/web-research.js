@@ -124,6 +124,51 @@ export class WebResearch {
     };
   }
 
+  // ─── HTML Search (DuckDuckGo Lite) ────────────────────────────
+  async searchHtml(query, maxResults = 8) {
+    const encoded = encodeURIComponent(query);
+    const url = `https://lite.duckduckgo.com/lite/?q=${encoded}&kl=wt-wt`;
+    const timeoutMs = Number(this.configStore?.getConfig?.()?.tools?.research?.timeoutMs || 10000);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(url, {
+        signal: controller.signal,
+        headers: {
+          "User-Agent": "Mozilla/5.0 (compatible; OmniClaw/0.1)",
+          Accept: "text/html",
+        },
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const html = await response.text();
+      // Parse results from DDG Lite HTML
+      const results = [];
+      const linkRegex = /<a[^>]+class="result-link"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+      const snippetRegex = /<td[^>]*class="result-snippet"[^>]*>([\s\S]*?)<\/td>/gi;
+      
+      // Fallback: parse any links with snippets
+      const rows = html.split(/<tr[^>]*>/);
+      for (const row of rows) {
+        if (results.length >= maxResults) break;
+        const linkMatch = row.match(/href="(https?:\/\/[^"]+)"/);
+        const titleMatch = row.match(/<a[^>]*>([\s\S]*?)<\/a>/);
+        if (linkMatch && titleMatch) {
+          const title = titleMatch[1].replace(/<[^>]+>/g, "").trim();
+          const href = linkMatch[1];
+          if (!title || href.includes("duckduckgo.com")) continue;
+          const snippetMatch = row.match(/class="result-snippet"[\s\S]*?>([\s\S]*?)<\/td>/);
+          const snippet = snippetMatch ? snippetMatch[1].replace(/<[^>]+>/g, "").trim() : "";
+          results.push({ title, snippet: snippet.slice(0, 300), url: href, source: "DuckDuckGo" });
+        }
+      }
+      return { query, provider: "duckduckgo-html", results };
+    } catch (error) {
+      return { query, provider: "duckduckgo-html", results: [{ title: "Search failed", snippet: error.message, url: "", source: "Error" }] };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   // ─── URL Fetch ────────────────────────────────────────────────
   async fetchUrl(url, maxChars = 5000) {
     const timeoutMs = Number(this.configStore?.getConfig?.()?.tools?.research?.timeoutMs || 10000);

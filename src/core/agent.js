@@ -8,7 +8,7 @@ import { Planner } from "./planner.js";
 import { ConfigStore } from "./config-store.js";
 import { TaskStore } from "./task-store.js";
 import { IntentEngine } from "./intent-engine.js";
-import { createProvider } from "./provider-factory.js";
+import { createProvider, getProvider } from "./provider-factory.js";
 import { FileStore } from "./file-store.js";
 import { ShellPlanner } from "./shell-planner.js";
 import { WebResearch } from "./web-research.js";
@@ -35,6 +35,8 @@ import { SummarizationEngine } from "./summarization-engine.js";
 import { BrowserOperator } from "./browser-operator.js";
 import { SystemMonitor } from "./system-monitor.js";
 import { V2FeatureHealth } from "./v2-feature-health.js";
+import { EventBus } from "./event-bus.js";
+import { Heartbeat } from "./heartbeat.js";
 
 function truncateAttachmentImport(value, maxChars = 12000) {
   const text = String(value || "").trim();
@@ -71,6 +73,7 @@ export class OmniClawAgent {
     this.memory = new MemoryStore(rootDir);
     this.sessions = new SessionStore(rootDir, this.config);
     this.gateway = new GatewayStore(rootDir);
+    this.gateway.agentRef = this;
     this.shellAudit = new ShellAuditStore(rootDir);
     this.connectors = new ConnectorStore(rootDir, { secretStore: this.secrets });
     this.jobs = new JobStore(rootDir);
@@ -128,6 +131,25 @@ export class OmniClawAgent {
       worker: this.worker,
       gatewayStore: this.gateway,
     });
+    this.eventBus = new EventBus();
+  this.heartbeat = new Heartbeat({ agent: this, intervalMs: 1800000 });
+  this.heartbeat.addCheck({ id: "memory-review", description: "Review and promote memory candidates", fn: (a) => a.memory.dreamSweep?.({ limit: 3, minScore: 0.7 }) });
+  this.heartbeat.addCheck({ id: "approval-expiry", description: "Expire old pending approvals", fn: (a) => a.gateway.expireOldApprovals?.(30) });
+  this.heartbeat.addCheck({ id: "session-cleanup", description: "Auto-compact large sessions", fn: (a) => { const sessions = a.sessions.listSessions(100); let compacted = 0; for (const s of sessions) { if (s.messageCount > 150) { try { a.sessions.compactSession(s.id, 80); compacted++; } catch {} } } return { compacted }; } });
+  this.heartbeat.start();
+
+  // ─── Load Workspace Identity Files ──────────────────────────────
+  this.workspaceIdentity = {};
+  const idFiles = ["SOUL.md", "USER.md", "MEMORY.md", "AGENTS.md", "IDENTITY.md"];
+  for (const fname of idFiles) {
+    try {
+      const fpath = path.join(this.rootDir, fname);
+      if (fs.existsSync(fpath)) {
+        this.workspaceIdentity[fname] = fs.readFileSync(fpath, "utf8").slice(0, 10000);
+      }
+    } catch {}
+  }
+
     this.telegramWorker = new TelegramPollingWorker({
       connectorStore: this.connectors,
       gatewayStore: this.gateway,

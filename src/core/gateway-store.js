@@ -82,6 +82,9 @@ export class GatewayStore {
     }
     this.write(data);
     this.emitter.emit("event", record);
+    if (this.agentRef && this.agentRef.eventBus) {
+      try { this.agentRef.eventBus.emit(event, record); } catch {}
+    }
     return record;
   }
 

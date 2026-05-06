@@ -3538,6 +3538,28 @@ form.addEventListener("submit", async (event) => {
 clearOutputButton?.addEventListener("click", () => {
   chatOutput.textContent = "Waiting for input...";
 });
+// ─── Keyboard Shortcuts ─────────────────────────────────────────
+if (messageInput) {
+ messageInput.addEventListener("keydown", (e) => {
+   if (e.key === "Enter" && !e.shiftKey) {
+     e.preventDefault();
+     form.dispatchEvent(new Event("submit", { cancelable: true }));
+   }
+ });
+}
+// Global shortcuts
+document.addEventListener("keydown", (e) => {
+ // Ctrl+Enter to send
+ if (e.ctrlKey && e.key === "Enter") {
+   e.preventDefault();
+   form.dispatchEvent(new Event("submit", { cancelable: true }));
+ }
+ // Escape to abort
+ if (e.key === "Escape" && activeChatController) {
+   activeChatController.abort();
+ }
+});
+
 
 abortRunButton?.addEventListener("click", () => {
   if (!activeChatController) {
@@ -4499,6 +4521,106 @@ function renderMarkdown(text) {
     .replace(/^- (.+)$/gm, '<li>$1</li>')
     .replace(/\n/g, '<br>');
 }
+
+// ─── Sidebar Navigation ─────────────────────────────────────────
+(function initSidebar() {
+  const sidebar = document.getElementById("sidebar");
+  const mainContent = document.getElementById("main-content");
+  const collapseBtn = document.getElementById("sidebar-collapse");
+  const mobileMenuBtn = document.getElementById("mobile-menu-btn");
+
+  if (collapseBtn && sidebar) {
+    collapseBtn.addEventListener("click", () => {
+      sidebar.classList.toggle("collapsed");
+      mainContent?.classList.toggle("sidebar-collapsed");
+    });
+  }
+  if (mobileMenuBtn && sidebar) {
+    mobileMenuBtn.addEventListener("click", () => {
+      sidebar.classList.toggle("mobile-open");
+    });
+    // Close sidebar on route change (mobile)
+    window.addEventListener("hashchange", () => {
+      sidebar.classList.remove("mobile-open");
+    });
+  }
+  // Highlight active nav link on route change
+  const observer = new MutationObserver(() => {
+    document.querySelectorAll(".sidebar-nav .nav-link").forEach((link) => {
+      const route = link.getAttribute("data-route");
+      const isActive = window.location.hash === "#" + route;
+      link.classList.toggle("active", isActive);
+    });
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+  window.addEventListener("hashchange", () => {
+    document.querySelectorAll(".sidebar-nav .nav-link").forEach((link) => {
+      const route = link.getAttribute("data-route");
+      link.classList.toggle("active", window.location.hash === "#" + route);
+    });
+  });
+  // Set initial active state
+  document.querySelectorAll(".sidebar-nav .nav-link").forEach((link) => {
+    const route = link.getAttribute("data-route");
+    link.classList.toggle("active", window.location.hash === "#" + route);
+  });
+})();
+
+// ─── Event Log Rendering ────────────────────────────────────────
+function renderEventLogEntry(event) {
+  const container = document.getElementById("event-log-entries");
+  if (!container) return;
+  const entry = document.createElement("div");
+  entry.className = "event-entry";
+  const time = event.at ? new Date(event.at).toLocaleTimeString() : new Date().toLocaleTimeString();
+  entry.innerHTML = '<span class="event-entry-time">' + escapeHtml(time) + "</span>" +
+    '<span class="event-entry-type">' + escapeHtml(event.event || event.type || "event") + "</span> " +
+    escapeHtml(JSON.stringify(event.data || {}).slice(0, 120));
+  container.prepend(entry);
+  // Keep last 100 entries
+  while (container.children.length > 100) container.removeChild(container.lastChild);
+}
+
+// ─── Loading Helpers ────────────────────────────────────────────
+function showLoading(element, message) {
+  if (!element) return;
+  element.innerHTML = '<div class="loading-overlay"><span class="spinner"></span> ' + escapeHtml(message || "Loading...") + "</div>";
+}
+function hideLoading(element) {
+  const overlay = element?.querySelector(".loading-overlay");
+  if (overlay) overlay.remove();
+}
+
+// ─── Safe Fetch with Error Handling + Retry ─────────────────────
+async function safeFetch(url, options = {}, retries = 1) {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const response = await fetch(url, options);
+      if (!response.ok) {
+        const errBody = await response.text().catch(() => "");
+        let errMsg;
+        try { errMsg = JSON.parse(errBody).error || response.statusText; } catch { errMsg = response.statusText; }
+        if (attempt < retries && (response.status >= 500 || response.status === 429)) {
+          await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
+          continue;
+        }
+        showToast("API Error: " + errMsg, "error");
+        throw new Error(errMsg);
+      }
+      return response;
+    } catch (error) {
+      if (attempt < retries && error.name !== "AbortError") {
+        await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
+        continue;
+      }
+      if (error.name !== "AbortError") {
+        showToast("Connection error: " + error.message, "error");
+      }
+      throw error;
+    }
+  }
+}
+
 
 // ─── SSE Streaming Chat ──────────────────────────────────────────
 async function sendStreamingChat(message, sessionId, label, agentId) {
