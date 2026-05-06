@@ -1181,6 +1181,30 @@ h3 {
   border-left: 3px solid var(--accent);
 }
 
+.live-run-output {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid rgba(23, 25, 29, 0.08);
+  border-radius: 8px;
+  background: var(--surface-muted);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.live-run-header {
+  color: var(--text-strong);
+  font-weight: 700;
+}
+
+.live-run-list {
+  display: grid;
+  gap: 4px;
+  max-height: 120px;
+  overflow: auto;
+}
+
 .chat-transcript {
   min-height: 340px;
   max-height: 520px;

@@ -121,6 +121,37 @@ function createToolTraceId() {
   return `tool_trace_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function classifyProviderOutcome(text = "") {
+  const message = String(text || "").trim();
+  if (!message) {
+    return {
+      ok: false,
+      reason: "empty_response",
+      message: "Provider returned an empty response.",
+    };
+  }
+  const lower = message.toLowerCase();
+  const failurePatterns = [
+    ["missing_api_key", "api key missing"],
+    ["missing_api_key", "no api key"],
+    ["auth_required", "codex login"],
+    ["auth_required", "authentication"],
+    ["rate_limited", "429"],
+    ["provider_request_failed", "provider request failed"],
+    ["provider_connection_failed", "provider connection failed"],
+    ["provider_connection_failed", "request failed"],
+    ["cli_failed", "codex cli provider failed"],
+    ["cli_not_ready", "codex cli bridge is selected"],
+    ["empty_response", "provider returned an empty response"],
+  ];
+  const match = failurePatterns.find(([, pattern]) => lower.includes(pattern));
+  return {
+    ok: !match,
+    reason: match?.[0] || "ok",
+    message: match ? truncateTraceText(message, 1000) : "",
+  };
+}
+
 export class OmniClawAgent {
   constructor({ rootDir }) {
     this.rootDir = rootDir;
@@ -2182,7 +2213,23 @@ export class OmniClawAgent {
       });
       const runtimeToolReply = this.buildRuntimeToolReply({ intents, toolOutputs });
       let response = forcedResponse || runtimeToolReply;
+      let providerDiagnostics = null;
       if (!response) {
+        const providerStartedAt = new Date().toISOString();
+        const providerInfo = this.provider.getInfo?.() || {};
+        this.gateway.updateRun(run.id, {
+          providerStatus: "running",
+          provider: providerInfo,
+          providerStartedAt,
+        });
+        this.gateway.addEvent("provider.started", {
+          runId: run.id,
+          sessionId: session.id,
+          agentId: routedAgent.id,
+          providerId: providerInfo.id || "unknown",
+          model: providerInfo.model || "",
+          ready: providerInfo.ready !== false,
+        });
         const providerResponse = await this.provider.respond({
           message,
           intents,
@@ -2200,6 +2247,32 @@ export class OmniClawAgent {
           tasks: contextBundle.tasks,
           tools: contextBundle.tools,
           contextBundle,
+        });
+        const outcome = classifyProviderOutcome(providerResponse);
+        providerDiagnostics = {
+          ok: outcome.ok,
+          status: outcome.ok ? "completed" : "failed",
+          reason: outcome.reason,
+          message: outcome.message,
+          providerId: providerInfo.id || "unknown",
+          model: providerInfo.model || "",
+          ready: providerInfo.ready !== false,
+          startedAt: providerStartedAt,
+          completedAt: new Date().toISOString(),
+          durationMs: Date.now() - Date.parse(providerStartedAt),
+        };
+        this.gateway.updateRun(run.id, {
+          providerStatus: providerDiagnostics.status,
+          providerDiagnostics,
+        });
+        this.gateway.addEvent(outcome.ok ? "provider.completed" : "provider.failed", {
+          runId: run.id,
+          sessionId: session.id,
+          agentId: routedAgent.id,
+          providerId: providerDiagnostics.providerId,
+          model: providerDiagnostics.model,
+          reason: providerDiagnostics.reason,
+          durationMs: providerDiagnostics.durationMs,
         });
         response = this.buildProviderFailureFallback({
           providerResponse,
@@ -2230,6 +2303,7 @@ export class OmniClawAgent {
         completedAt: assistantAt,
         toolOutputs,
         reply: response,
+        providerDiagnostics,
         approvalIds: approvals.map((item) => item.id),
       });
       this.gateway.addEvent("agent.completed", {
@@ -2278,9 +2352,11 @@ export class OmniClawAgent {
         toolOutputs,
         approvals,
         provider: this.provider.getInfo(),
+        providerDiagnostics,
       };
     } catch (error) {
       const failedAt = new Date().toISOString();
+      const providerInfo = this.provider.getInfo?.() || {};
       this.sessions.finishRun(session.id, run.id, {
         status: "error",
         at: failedAt,
@@ -2290,12 +2366,30 @@ export class OmniClawAgent {
         status: "failed",
         completedAt: failedAt,
         error: error.message,
+        providerStatus: "failed",
+        providerDiagnostics: {
+          ok: false,
+          status: "failed",
+          reason: "runtime_exception",
+          message: truncateTraceText(error.message, 1000),
+          providerId: providerInfo.id || "unknown",
+          model: providerInfo.model || "",
+          completedAt: failedAt,
+        },
       });
       this.gateway.addEvent("agent.failed", {
         runId: run.id,
         sessionId: session.id,
         agentId: routedAgent.id,
         error: error.message,
+      });
+      this.gateway.addEvent("provider.failed", {
+        runId: run.id,
+        sessionId: session.id,
+        agentId: routedAgent.id,
+        providerId: providerInfo.id || "unknown",
+        model: providerInfo.model || "",
+        reason: "runtime_exception",
       });
       throw error;
     }

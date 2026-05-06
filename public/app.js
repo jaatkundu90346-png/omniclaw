@@ -7,6 +7,7 @@ const agentSelect = document.querySelector("#agent-select");
 const messageInput = document.querySelector("#message");
 const chatOutput = document.querySelector("#chat-output");
 const chatTranscript = document.querySelector("#chat-transcript");
+const liveRunOutput = document.querySelector("#live-run-output");
 const clearOutputButton = document.querySelector("#clear-output");
 const abortRunButton = document.querySelector("#abort-run");
 const globalSearchInput = document.querySelector("#global-search");
@@ -191,6 +192,9 @@ let latestMediaInstallPlan = null;
 let designBridgeLoaded = false;
 let latestGatewayToken = "";
 let activeChatController = null;
+let activeRunId = "";
+let activeRunEvents = [];
+let activeRunStartedAt = 0;
 
 function escapeHtml(value) {
   return String(value == null ? "" : value)
@@ -668,6 +672,17 @@ function formatChatResponse(data) {
     data.reply || "(no reply)",
   ];
 
+  if (data.providerDiagnostics) {
+    const diag = data.providerDiagnostics;
+    lines.push(
+      "",
+      `PROVIDER STATUS ${diag.status || "unknown"}${diag.reason ? ` | ${diag.reason}` : ""}${diag.durationMs ? ` | ${diag.durationMs}ms` : ""}`,
+    );
+    if (diag.message) {
+      lines.push(diag.message);
+    }
+  }
+
   if (Array.isArray(data.intents) && data.intents.length > 0) {
     lines.push("", `INTENTS ${data.intents.join(", ")}`);
   }
@@ -694,6 +709,54 @@ function formatChatResponse(data) {
   }
 
   return lines.join("\n");
+}
+
+function resetLiveRunTimeline(message = "Starting gateway run...") {
+  activeRunId = "";
+  activeRunEvents = [];
+  activeRunStartedAt = Date.now();
+  renderLiveRunTimeline(message);
+}
+
+function renderLiveRunTimeline(fallback = "No active run.") {
+  if (!liveRunOutput) {
+    return;
+  }
+  const elapsed = activeRunStartedAt ? Math.max(0, Math.round((Date.now() - activeRunStartedAt) / 1000)) : 0;
+  const header = activeRunId ? `Live run ${activeRunId} | ${elapsed}s` : fallback;
+  const items = activeRunEvents.slice(-12).map((record) => {
+    const payload = record.payload || {};
+    const tool = payload.tool ? ` | ${payload.tool}` : "";
+    const provider = payload.providerId ? ` | ${payload.providerId}${payload.model ? `/${payload.model}` : ""}` : "";
+    const status = payload.status ? ` | ${payload.status}` : "";
+    const reason = payload.reason ? ` | ${payload.reason}` : "";
+    const time = record.at ? formatDate(record.at) : "now";
+    return `${time}  ${record.event || record.type}${tool}${provider}${status}${reason}`;
+  });
+  liveRunOutput.innerHTML = [
+    `<div class="live-run-header">${escapeHtml(header)}</div>`,
+    `<div class="live-run-list">${items.length ? items.map((item) => `<div>${escapeHtml(item)}</div>`).join("") : `<div>${escapeHtml(fallback)}</div>`}</div>`,
+  ].join("");
+}
+
+function trackLiveRunEvent(record) {
+  if (!activeChatController) {
+    return;
+  }
+  const payload = record.payload || {};
+  const runId = payload.runId || "";
+  const interesting = /^(agent|tool|model_tool_loop|provider|context|shell|terminal|approval|run)\./.test(record.event || "");
+  if (!interesting) {
+    return;
+  }
+  if (!activeRunId && runId) {
+    activeRunId = runId;
+  }
+  if (activeRunId && runId && runId !== activeRunId) {
+    return;
+  }
+  activeRunEvents.push(record);
+  renderLiveRunTimeline("Waiting for first gateway event...");
 }
 
 async function fetchPromptTrace(runId) {
@@ -1160,6 +1223,11 @@ function renderRuns(gateway) {
           : "";
         const summary = truncate(executionSummary || item.reply || item.message || "No reply body", 120);
         const shellMeta = shellExecution ? ` | shell ${shellExecution.status}` : "";
+        const providerMeta = item.providerDiagnostics
+          ? ` | provider ${item.providerDiagnostics.status || "unknown"}${item.providerDiagnostics.reason ? `/${item.providerDiagnostics.reason}` : ""}`
+          : item.providerStatus
+            ? ` | provider ${item.providerStatus}`
+            : "";
         return [
           `<div class="stack-item">`,
           `<div class="row-top">`,
@@ -1167,7 +1235,7 @@ function renderRuns(gateway) {
           statusPill(item.status || "unknown", tone),
           `</div>`,
           `<p>${escapeHtml(summary)}</p>`,
-          `<small>${escapeHtml(`${item.id} | ${item.agentId || "main"} | ${item.channel || "webchat"} | ${wait}${shellMeta}`)}</small>`,
+          `<small>${escapeHtml(`${item.id} | ${item.agentId || "main"} | ${item.channel || "webchat"} | ${wait}${shellMeta}${providerMeta}`)}</small>`,
           `<div class="hero-actions"><button type="button" class="button button-ghost button-small" data-prompt-trace-run="${escapeHtml(item.id)}" ${item.promptTrace ? "" : "disabled"}>Prompt</button><button type="button" class="button button-ghost button-small" data-tool-trace-run="${escapeHtml(item.id)}" ${item.toolTrace ? "" : "disabled"}>Tools${item.toolTraceCount ? ` ${escapeHtml(String(item.toolTraceCount))}` : ""}</button></div>`,
           `</div>`,
         ].join("");
@@ -3563,6 +3631,7 @@ function openEventStream() {
       const record = JSON.parse(event.data);
       if (record.type !== "hello") {
         heroLastEvent.textContent = `Last event: ${record.event || record.type} at ${formatDate(record.at)}.`;
+        trackLiveRunEvent(record);
       }
     } catch {
       heroLastEvent.textContent = "Live event received.";
@@ -3593,6 +3662,7 @@ form.addEventListener("submit", async (event) => {
     abortRunButton.disabled = false;
   }
   chatOutput.textContent = "Running through the gateway...";
+  resetLiveRunTimeline("Waiting for gateway acceptance...");
 
   const selected = selectedSessionSummary();
   const payload = {
@@ -3621,6 +3691,10 @@ form.addEventListener("submit", async (event) => {
     });
 
     const data = await response.json();
+    if (data.run?.id) {
+      activeRunId = data.run.id;
+      renderLiveRunTimeline("Run completed.");
+    }
     chatOutput.textContent = formatChatResponse(data);
     messageInput.value = "";
     if (data.run?.id) {
@@ -3650,6 +3724,10 @@ form.addEventListener("submit", async (event) => {
 
 clearOutputButton?.addEventListener("click", () => {
   chatOutput.textContent = "Waiting for input...";
+  activeRunId = "";
+  activeRunEvents = [];
+  activeRunStartedAt = 0;
+  renderLiveRunTimeline("No active run.");
 });
 // ─── Keyboard Shortcuts ─────────────────────────────────────────
 if (messageInput) {
