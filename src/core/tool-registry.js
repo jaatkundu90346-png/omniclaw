@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import path from "node:path";
+
 function normalizeContext(context = {}) {
   if (typeof context === "string") {
     return {
@@ -6,6 +9,39 @@ function normalizeContext(context = {}) {
   }
 
   return context && typeof context === "object" ? context : {};
+}
+
+function slugify(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "openclaw-skill";
+}
+
+function parseOpenClawSkill(contents, filePath, rootDir) {
+  const text = String(contents || "");
+  const meta = {};
+  let body = text;
+  const match = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
+  if (match) {
+    body = text.slice(match[0].length);
+    for (const line of match[1].split(/\r?\n/)) {
+      const item = line.match(/^([a-zA-Z0-9_-]+):\s*(.*)$/);
+      if (item) {
+        meta[item[1].toLowerCase()] = item[2].replace(/^["']|["']$/g, "").trim();
+      }
+    }
+  }
+  const relativePath = path.relative(rootDir, filePath).replace(/\\/g, "/");
+  const directoryName = path.basename(path.dirname(filePath));
+  return {
+    name: meta.name || directoryName,
+    description: meta.description || "",
+    path: relativePath,
+    absolutePath: filePath,
+    source: relativePath.startsWith("vendor/openclaw/extensions/") ? "extensions" : "skills",
+    instructions: body.trim(),
+  };
 }
 
 export class ToolRegistry {
@@ -613,6 +649,24 @@ export class ToolRegistry {
             agentId: input.agentId || this.getAgentId(context),
           }),
       },
+      openclaw_vendor_status: {
+        description: "Inspect the vendored OpenClaw reference checkout and license metadata.",
+        permission: null,
+        group: "openclaw",
+        run: async () => this.getOpenClawVendorStatus(),
+      },
+      openclaw_skill_scan: {
+        description: "Scan vendored OpenClaw SKILL.md files for possible OmniClaw imports.",
+        permission: null,
+        group: "openclaw",
+        run: async (input = {}) => this.scanOpenClawSkills(input),
+      },
+      openclaw_skill_import: {
+        description: "Import one vendored OpenClaw SKILL.md into OmniClaw's local .skill format.",
+        permission: "allowSkillWrite",
+        group: "openclaw",
+        run: async (input = {}, context) => this.importOpenClawSkill(input, context),
+      },
       update_runtime_settings: {
         description: "Update OmniClaw runtime profile or provider mode.",
         permission: "allowConfigWrite",
@@ -1176,6 +1230,149 @@ export class ToolRegistry {
       promptPreview: String(prompt || "").slice(0, 180),
       message: `${tool} is registered for OpenClaw compatibility, but no media provider plugin is configured yet.`,
       nextUpgrade: "Add provider-backed image/music/video/TTS plugins and route these tools to them.",
+    };
+  }
+
+  getRootDir() {
+    return this.agentRuntime?.rootDir || this.fileStore?.rootDir || process.cwd();
+  }
+
+  getOpenClawRoot() {
+    return path.join(this.getRootDir(), "vendor", "openclaw");
+  }
+
+  getOpenClawVendorStatus() {
+    const root = this.getOpenClawRoot();
+    const packagePath = path.join(root, "package.json");
+    const licensePath = path.join(root, "LICENSE");
+    const gitPath = path.join(root, ".git");
+    const packageJson = fs.existsSync(packagePath)
+      ? JSON.parse(fs.readFileSync(packagePath, "utf8"))
+      : {};
+    return {
+      available: fs.existsSync(root),
+      path: root,
+      gitLinked: fs.existsSync(gitPath),
+      packageName: packageJson.name || "",
+      version: packageJson.version || "",
+      license: packageJson.license || (fs.existsSync(licensePath) ? "present" : ""),
+      docsPresent: fs.existsSync(path.join(root, "docs")),
+      skillsPresent: fs.existsSync(path.join(root, "skills")),
+      extensionsPresent: fs.existsSync(path.join(root, "extensions")),
+      recommendedMode: "reference-submodule",
+      nextActions: [
+        "Use openclaw_skill_scan to find donor skills.",
+        "Use openclaw_skill_import for selected skills only.",
+        "Use docs/OPENCLAW_TO_OMNICLAW_TRANSPLANT_MAP.md for layer-by-layer runtime work.",
+      ],
+    };
+  }
+
+  walkOpenClawSkillFiles(dir, output = []) {
+    if (!fs.existsSync(dir)) {
+      return output;
+    }
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const absolutePath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (["node_modules", ".git", "dist"].includes(entry.name)) {
+          continue;
+        }
+        this.walkOpenClawSkillFiles(absolutePath, output);
+      } else if (entry.isFile() && entry.name === "SKILL.md") {
+        output.push(absolutePath);
+      }
+    }
+    return output;
+  }
+
+  getOpenClawSkillFiles(source = "skills") {
+    const root = this.getOpenClawRoot();
+    const normalized = String(source || "skills").trim().toLowerCase();
+    const roots = [];
+    if (normalized === "skills" || normalized === "all") {
+      roots.push(path.join(root, "skills"));
+    }
+    if (normalized === "extensions" || normalized === "all") {
+      roots.push(path.join(root, "extensions"));
+    }
+    return roots.flatMap((item) => this.walkOpenClawSkillFiles(item));
+  }
+
+  scanOpenClawSkills({ query = "", source = "skills", limit = 40 } = {}) {
+    const rootDir = this.getRootDir();
+    const normalizedQuery = String(query || "").trim().toLowerCase();
+    const safeLimit = Math.max(1, Math.min(Number(limit) || 40, 200));
+    const skills = this.getOpenClawSkillFiles(source)
+      .map((filePath) => parseOpenClawSkill(fs.readFileSync(filePath, "utf8"), filePath, rootDir))
+      .filter((skill) => {
+        if (!normalizedQuery) {
+          return true;
+        }
+        return [skill.name, skill.description, skill.path].join(" ").toLowerCase().includes(normalizedQuery);
+      })
+      .sort((left, right) => left.name.localeCompare(right.name))
+      .slice(0, safeLimit)
+      .map(({ absolutePath, instructions, ...skill }) => ({
+        ...skill,
+        instructionChars: instructions.length,
+      }));
+    return {
+      source,
+      query,
+      count: skills.length,
+      skills,
+    };
+  }
+
+  importOpenClawSkill(input = {}, context = {}) {
+    const rootDir = this.getRootDir();
+    const requestedPath = String(input.path || "").trim().replace(/\\/g, "/");
+    const requestedName = String(input.name || "").trim().toLowerCase();
+    const matches = this.getOpenClawSkillFiles(input.source || "all")
+      .map((filePath) => parseOpenClawSkill(fs.readFileSync(filePath, "utf8"), filePath, rootDir))
+      .filter((skill) => {
+        if (requestedPath) {
+          return skill.path === requestedPath || skill.path.endsWith(`/${requestedPath}`);
+        }
+        return requestedName && skill.name.toLowerCase() === requestedName;
+      });
+
+    if (matches.length === 0) {
+      throw new Error("OpenClaw skill not found. Use openclaw_skill_scan first and pass the exact path.");
+    }
+    if (matches.length > 1) {
+      return {
+        imported: false,
+        reason: "Multiple skills matched. Pass exact path.",
+        matches: matches.map((skill) => ({ name: skill.name, path: skill.path, description: skill.description })),
+      };
+    }
+
+    const skill = matches[0];
+    const triggers = Array.isArray(input.triggers) && input.triggers.length > 0
+      ? input.triggers
+      : [skill.name, ...skill.name.split(/[-_\s]+/)].map((item) => item.trim()).filter(Boolean);
+    const imported = this.customizationEngine.createSkill({
+      name: input.importName || `OpenClaw ${skill.name}`,
+      triggers: [...new Set(triggers.map((item) => item.toLowerCase()))],
+      description: input.description || `Imported from OpenClaw ${skill.path}. ${skill.description}`.trim(),
+      instructions: [
+        `Imported from OpenClaw vendor path: ${skill.path}`,
+        "",
+        skill.instructions,
+      ].join("\n"),
+      agentId: input.agentId || this.getAgentId(context),
+    });
+    return {
+      imported: true,
+      source: {
+        name: skill.name,
+        path: skill.path,
+        description: skill.description,
+      },
+      target: imported,
+      id: slugify(input.importName || `OpenClaw ${skill.name}`),
     };
   }
 }

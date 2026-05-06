@@ -16,6 +16,7 @@ OmniClaw runtime tools include:
 - browser, browser_status, browser_screenshot, browser_text, and open_browser_url for browser automation / URL fetch
 - run_terminal_command and plan_shell_command through governed shell execution and audit logs
 - sandbox_status, sandbox_run, and sandbox_apply for temp-workspace dry runs before applying changes
+- openclaw_vendor_status, openclaw_skill_scan, and openclaw_skill_import for using the vendored OpenClaw reference safely
 - message, sessions_list, sessions_history, sessions_send, sessions_spawn, sessions_yield, session_status
 - subagents and agents_list
 - nodes, cron, gateway
