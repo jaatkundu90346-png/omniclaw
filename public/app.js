@@ -4522,50 +4522,6 @@ function renderMarkdown(text) {
     .replace(/\n/g, '<br>');
 }
 
-// ─── Sidebar Navigation ─────────────────────────────────────────
-(function initSidebar() {
-  const sidebar = document.getElementById("sidebar");
-  const mainContent = document.getElementById("main-content");
-  const collapseBtn = document.getElementById("sidebar-collapse");
-  const mobileMenuBtn = document.getElementById("mobile-menu-btn");
-
-  if (collapseBtn && sidebar) {
-    collapseBtn.addEventListener("click", () => {
-      sidebar.classList.toggle("collapsed");
-      mainContent?.classList.toggle("sidebar-collapsed");
-    });
-  }
-  if (mobileMenuBtn && sidebar) {
-    mobileMenuBtn.addEventListener("click", () => {
-      sidebar.classList.toggle("mobile-open");
-    });
-    // Close sidebar on route change (mobile)
-    window.addEventListener("hashchange", () => {
-      sidebar.classList.remove("mobile-open");
-    });
-  }
-  // Highlight active nav link on route change
-  const observer = new MutationObserver(() => {
-    document.querySelectorAll(".sidebar-nav .nav-link").forEach((link) => {
-      const route = link.getAttribute("data-route");
-      const isActive = window.location.hash === "#" + route;
-      link.classList.toggle("active", isActive);
-    });
-  });
-  observer.observe(document.body, { childList: true, subtree: true });
-  window.addEventListener("hashchange", () => {
-    document.querySelectorAll(".sidebar-nav .nav-link").forEach((link) => {
-      const route = link.getAttribute("data-route");
-      link.classList.toggle("active", window.location.hash === "#" + route);
-    });
-  });
-  // Set initial active state
-  document.querySelectorAll(".sidebar-nav .nav-link").forEach((link) => {
-    const route = link.getAttribute("data-route");
-    link.classList.toggle("active", window.location.hash === "#" + route);
-  });
-})();
-
 // ─── Event Log Rendering ────────────────────────────────────────
 function renderEventLogEntry(event) {
   const container = document.getElementById("event-log-entries");
