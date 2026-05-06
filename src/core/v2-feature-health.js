@@ -61,6 +61,7 @@ export class V2FeatureHealth {
     const agents = runtime.agents.getAll();
     const pluginTools = runtime.plugins.getToolDefinitions();
     const modelToolLoop = runtime.getModelToolLoopSettings?.() || {};
+    const sandboxStatus = runtime.sandboxRunner?.getStatus?.() || {};
     const browserStatus = runtime.browserOperator?.getStatus?.() || {};
     const browserAutomationReady = Boolean(
       toolIds.has("browser")
@@ -202,13 +203,22 @@ export class V2FeatureHealth {
       }),
       feature({
         id: "trust-sandbox",
-        name: "Trust + sandbox governance",
+        name: "Trust + governed sandbox",
         layer: "safety",
-        status: trust?.gateway?.configured || shellPolicy.enabled ? "partial" : "missing",
+        status: trust?.gateway?.configured && shellPolicy.enabled && sandboxStatus.enabled && toolIds.has("sandbox_run") && toolIds.has("sandbox_apply") ? "ready" : trust?.gateway?.configured || shellPolicy.enabled ? "partial" : "missing",
         priority: "high",
-        evidence: [`trustedDevices=${trust?.trustedDevices || 0}`, `shellEnabled=${shellPolicy.enabled}`],
-        gaps: ["Hard container/VM sandbox is not implemented."],
-        nextAction: "Add isolated runner for high-risk commands and filesystem writes.",
+        evidence: [
+          `trustedDevices=${trust?.trustedDevices || 0}`,
+          `shellEnabled=${shellPolicy.enabled}`,
+          `sandbox=${Boolean(sandboxStatus.enabled)}`,
+          `isolation=${sandboxStatus.isolation || "none"}`,
+          `sandbox_run=${toolIds.has("sandbox_run")}`,
+          `sandbox_apply=${toolIds.has("sandbox_apply")}`,
+        ],
+        gaps: sandboxStatus.capabilities?.vmIsolation ? [] : ["VM/container isolation is not implemented; sandbox is a temp workspace copy with explicit apply."],
+        nextAction: sandboxStatus.enabled
+          ? "Add optional VM/container backend and per-risk UI approval prompts."
+          : "Enable tools.sandbox and expose sandbox_run/sandbox_apply.",
       }),
       feature({
         id: "windows-packaging",

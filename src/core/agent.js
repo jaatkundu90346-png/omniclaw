@@ -35,6 +35,7 @@ import { SummarizationEngine } from "./summarization-engine.js";
 import { BrowserOperator } from "./browser-operator.js";
 import { SystemMonitor } from "./system-monitor.js";
 import { V2FeatureHealth } from "./v2-feature-health.js";
+import { SandboxRunner } from "./sandbox-runner.js";
 import { EventBus } from "./event-bus.js";
 import { Heartbeat } from "./heartbeat.js";
 import { McpRegistry } from "./mcp-client.js";
@@ -103,6 +104,10 @@ export class OmniClawAgent {
     });
     this.contextEngine = new ContextEngine(this.config);
     this.browserOperator = new BrowserOperator({ rootDir });
+    this.sandboxRunner = new SandboxRunner({
+      rootDir,
+      configStore: this.config,
+    });
     this.systemMonitor = new SystemMonitor();
     this.v2Health = new V2FeatureHealth(this);
 
@@ -114,6 +119,7 @@ export class OmniClawAgent {
       shellPlanner: this.shellPlanner,
       webResearch: this.webResearch,
       browserOperator: this.browserOperator,
+      sandboxRunner: this.sandboxRunner,
       systemMonitor: this.systemMonitor,
       taskRunner: this.taskRunner,
       customizationEngine: this.customizationEngine,

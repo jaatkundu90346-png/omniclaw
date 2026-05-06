@@ -202,6 +202,9 @@
         "delete_computer_path",
         "open_browser_url",
         "run_terminal_command",
+        "sandbox_status",
+        "sandbox_run",
+        "sandbox_apply",
         "exec",
         "process",
         "code_execution",
@@ -337,6 +340,36 @@
         "^winget\\s+search\\b",
         "^Get-Date$",
         "^pwd$"
+      ],
+      "blockedPatterns": [
+        "\\brm\\s+-rf\\b",
+        "\\bRemove-Item\\b[\\s\\S]*-Recurse\\b[\\s\\S]*-Force\\b",
+        "\\bdel\\s+/[sq]\\b",
+        "\\brmdir\\s+/[sq]\\b",
+        "\\bformat\\b",
+        "\\bdiskpart\\b",
+        "\\bshutdown\\b",
+        "\\bRestart-Computer\\b",
+        "\\bgit\\s+reset\\s+--hard\\b",
+        "\\bgit\\s+clean\\s+-fd\\b"
+      ]
+    },
+    "sandbox": {
+      "enabled": true,
+      "timeoutMs": 30000,
+      "maxOutputBytes": 20000,
+      "maxCopyBytes": 26214400,
+      "maxFileBytes": 2097152,
+      "defaultPaths": [
+        "."
+      ],
+      "excludePatterns": [
+        "^\\.git(?:/|$)",
+        "^node_modules(?:/|$)",
+        "^data(?:/|$)",
+        "^dist(?:/|$)",
+        "^\\.next(?:/|$)",
+        "^src-tauri/target(?:/|$)"
       ],
       "blockedPatterns": [
         "\\brm\\s+-rf\\b",

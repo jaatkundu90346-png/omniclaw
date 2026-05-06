@@ -17,6 +17,7 @@ export class ToolRegistry {
     shellPlanner,
     webResearch,
     browserOperator,
+    sandboxRunner,
     systemMonitor,
     taskRunner,
     customizationEngine,
@@ -32,6 +33,7 @@ export class ToolRegistry {
     this.shellPlanner = shellPlanner;
     this.webResearch = webResearch;
     this.browserOperator = browserOperator;
+    this.sandboxRunner = sandboxRunner;
     this.systemMonitor = systemMonitor;
     this.taskRunner = taskRunner;
     this.customizationEngine = customizationEngine;
@@ -449,6 +451,7 @@ export class ToolRegistry {
               cwd: shellPolicy.cwd || ".",
               timeoutMs: shellPolicy.timeoutMs || 15000,
             },
+            sandbox: this.sandboxRunner?.getStatus?.() || {},
             browser: {
               openUrl: true,
               readUrl: true,
@@ -564,6 +567,24 @@ export class ToolRegistry {
                 context,
               })
             : this.shellPlanner.buildRequest(String(command || "").trim(), "Terminal execution requested."),
+      },
+      sandbox_status: {
+        description: "Show the governed temp-workspace sandbox status, limits, and capabilities.",
+        permission: null,
+        group: "safety",
+        run: async () => this.sandboxRunner?.getStatus?.() || { enabled: false },
+      },
+      sandbox_run: {
+        description: "Run a shell command in an isolated temp workspace copy and report changed files without touching the real workspace.",
+        permission: "allowShellExecution",
+        group: "safety",
+        run: async (input = {}) => this.sandboxRunner.run(input),
+      },
+      sandbox_apply: {
+        description: "Apply selected changed files from a sandbox run into the real workspace.",
+        permission: "allowFileWrite",
+        group: "safety",
+        run: async (input = {}) => this.sandboxRunner.apply(input),
       },
       list_processes: {
         description: "List currently running system processes (Windows).",

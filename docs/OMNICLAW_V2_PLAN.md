@@ -37,6 +37,13 @@ This pass adds the V2 control layer:
 - Screenshots are saved as artifacts under `data/generated/browser-screenshots`.
 - V2 health now scores browser automation from real tool/capability evidence.
 
+## V2.3 Added
+
+- Governed sandbox runner that copies selected workspace paths into a temporary workspace.
+- `sandbox_run` executes commands inside the copy and reports added/modified/deleted files without touching the real workspace.
+- `sandbox_apply` copies selected added/modified files back into the real workspace only after an explicit apply call.
+- Known destructive system commands stay blocked even inside the sandbox.
+
 ## Current V2 Milestones
 
 1. V2.1 Provider-native repeated tool calling
@@ -52,7 +59,7 @@ This pass adds the V2 control layer:
    Wire image/video/music/TTS tools to real provider plugins and return artifact paths/URLs.
 
 5. V2.5 Hard sandbox
-   Add isolated runner for high-risk shell/file actions and stronger approval UX.
+   Initial temp-workspace sandbox runner is implemented. Future work: optional VM/container backend and stronger per-risk approval UX.
 
 6. V2.6 Semantic memory
    Index transcripts and memory for queryable long-term recall.

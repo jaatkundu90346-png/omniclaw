@@ -15,6 +15,7 @@ OmniClaw runtime tools include:
 - delete_computer_path, which moves deleted items to data/trash unless permanent delete is explicitly enabled
 - browser, browser_status, browser_screenshot, browser_text, and open_browser_url for browser automation / URL fetch
 - run_terminal_command and plan_shell_command through governed shell execution and audit logs
+- sandbox_status, sandbox_run, and sandbox_apply for temp-workspace dry runs before applying changes
 - message, sessions_list, sessions_history, sessions_send, sessions_spawn, sessions_yield, session_status
 - subagents and agents_list
 - nodes, cron, gateway
