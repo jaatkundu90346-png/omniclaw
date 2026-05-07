@@ -3118,9 +3118,10 @@ export class OmniClawAgent {
       return [
         "Computer access status ready hai.",
         `Allowed roots: ${(access.allowedRoots || []).join(", ") || "none"}.`,
-        `Files: write ${access.allowWrite ? "on" : "off"}, delete ${access.allowDelete ? "on" : "off"} (${access.deleteMode || "recoverable mode"}).`,
+        `Files: write/copy/move ${access.allowWrite ? "on" : "off"}, delete ${access.allowDelete ? "on" : "off"} (${access.deleteMode || "recoverable mode"}).`,
         `Terminal: ${access.terminal?.enabled ? "on" : "off"} with ${access.terminal?.trustLevel || "unknown"} trust.`,
         `Browser: open URL ${access.browser?.openUrl ? "on" : "off"}, read URL ${access.browser?.readUrl ? "on" : "off"}.`,
+        `Recent computer operations: ${access.operations?.recent?.length || 0}.`,
       ].join(" ");
     }
 

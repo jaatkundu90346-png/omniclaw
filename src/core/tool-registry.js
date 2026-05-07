@@ -419,6 +419,9 @@ export class ToolRegistry {
               "read",
               "write",
               "edit",
+              "copy_computer_path",
+              "move_computer_path",
+              "computer_access_audit",
               "sessions_list",
               "sessions_history",
               "memory_search",
@@ -481,7 +484,7 @@ export class ToolRegistry {
                 : "Offline task engine is active; connect BYOK/API key for the real LLM brain.",
               hands: [
                 "safe shell execution",
-                "file read/write inside protected roots",
+                "file read/write/copy/move/delete inside protected roots",
                 "build/test/release commands",
                 "task runner",
                 "plugins",
@@ -562,6 +565,7 @@ export class ToolRegistry {
           const config = this.configStore.getConfig();
           const policy = this.getComputerAccessPolicy();
           const shellPolicy = config.tools?.shellExecution || {};
+          const recentOperations = this.getComputerAccessAudit(8);
           return {
             enabled: policy.enabled,
             allowedRoots: policy.allowedRoots,
@@ -582,48 +586,107 @@ export class ToolRegistry {
               readUrl: true,
               automation: this.browserOperator.getStatus?.() || {},
             },
+            operations: {
+              available: [
+                "list_computer_directory",
+                "read_computer_file",
+                "write_computer_file",
+                "create_computer_directory",
+                "copy_computer_path",
+                "move_computer_path",
+                "delete_computer_path",
+              ],
+              recent: recentOperations,
+            },
           };
         },
+      },
+      computer_access_audit: {
+        description: "List recent governed computer-access operations captured in the gateway audit feed.",
+        permission: "allowComputerAccess",
+        run: async ({ limit }) => ({
+          operations: this.getComputerAccessAudit(Number(limit || 25)),
+        }),
       },
       list_computer_directory: {
         description: "List files from configured laptop access roots such as the user home folder.",
         permission: "allowComputerAccess",
-        run: async ({ path }) => this.fileStore.listComputerDirectory(path || "~", this.requireComputerAccessPolicy()),
+        run: async ({ path }, context) => {
+          const result = this.fileStore.listComputerDirectory(path || "~", this.requireComputerAccessPolicy());
+          this.recordComputerAccessOperation("list", result, context);
+          return result;
+        },
       },
       read_computer_file: {
         description: "Read a text file from configured laptop access roots.",
         permission: "allowComputerAccess",
-        run: async ({ path }) => {
+        run: async ({ path }, context) => {
           const config = this.configStore.getConfig();
-          return this.fileStore.readComputerText(
+          const result = this.fileStore.readComputerText(
             path,
             config.tools?.computerAccess?.maxReadBytes || 131072,
             this.requireComputerAccessPolicy(),
           );
+          this.recordComputerAccessOperation("read", { ...result, content: undefined }, context);
+          return result;
         },
       },
       write_computer_file: {
         description: "Write or append a text file inside configured laptop access roots.",
         permission: "allowComputerAccess",
-        run: async ({ path, content, append }) =>
-          this.fileStore.writeComputerText(path, String(content || ""), {
+        run: async ({ path, content, append }, context) => {
+          const result = this.fileStore.writeComputerText(path, String(content || ""), {
             append: Boolean(append),
             policy: this.requireComputerAccessPolicy(),
-          }),
+          });
+          this.recordComputerAccessOperation(append ? "append" : "write", result, context);
+          return result;
+        },
       },
       create_computer_directory: {
         description: "Create a directory inside configured laptop access roots.",
         permission: "allowComputerAccess",
-        run: async ({ path }) => this.fileStore.createComputerDirectory(path, this.requireComputerAccessPolicy()),
+        run: async ({ path }, context) => {
+          const result = this.fileStore.createComputerDirectory(path, this.requireComputerAccessPolicy());
+          this.recordComputerAccessOperation("mkdir", result, context);
+          return result;
+        },
+      },
+      copy_computer_path: {
+        description: "Copy a file or folder between configured laptop access roots.",
+        permission: "allowComputerAccess",
+        run: async ({ from, source, to, destination, overwrite }, context) => {
+          const result = this.fileStore.copyComputerPath(from || source, to || destination, {
+            overwrite: Boolean(overwrite),
+            policy: this.requireComputerAccessPolicy(),
+          });
+          this.recordComputerAccessOperation("copy", result, context);
+          return result;
+        },
+      },
+      move_computer_path: {
+        description: "Move or rename a file or folder inside configured laptop access roots.",
+        permission: "allowComputerAccess",
+        run: async ({ from, source, to, destination, overwrite }, context) => {
+          const result = this.fileStore.moveComputerPath(from || source, to || destination, {
+            overwrite: Boolean(overwrite),
+            policy: this.requireComputerAccessPolicy(),
+          });
+          this.recordComputerAccessOperation("move", result, context);
+          return result;
+        },
       },
       delete_computer_path: {
         description: "Delete a file or folder inside configured laptop access roots. By default it moves the item to data/trash for restore.",
         permission: "allowComputerAccess",
-        run: async ({ path, permanent }) =>
-          this.fileStore.deleteComputerPath(path, {
+        run: async ({ path, permanent }, context) => {
+          const result = this.fileStore.deleteComputerPath(path, {
             permanent: Boolean(permanent),
             policy: this.requireComputerAccessPolicy(),
-          }),
+          });
+          this.recordComputerAccessOperation("delete", result, context);
+          return result;
+        },
       },
       read_file: {
         description: "Read a text file from the workspace.",
@@ -1222,6 +1285,40 @@ export class ToolRegistry {
       throw new Error("Computer access is disabled by runtime policy.");
     }
     return policy;
+  }
+
+  recordComputerAccessOperation(action, result = {}, context = {}) {
+    const gateway = this.agentRuntime?.gateway;
+    if (!gateway?.addEvent) {
+      return null;
+    }
+    return gateway.addEvent("computer.access_operation", {
+      action,
+      agentId: this.getAgentId(context),
+      runId: context.runId || "",
+      sessionId: context.sessionId || "",
+      path: result.path || result.source || "",
+      destination: result.destination || result.movedTo || "",
+      type: result.type || "",
+      bytes: result.bytes ?? result.bytesRead ?? result.bytesWritten ?? 0,
+      permanent: Boolean(result.permanent),
+      overwritten: Boolean(result.overwritten),
+      ok: !result.error,
+    });
+  }
+
+  getComputerAccessAudit(limit = 25) {
+    const gateway = this.agentRuntime?.gateway;
+    const count = Math.max(1, Math.min(100, Number(limit || 25)));
+    return (gateway?.listEvents?.(200) || [])
+      .filter((event) => event.event === "computer.access_operation")
+      .slice(0, count)
+      .map((event) => ({
+        id: event.id,
+        at: event.at,
+        seq: event.seq,
+        ...event.payload,
+      }));
   }
 
   getAll(context = {}) {

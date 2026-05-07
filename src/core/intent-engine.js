@@ -119,6 +119,25 @@ export class IntentEngine {
     }
 
     if (
+      lowered.includes("copy computer") ||
+      lowered.includes("copy laptop") ||
+      lowered.includes("copy file") ||
+      lowered.includes("file copy")
+    ) {
+      intents.push("computer-copy");
+    }
+
+    if (
+      lowered.includes("move computer") ||
+      lowered.includes("move laptop") ||
+      lowered.includes("move file") ||
+      lowered.includes("rename file") ||
+      lowered.includes("file move")
+    ) {
+      intents.push("computer-move");
+    }
+
+    if (
       lowered.includes("ram") ||
       lowered.includes("memory") ||
       lowered.includes("storage") ||

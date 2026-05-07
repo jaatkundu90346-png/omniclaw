@@ -183,6 +183,79 @@ export class FileStore {
     };
   }
 
+  copyComputerPath(fromPath, toPath, options = {}) {
+    const policy = options.policy || {};
+    if (policy.allowWrite === false) {
+      throw new Error("Computer file copies are disabled by policy.");
+    }
+    const source = this.resolveComputerPath(fromPath, policy);
+    const destination = this.resolveComputerPath(toPath, policy);
+    if (!fs.existsSync(source)) {
+      throw new Error("Source path does not exist.");
+    }
+    if (fs.existsSync(destination) && !options.overwrite) {
+      throw new Error("Destination already exists. Pass overwrite=true to replace it.");
+    }
+
+    const stat = fs.statSync(source);
+    fs.mkdirSync(path.dirname(destination), { recursive: true });
+    if (stat.isDirectory()) {
+      fs.cpSync(source, destination, {
+        recursive: true,
+        force: Boolean(options.overwrite),
+        errorOnExist: !options.overwrite,
+      });
+    } else {
+      fs.copyFileSync(source, destination, options.overwrite ? 0 : fs.constants.COPYFILE_EXCL);
+    }
+    return {
+      source,
+      destination,
+      copied: true,
+      overwritten: Boolean(options.overwrite),
+      type: stat.isDirectory() ? "directory" : "file",
+      bytes: stat.isDirectory() ? 0 : stat.size,
+    };
+  }
+
+  moveComputerPath(fromPath, toPath, options = {}) {
+    const policy = options.policy || {};
+    if (policy.allowWrite === false || policy.allowDelete === false) {
+      throw new Error("Computer file moves are disabled by policy.");
+    }
+    const source = this.resolveComputerPath(fromPath, policy);
+    const destination = this.resolveComputerPath(toPath, policy);
+    if (!fs.existsSync(source)) {
+      throw new Error("Source path does not exist.");
+    }
+    if (fs.existsSync(destination) && !options.overwrite) {
+      throw new Error("Destination already exists. Pass overwrite=true to replace it.");
+    }
+
+    const stat = fs.statSync(source);
+    fs.mkdirSync(path.dirname(destination), { recursive: true });
+    if (options.overwrite && fs.existsSync(destination)) {
+      fs.rmSync(destination, { recursive: true, force: true });
+    }
+    try {
+      fs.renameSync(source, destination);
+    } catch (error) {
+      if (error.code !== "EXDEV") {
+        throw error;
+      }
+      this.copyComputerPath(source, destination, { policy, overwrite: Boolean(options.overwrite) });
+      fs.rmSync(source, { recursive: true, force: true });
+    }
+    return {
+      source,
+      destination,
+      moved: true,
+      overwritten: Boolean(options.overwrite),
+      type: stat.isDirectory() ? "directory" : "file",
+      bytes: stat.isDirectory() ? 0 : stat.size,
+    };
+  }
+
   deleteComputerPath(inputPath, options = {}) {
     const policy = options.policy || {};
     if (policy.allowDelete === false) {

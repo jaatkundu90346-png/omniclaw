@@ -2709,18 +2709,23 @@ function renderSkills(state) {
 
 function renderTools(state) {
   const items = selectedAgentSummary()?.tools || [];
+  const permissions = state.config?.tools?.permissions || {};
   toolOutput.innerHTML =
     items
       .map((item) => {
         const permission = item.permission || "no permission gate";
+        const enabled = item.permission ? Boolean(permissions[item.permission]) : true;
+        const tone = !item.permission ? "ok" : enabled ? "ok" : "danger";
+        const label = !item.permission ? "open" : enabled ? "enabled" : "blocked";
+        const computerHint = item.id.includes("computer") ? " | computer hand" : "";
         return [
           `<div class="stack-item">`,
           `<div class="row-top">`,
           `<strong>${escapeHtml(item.id)}</strong>`,
-          statusPill(permission === "no permission gate" ? "open" : "guarded", permission === "no permission gate" ? "ok" : "warn"),
+          statusPill(label, tone),
           `</div>`,
           `<p>${escapeHtml(item.description || "No description")}</p>`,
-          `<small>${escapeHtml(`${permission}${item.pluginId ? ` | ${item.pluginId}` : ""}`)}</small>`,
+          `<small>${escapeHtml(`${permission}${computerHint}${item.pluginId ? ` | ${item.pluginId}` : ""}`)}</small>`,
           `</div>`,
         ].join("");
       })

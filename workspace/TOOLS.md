@@ -4,6 +4,7 @@ OmniClaw runtime tools include:
 - time_now
 - runtime_summary, provider_status, prompt_trace, tool_trace, v2_status, v2_repair_plan, capability_demo
 - list_files, read_file, write_file, append_file
+- computer_access_status, computer_access_audit, list_computer_directory, read_computer_file, write_computer_file, copy_computer_path, move_computer_path, delete_computer_path
 - OpenClaw-compatible aliases: read, write, edit, apply_patch
 - exec, process, code_execution
 - remember_note, list_notes, list_long_term_memory, promote_memory, dream_memory_sweep
