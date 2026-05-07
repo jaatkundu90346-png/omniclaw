@@ -20,7 +20,7 @@ function truncatePreview(value, maxChars) {
   if (text.length <= maxChars) {
     return text;
   }
-  return `${text.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`;
+  return `${text.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`;
 }
 
 function sortByUpdatedAtDesc(left, right) {
@@ -361,7 +361,12 @@ export class SessionStore {
       id: message.id || createId("message"),
       role: String(message.role || "assistant"),
       text: String(message.text || ""),
+      runId: message.runId || undefined,
       toolOutputs: Array.isArray(message.toolOutputs) ? message.toolOutputs : undefined,
+      modelToolLoop: message.modelToolLoop && typeof message.modelToolLoop === "object" ? message.modelToolLoop : undefined,
+      providerDiagnostics:
+        message.providerDiagnostics && typeof message.providerDiagnostics === "object" ? message.providerDiagnostics : undefined,
+      planSummary: message.planSummary || undefined,
       at,
     });
 

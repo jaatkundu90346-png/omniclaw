@@ -219,7 +219,7 @@ function truncate(value, max = 120) {
   if (!text) {
     return "";
   }
-  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+  return text.length > max ? `${text.slice(0, Math.max(0, max - 3)).trimEnd()}...` : text;
 }
 
 function formatDate(value) {
@@ -624,6 +624,89 @@ function renderSessionDetail(session) {
   ].join("");
 }
 
+function summarizeToolOutput(item = {}) {
+  const output = item.output || {};
+  if (output.error || output.blocked) {
+    return output.message || output.reason || output.stderr || "Tool was blocked or failed.";
+  }
+  if (Array.isArray(output.results)) {
+    const first = output.results[0] || {};
+    return `${output.results.length} result(s)${first.title ? `: ${first.title}` : ""}`;
+  }
+  if (output.execution) {
+    const execution = output.execution || {};
+    const body = execution.stdout || execution.stderr || execution.command || "";
+    return `${execution.status || "executed"}${execution.exitCode != null ? ` (${execution.exitCode})` : ""}: ${body}`;
+  }
+  if (output.stdout || output.stderr) {
+    return output.stdout || output.stderr;
+  }
+  if (output.path || output.file) {
+    return `${output.path || output.file}${output.bytesWritten ? ` | ${output.bytesWritten} bytes` : ""}`;
+  }
+  if (output.content) {
+    return output.content;
+  }
+  return formatJson(output || {});
+}
+
+function renderChatToolTrace(entry = {}) {
+  const toolOutputs = Array.isArray(entry.toolOutputs) ? entry.toolOutputs : [];
+  const loop = entry.modelToolLoop && typeof entry.modelToolLoop === "object" ? entry.modelToolLoop : null;
+  const provider = entry.providerDiagnostics && typeof entry.providerDiagnostics === "object" ? entry.providerDiagnostics : null;
+  const blocks = [];
+
+  if (provider?.status || entry.planSummary) {
+    blocks.push([
+      `<div class="chat-trace-card chat-trace-card-provider">`,
+      `<div class="chat-trace-head"><strong>Provider</strong>${provider?.status ? statusPill(provider.status, toneForStatus(provider.status)) : ""}</div>`,
+      `<p>${escapeHtml(entry.planSummary || provider?.reason || "Provider response completed.")}</p>`,
+      provider?.durationMs ? `<small>${escapeHtml(`${provider.providerId || "provider"} | ${provider.model || "model"} | ${provider.durationMs}ms`)}</small>` : "",
+      `</div>`,
+    ].join(""));
+  }
+
+  if (loop && (loop.attempted || loop.toolCallCount || loop.stoppedReason || loop.skippedReason)) {
+    const loopTone = loop.errors?.length ? "danger" : loop.toolCallCount ? "ok" : "muted";
+    const details = [
+      `${loop.rounds || 0} round(s)`,
+      `${loop.toolCallCount || 0} tool(s)`,
+      loop.recoveredToolCalls ? `${loop.recoveredToolCalls} recovered` : "",
+      loop.repeatedToolCallsSkipped ? `${loop.repeatedToolCallsSkipped} repeat skipped` : "",
+      loop.rejectedToolCalls?.length ? `${loop.rejectedToolCalls.length} rejected` : "",
+    ].filter(Boolean).join(" | ");
+    blocks.push([
+      `<div class="chat-trace-card chat-trace-card-brain">`,
+      `<div class="chat-trace-head"><strong>Brain loop</strong>${statusPill(loop.stoppedReason || loop.skippedReason || "checked", loopTone)}</div>`,
+      `<p>${escapeHtml(details || loop.skippedReason || "No extra runtime tools needed.")}</p>`,
+      Array.isArray(loop.roundDetails) && loop.roundDetails.length
+        ? `<small>${escapeHtml(loop.roundDetails.map((item) => `r${item.round}:${item.status}`).join(" -> "))}</small>`
+        : "",
+      `</div>`,
+    ].join(""));
+  }
+
+  if (toolOutputs.length > 0) {
+    blocks.push([
+      `<div class="chat-tool-strip">`,
+      toolOutputs.map((item) => {
+        const failed = Boolean(item.output?.error || item.output?.blocked);
+        const label = item.source === "model-tool-loop" ? "brain" : "plan";
+        return [
+          `<div class="chat-tool-card">`,
+          `<div class="chat-trace-head"><strong>${escapeHtml(item.tool || "tool")}</strong>${statusPill(failed ? "failed" : label, failed ? "danger" : "ok")}</div>`,
+          item.reason ? `<small>${escapeHtml(item.reason)}</small>` : "",
+          `<p>${escapeHtml(truncate(summarizeToolOutput(item), 220))}</p>`,
+          `</div>`,
+        ].join("");
+      }).join(""),
+      `</div>`,
+    ].join(""));
+  }
+
+  return blocks.length ? `<div class="chat-trace">${blocks.join("")}</div>` : "";
+}
+
 function renderChatTranscript(session) {
   if (!chatTranscript) {
     return;
@@ -642,10 +725,12 @@ function renderChatTranscript(session) {
   chatTranscript.innerHTML = messages
     .map((entry) => {
       const role = entry.role === "assistant" ? "assistant" : entry.role === "user" ? "user" : "system";
+      const traceHtml = role === "assistant" ? renderChatToolTrace(entry) : "";
       return [
         `<div class="chat-bubble chat-bubble-${escapeHtml(role)}">`,
-        `<div class="chat-bubble-meta">${escapeHtml(role)} · ${escapeHtml(formatDate(entry.at))}</div>`,
+        `<div class="chat-bubble-meta">${escapeHtml(role)} | ${escapeHtml(formatDate(entry.at))}</div>`,
         `<div class="chat-bubble-text">${escapeHtml(entry.text || "")}</div>`,
+        traceHtml,
         `</div>`,
       ].join("");
     })
@@ -702,6 +787,10 @@ function formatChatResponse(data) {
 
   if (Array.isArray(data.toolOutputs) && data.toolOutputs.length > 0) {
     lines.push("", "TOOL OUTPUTS", formatJson(data.toolOutputs));
+  }
+
+  if (data.modelToolLoop) {
+    lines.push("", "BRAIN LOOP", formatJson(data.modelToolLoop));
   }
 
   if (Array.isArray(data.approvals) && data.approvals.length > 0) {
@@ -3704,7 +3793,7 @@ form.addEventListener("submit", async (event) => {
     messageInput.value = "";
     if (data.run?.id) {
       await fetchPromptTrace(data.run.id);
-      if (Array.isArray(data.toolOutputs) && data.toolOutputs.length > 0) {
+      if ((Array.isArray(data.toolOutputs) && data.toolOutputs.length > 0) || data.modelToolLoop?.attempted) {
         await fetchToolTrace(data.run.id);
       }
     }

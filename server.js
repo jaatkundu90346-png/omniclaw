@@ -330,7 +330,7 @@ const server = http.createServer(async (req, res) => {
       runs: agent.gateway.listRuns(20).map(({ promptTrace, toolTrace, ...run }) => ({
         ...run,
         promptTrace: Boolean(promptTrace),
-        toolTrace: Boolean(Array.isArray(toolTrace) && toolTrace.length > 0),
+        toolTrace: Boolean((Array.isArray(toolTrace) && toolTrace.length > 0) || run.modelToolLoop?.attempted),
         toolTraceCount: Array.isArray(toolTrace) ? toolTrace.length : Number(run.toolTraceCount || 0),
       })),
       approvals: agent.gateway.listApprovals(),

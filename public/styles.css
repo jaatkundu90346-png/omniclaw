@@ -1214,32 +1214,33 @@ h3 {
   gap: 12px;
   padding: 14px;
   border: 1px solid var(--line);
-  border-radius: 12px;
-  background: linear-gradient(180deg, #f8fafc, #ffffff);
+  border-radius: 8px;
+  background: linear-gradient(180deg, var(--bg), var(--bg-strong));
 }
 
 .chat-bubble {
-  max-width: min(76%, 720px);
+  max-width: min(84%, 780px);
   padding: 12px 14px;
   border: 1px solid var(--line);
-  border-radius: 12px;
-  background: #fff;
-  box-shadow: 0 8px 22px rgba(18, 24, 31, 0.05);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.18);
 }
 
 .chat-bubble-user {
   align-self: flex-end;
-  border-color: rgba(225, 29, 72, 0.26);
-  background: #fff7f7;
+  border-color: rgba(88, 166, 255, 0.34);
+  background: rgba(28, 37, 65, 0.84);
 }
 
 .chat-bubble-assistant {
   align-self: flex-start;
+  background: var(--surface-strong);
 }
 
 .chat-bubble-meta {
   margin-bottom: 6px;
-  color: var(--text-muted);
+  color: var(--muted);
   font-size: 0.72rem;
   text-transform: uppercase;
   letter-spacing: 0;
@@ -1249,6 +1250,61 @@ h3 {
   white-space: pre-wrap;
   line-height: 1.55;
   color: var(--text-strong);
+}
+
+.chat-trace {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.chat-trace-card,
+.chat-tool-card {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(13, 17, 23, 0.62);
+}
+
+.chat-trace-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.chat-trace-head strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--text-strong);
+  font-family: var(--mono);
+  font-size: 0.78rem;
+}
+
+.chat-trace p,
+.chat-tool-card p {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.86rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.chat-trace small,
+.chat-tool-card small {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.chat-tool-strip {
+  display: grid;
+  gap: 8px;
 }
 
 .tool-card {

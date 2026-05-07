@@ -894,17 +894,18 @@ export class OmniClawAgent {
       return null;
     }
     const toolTrace = Array.isArray(run.toolTrace) ? run.toolTrace : [];
+    const modelToolLoop = run.modelToolLoop || null;
     return {
       runId: run.id,
       sessionId: run.sessionId || "",
       agentId: run.agentId || "main",
       status: run.status,
-      available: toolTrace.length > 0,
+      available: toolTrace.length > 0 || Boolean(modelToolLoop?.attempted || modelToolLoop?.skippedReason),
       toolTrace,
       toolTraceCount: toolTrace.length,
       currentTool: run.currentTool || "",
       toolExecutionStatus: run.toolExecutionStatus || "",
-      modelToolLoop: run.modelToolLoop || null,
+      modelToolLoop,
       shellExecutions: sanitizeTraceValue(run.shellExecutions || [], { maxString: 1000, maxArray: 12, maxDepth: 4 }),
     };
   }
@@ -2082,12 +2083,12 @@ export class OmniClawAgent {
       session,
       run,
     });
+    plan.modelToolLoop = modelToolLoop.report;
+    this.gateway.updateRun(run.id, {
+      modelToolLoop: modelToolLoop.report,
+    });
     if (modelToolLoop.toolOutputs.length > 0) {
       toolOutputs.push(...modelToolLoop.toolOutputs);
-      plan.modelToolLoop = modelToolLoop.report;
-      this.gateway.updateRun(run.id, {
-        modelToolLoop: modelToolLoop.report,
-      });
     }
 
     for (const item of toolOutputs) {
@@ -2295,7 +2296,11 @@ export class OmniClawAgent {
         at: assistantAt,
         role: "assistant",
         text: response,
+        runId: run.id,
         toolOutputs,
+        modelToolLoop: modelToolLoop.report,
+        providerDiagnostics,
+        planSummary: plan.summary || "",
       });
       this.sessions.finishRun(session.id, run.id, {
         status: approvals.length > 0 ? "awaiting-approval" : "idle",
@@ -2354,6 +2359,7 @@ export class OmniClawAgent {
         intents,
         plan,
         toolOutputs,
+        modelToolLoop: modelToolLoop.report,
         approvals,
         provider: this.provider.getInfo(),
         providerDiagnostics,
