@@ -95,6 +95,33 @@ export class IntentEngine {
     }
 
     if (
+      lowered.includes("who are you") ||
+      lowered.includes("what is your name") ||
+      lowered.includes("your name") ||
+      lowered.includes("who am i") ||
+      lowered.includes("what is my name") ||
+      lowered.includes("my name") ||
+      lowered.includes("tum kon ho") ||
+      lowered.includes("tum kaun ho") ||
+      lowered.includes("tu kon hai") ||
+      lowered.includes("tu kaun hai") ||
+      lowered.includes("tera name") ||
+      lowered.includes("tara name") ||
+      lowered.includes("tumhara name") ||
+      lowered.includes("tera naam") ||
+      lowered.includes("mara name") ||
+      lowered.includes("mera name") ||
+      lowered.includes("mera naam") ||
+      lowered.includes("mara naam") ||
+      lowered.includes("mujhe jante") ||
+      lowered.includes("mujha janta") ||
+      lowered.includes("mere baare") ||
+      lowered.includes("mara bara")
+    ) {
+      intents.push("profile-question");
+    }
+
+    if (
       lowered.includes("provider status") ||
       lowered.includes("brain status") ||
       lowered.includes("model status") ||

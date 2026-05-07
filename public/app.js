@@ -196,6 +196,38 @@ let activeRunId = "";
 let activeRunEvents = [];
 let activeRunStartedAt = 0;
 
+function readStoredValue(key, fallback = "") {
+  try {
+    return localStorage.getItem(key) || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeStoredValue(key, value = "") {
+  try {
+    if (value) {
+      localStorage.setItem(key, value);
+    } else {
+      localStorage.removeItem(key);
+    }
+  } catch {
+    // Storage is a convenience only; dashboard state still works without it.
+  }
+}
+
+selectedSessionId = readStoredValue("omniclaw.selectedSessionId");
+selectedAgentId = readStoredValue("omniclaw.selectedAgentId");
+
+function rememberSelectedSession(session = null) {
+  const sessionId = session?.id || selectedSessionId || "";
+  const agentId = normalizeAgentId(session?.agentId || selectedAgentId || "main");
+  selectedSessionId = sessionId;
+  selectedAgentId = agentId;
+  writeStoredValue("omniclaw.selectedSessionId", sessionId);
+  writeStoredValue("omniclaw.selectedAgentId", agentId);
+}
+
 function escapeHtml(value) {
   return String(value == null ? "" : value)
     .replace(/&/g, "&amp;")
@@ -1393,6 +1425,7 @@ function attachSessionListeners() {
     button.addEventListener("click", async () => {
       selectedSessionId = button.dataset.sessionId || "";
       selectedAgentId = normalizeAgentId(button.dataset.agentId || selectedAgentId);
+      rememberSelectedSession({ id: selectedSessionId, agentId: selectedAgentId });
       agentSelect.value = selectedAgentId;
       sessionLabelInput.value = button.dataset.sessionLabel || sessionLabelInput.value;
       await loadState();
@@ -1410,6 +1443,9 @@ function renderSessions(state) {
   if (!sessions.some((item) => item.id === selectedSessionId)) {
     const preferred = pickSessionForAgent(selectedAgentId, sessions) || sessions[0] || null;
     selectedSessionId = preferred ? preferred.id : "";
+    if (preferred) {
+      rememberSelectedSession(preferred);
+    }
   }
 
   const selected = selectedSessionSummary();
@@ -1417,6 +1453,7 @@ function renderSessions(state) {
     sessionLabelInput.value = selected.label;
     selectedAgentId = normalizeAgentId(selected.agentId);
     agentSelect.value = selectedAgentId;
+    rememberSelectedSession(selected);
   }
 
   sessionOutput.innerHTML =
@@ -3801,6 +3838,7 @@ form.addEventListener("submit", async (event) => {
     if (data.session?.id) {
       selectedSessionId = data.session.id;
       selectedAgentId = normalizeAgentId(data.session.agentId || payload.agentId);
+      rememberSelectedSession({ id: selectedSessionId, agentId: selectedAgentId });
       sessionLabelInput.value = data.session.label || sessionLabelInput.value;
     }
 
@@ -3927,6 +3965,7 @@ async function selectSession(sessionId) {
   selectedSessionId = sessionId;
   const summary = selectedSessionSummary();
   if (summary) {
+    rememberSelectedSession(summary);
     sessionContext.textContent = `${summary.label} | ${summary.agentId}`;
     sessionContext.classList.remove("status-chip-muted");
     sessionLabelInput.value = summary.label;

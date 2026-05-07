@@ -1,7 +1,13 @@
 import { spawn } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const port = Number(process.env.CHAT_SMOKE_PORT || 3267 + Math.floor(Math.random() * 400));
 const timeoutMs = 45_000;
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const rootDir = path.resolve(__dirname, "..");
+const profilePath = path.join(rootDir, "workspace", "agents", "main", "PROFILE.md");
 
 function waitForServerReady(child) {
   return new Promise((resolve, reject) => {
@@ -56,6 +62,7 @@ function assert(condition, message) {
 
 async function run() {
   const suffix = Date.now().toString(36);
+  const originalProfile = fs.existsSync(profilePath) ? fs.readFileSync(profilePath, "utf8") : null;
   const child = spawn(process.execPath, ["server.js"], {
     env: { ...process.env, PORT: String(port), OMNICLAW_DISABLE_USER_CONFIG: "1" },
     stdio: ["ignore", "pipe", "pipe"],
@@ -71,6 +78,11 @@ async function run() {
 
     const apiSetup = await postChat("api key setup", `chat-smoke-api-${suffix}`);
     assert(apiSetup.reply.includes("API key"), "API setup reply should explain API keys.");
+
+    const profileSet = await postChat(`mera name SmokeUser${suffix} hai`, `chat-smoke-profile-${suffix}`);
+    assert(profileSet.reply.includes(`SmokeUser${suffix}`), "Profile update should be reflected immediately.");
+    const profileRecall = await postChat("mera name kya hai", `chat-smoke-profile-${suffix}`);
+    assert(profileRecall.reply.includes(`SmokeUser${suffix}`), "Profile recall should survive the next message in the same lane.");
 
     const research = await postChat("research OpenClaw system prompt", `chat-smoke-research-${suffix}`);
     assert(
@@ -106,6 +118,11 @@ async function run() {
     console.log("Chat agent smoke test passed");
   } finally {
     child.kill("SIGTERM");
+    if (originalProfile == null) {
+      fs.rmSync(profilePath, { force: true });
+    } else {
+      fs.writeFileSync(profilePath, originalProfile, "utf8");
+    }
   }
 }
 

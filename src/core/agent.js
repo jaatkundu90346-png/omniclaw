@@ -682,7 +682,7 @@ export class OmniClawAgent {
         skillRegistry: this.skills,
         toolRegistry: this.tools,
       }),
-      sessions: this.sessions.listSessions(12).map((session) => ({
+      sessions: this.sessions.listSessions(40).map((session) => ({
         id: session.id,
         key: session.key,
         label: session.label,
@@ -3207,7 +3207,7 @@ export class OmniClawAgent {
     ].join("\n");
   }
 
-  buildDirectRuntimeReply({ intents = [], agent = {}, tools = [], skills = [] } = {}) {
+  buildDirectRuntimeReply({ intents = [], message = "", agent = {}, tools = [], skills = [] } = {}) {
     if (intents.includes("api-setup") && !intents.includes("provider-status")) {
       return [
         "API key OmniClaw ke active agent ko real LLM brain deti hai.",
@@ -3215,6 +3215,10 @@ export class OmniClawAgent {
         "OpenRouter/OpenAI-compatible setup me teen cheezein chahiye: base URL, model, aur API key. Key local SecretStore me masked form me save hoti hai.",
         "Agar key ready hai to agent real provider se reply karega; agar provider fail ho to local tools aur memory phir bhi run ho sakte hain.",
       ].join(" ");
+    }
+
+    if (intents.includes("profile-question")) {
+      return this.buildProfileQuestionReply({ message, agent });
     }
 
     if (intents.includes("greeting") && intents.length === 1) {
@@ -3370,15 +3374,63 @@ export class OmniClawAgent {
     return /Codex CLI provider failed|Codex CLI bridge|codex command|Provider request failed|Provider connection failed|API key missing|authentication|auth|login/i.test(String(text || ""));
   }
 
+  buildProfileQuestionReply({ message = "", agent = {} } = {}) {
+    const agentId = agent.id || "main";
+    const text = String(message || "").toLowerCase();
+    const facts = this.readAgentProfileFacts(agentId);
+    const longTerm = this.memory.getLongTermMemory(12, agentId);
+    const assistantName = facts.assistantName || agent.name || "Main Agent";
+    const userName = facts.userName || "";
+    const location = facts.userLocation || "";
+    const preferences = [
+      ...facts.preferences,
+      ...longTerm
+        .map((item) => item.text || "")
+        .filter((item) => /vibe coding|practical ai|real work|build/i.test(item))
+        .slice(0, 3),
+    ];
+    const asksAssistant = /who are you|your name|tum kon|tum kaun|tu kon|tu kaun|tera|tara|tumhara/i.test(text);
+    const asksUser = /who am i|my name|mera|mara|mujhe|mujha|mere|mara bara|mere baare/i.test(text);
+
+    const lines = [];
+    if (asksAssistant || !asksUser) {
+      lines.push(`Main ${assistantName} hoon, OmniClaw ke andar chalne wala active agent.`);
+      lines.push("OmniClaw khud platform/runtime hai; agent ko sessions, memory, tools, skills, browser/file/terminal hands aur gateway eyes deta hai.");
+    }
+    if (asksUser || !asksAssistant) {
+      if (userName || location || preferences.length > 0) {
+        lines.push(
+          `Tum${userName ? ` ${userName}` : ""}${location ? `, ${location} se` : ""} ho.`,
+        );
+        if (preferences.length > 0) {
+          lines.push(`Mujhe tumhare baare me yaad hai: ${preferences.slice(0, 4).join(" | ")}`);
+        }
+      } else {
+        lines.push("Tumhari profile abhi complete nahi mili. Apna naam, location, vibe aur AI-build preferences bataoge to main PROFILE.md aur memory me save kar lunga.");
+      }
+    }
+    lines.push(`Profile source: ${this.hasAgentProfile(agentId) ? "PROFILE.md + long-term memory" : "fresh profile"}.`);
+    return lines.join(" ");
+  }
+
   readAgentProfileFacts(agentId = "main") {
     const profilePath = this.getAgentProfilePath(agentId);
     if (!fs.existsSync(profilePath)) {
       return {};
     }
     const text = fs.readFileSync(profilePath, "utf8");
-    const assistantName = text.match(/Assistant name:\s*([^\r\n]+)/i)?.[1]?.trim() || "";
-    const userName = text.match(/User name:\s*([^\r\n]+)/i)?.[1]?.trim() || "";
-    return { assistantName, userName };
+    const latestFact = (pattern) => {
+      const matches = [...text.matchAll(pattern)];
+      return matches.length ? matches[matches.length - 1][1]?.trim() || "" : "";
+    };
+    const assistantName = latestFact(/Assistant name:\s*([^\r\n]+)/gi);
+    const userName = latestFact(/User name:\s*([^\r\n]+)/gi);
+    const userLocation = latestFact(/User location:\s*([^\r\n]+)/gi);
+    const preferences = text
+      .split(/\r?\n/)
+      .map((line) => line.replace(/^-\s*/, "").trim())
+      .filter((line) => /^User (likes|prefers)\b/i.test(line));
+    return { assistantName, userName, userLocation, preferences };
   }
 
   updateProfileFromMessage(agentId = "main", message = "") {
