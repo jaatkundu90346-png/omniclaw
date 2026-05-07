@@ -414,6 +414,8 @@ export class ToolRegistry {
               "process",
               "code_execution",
               "browser",
+              "browser_snapshot",
+              "browser_audit",
               "web_search",
               "web_fetch",
               "read",
@@ -585,6 +587,7 @@ export class ToolRegistry {
               openUrl: true,
               readUrl: true,
               automation: this.browserOperator.getStatus?.() || {},
+              operations: ["browser_snapshot", "browser_links", "browser_screenshot", "browser_text", "browser_audit"],
             },
             operations: {
               available: [
@@ -737,12 +740,14 @@ export class ToolRegistry {
       read_url: {
         description: "Fetch and read the text content of a specific public URL.",
         permission: "allowWebResearch",
-        run: async ({ url }) => this.browserOperator.readUrl(String(url || "").trim()),
+        run: async ({ url }, context) =>
+          this.runBrowserOperation("read_url", () => this.browserOperator.readUrl(String(url || "").trim()), context),
       },
       open_browser_url: {
         description: "Open a URL in the laptop's default browser.",
         permission: "allowBrowserControl",
-        run: async ({ url }) => this.browserOperator.openUrl(String(url || "").trim()),
+        run: async ({ url }, context) =>
+          this.runBrowserOperation("open_url", () => this.browserOperator.openUrl(String(url || "").trim()), context),
       },
       run_terminal_command: {
         description: "Execute a terminal command through OmniClaw shell policy and audit logging.",
@@ -907,20 +912,20 @@ export class ToolRegistry {
         description: "OpenClaw-compatible browser helper for URL open/fetch and DevTools automation actions.",
         permission: "allowBrowserControl",
         group: "ui",
-        run: async (input = {}) => {
+        run: async (input = {}, context) => {
           const { action, url } = input;
           const normalizedAction = String(action || "open").trim().toLowerCase();
-          if (["status", "screenshot", "capture", "text", "links", "click", "type", "fill"].includes(normalizedAction)) {
-            return this.browserOperator.automate(input);
+          if (["status", "snapshot", "observe", "inspect", "screenshot", "capture", "text", "links", "click", "type", "fill"].includes(normalizedAction)) {
+            return this.runBrowserOperation(normalizedAction, () => this.browserOperator.automate(input), context);
           }
           if (["navigate", "goto"].includes(normalizedAction)) {
-            return this.browserOperator.automate(input);
+            return this.runBrowserOperation(normalizedAction, () => this.browserOperator.automate(input), context);
           }
           if (["fetch", "read", "read_url"].includes(normalizedAction)) {
-            return this.browserOperator.readUrl(String(url || "").trim());
+            return this.runBrowserOperation("read_url", () => this.browserOperator.readUrl(String(url || "").trim()), context);
           }
           if (["open"].includes(normalizedAction)) {
-            return this.browserOperator.openUrl(String(url || "").trim());
+            return this.runBrowserOperation("open_url", () => this.browserOperator.openUrl(String(url || "").trim()), context);
           }
           return {
             ok: false,
@@ -935,17 +940,42 @@ export class ToolRegistry {
         group: "ui",
         run: async () => this.browserOperator.getStatus?.() || {},
       },
+      browser_audit: {
+        description: "List recent governed browser actions captured in the gateway audit feed.",
+        permission: null,
+        group: "ui",
+        run: async ({ limit }) => ({
+          operations: this.getBrowserAudit(Number(limit || 25)),
+          localActions: this.browserOperator.getStatus?.().recentActions || [],
+        }),
+      },
+      browser_snapshot: {
+        description: "Observe the current browser page: URL, title, text preview, links, controls, and forms.",
+        permission: "allowBrowserControl",
+        group: "ui",
+        run: async (input = {}, context) =>
+          this.runBrowserOperation("snapshot", () => this.browserOperator.automate({ ...input, action: "snapshot" }), context),
+      },
+      browser_links: {
+        description: "Extract visible links from the current automated browser page.",
+        permission: "allowBrowserControl",
+        group: "ui",
+        run: async (input = {}, context) =>
+          this.runBrowserOperation("links", () => this.browserOperator.automate({ ...input, action: "links" }), context),
+      },
       browser_screenshot: {
         description: "Capture a screenshot from the current automated browser page.",
         permission: "allowBrowserControl",
         group: "ui",
-        run: async (input = {}) => this.browserOperator.automate({ ...input, action: "screenshot" }),
+        run: async (input = {}, context) =>
+          this.runBrowserOperation("screenshot", () => this.browserOperator.automate({ ...input, action: "screenshot" }), context),
       },
       browser_text: {
         description: "Extract visible text from the current automated browser page.",
         permission: "allowBrowserControl",
         group: "ui",
-        run: async (input = {}) => this.browserOperator.automate({ ...input, action: "text" }),
+        run: async (input = {}, context) =>
+          this.runBrowserOperation("text", () => this.browserOperator.automate({ ...input, action: "text" }), context),
       },
       web_search: {
         description: "OpenClaw-compatible web search alias.",
@@ -963,7 +993,8 @@ export class ToolRegistry {
         description: "OpenClaw-compatible URL fetch alias.",
         permission: "allowWebResearch",
         group: "web",
-        run: async ({ url }) => this.browserOperator.readUrl(String(url || "").trim()),
+        run: async ({ url }, context) =>
+          this.runBrowserOperation("web_fetch", () => this.browserOperator.readUrl(String(url || "").trim()), context),
       },
       read: {
         description: "OpenClaw-compatible workspace file read alias.",
@@ -1312,6 +1343,65 @@ export class ToolRegistry {
     const count = Math.max(1, Math.min(100, Number(limit || 25)));
     return (gateway?.listEvents?.(200) || [])
       .filter((event) => event.event === "computer.access_operation")
+      .slice(0, count)
+      .map((event) => ({
+        id: event.id,
+        at: event.at,
+        seq: event.seq,
+        ...event.payload,
+      }));
+  }
+
+  async runBrowserOperation(action, fn, context = {}) {
+    const startedAt = Date.now();
+    const config = this.configStore.getConfig();
+    const timeoutMs = Math.max(1000, Math.min(120000, Number(config.tools?.browserControl?.timeoutMs || 30000)));
+    let result;
+    try {
+      result = await Promise.race([
+        fn(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error(`Browser operation timed out after ${timeoutMs}ms: ${action}`)), timeoutMs)),
+      ]);
+      this.recordBrowserOperation(action, result, context, Date.now() - startedAt);
+      return result;
+    } catch (error) {
+      const failed = {
+        ok: false,
+        action,
+        error: error.message,
+      };
+      this.recordBrowserOperation(action, failed, context, Date.now() - startedAt);
+      throw error;
+    }
+  }
+
+  recordBrowserOperation(action, result = {}, context = {}, durationMs = 0) {
+    const gateway = this.agentRuntime?.gateway;
+    if (!gateway?.addEvent) {
+      return null;
+    }
+    const snapshot = result.snapshot || {};
+    return gateway.addEvent("browser.operation", {
+      action,
+      agentId: this.getAgentId(context),
+      runId: context.runId || "",
+      sessionId: context.sessionId || "",
+      ok: result.error ? false : Boolean(result.ok ?? result.opened ?? (result.status ? result.status === "success" : true)),
+      url: result.url || snapshot.url || "",
+      title: result.title || snapshot.title || "",
+      screenshotPath: result.screenshot?.path || "",
+      linkCount: Array.isArray(result.links) ? result.links.length : Array.isArray(snapshot.links) ? snapshot.links.length : 0,
+      controlCount: Array.isArray(snapshot.controls) ? snapshot.controls.length : 0,
+      durationMs,
+      error: result.error || "",
+    });
+  }
+
+  getBrowserAudit(limit = 25) {
+    const gateway = this.agentRuntime?.gateway;
+    const count = Math.max(1, Math.min(100, Number(limit || 25)));
+    return (gateway?.listEvents?.(200) || [])
+      .filter((event) => event.event === "browser.operation")
       .slice(0, count)
       .map((event) => ({
         id: event.id,

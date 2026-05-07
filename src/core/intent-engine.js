@@ -119,6 +119,17 @@ export class IntentEngine {
     }
 
     if (
+      lowered.includes("browser status") ||
+      lowered.includes("browser snapshot") ||
+      lowered.includes("browser observe") ||
+      lowered.includes("inspect browser") ||
+      lowered.includes("page snapshot") ||
+      lowered.includes("screenshot browser")
+    ) {
+      intents.push("browser-observe");
+    }
+
+    if (
       lowered.includes("copy computer") ||
       lowered.includes("copy laptop") ||
       lowered.includes("copy file") ||

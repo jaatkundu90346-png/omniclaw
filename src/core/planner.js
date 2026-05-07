@@ -123,6 +123,14 @@ export class Planner {
         reason: "User asked to give OmniClaw laptop/computer tools and understand current access policy.",
       });
     }
+    if (intents.includes("browser-observe")) {
+      steps.push({
+        type: "tool",
+        tool: "browser_snapshot",
+        input: { screenshot: /screenshot|capture/i.test(message) },
+        reason: "User asked OmniClaw to inspect the current automated browser page.",
+      });
+    }
 
     if (intents.includes("provider-status")) {
       steps.push({

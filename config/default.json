@@ -219,6 +219,9 @@
         "code_execution",
         "browser",
         "browser_status",
+        "browser_audit",
+        "browser_snapshot",
+        "browser_links",
         "browser_screenshot",
         "browser_text",
         "web_search",
@@ -323,6 +326,9 @@
     "research": {
       "maxResults": 5,
       "timeoutMs": 10000
+    },
+    "browserControl": {
+      "timeoutMs": 30000
     },
     "shellExecution": {
       "cwd": ".",

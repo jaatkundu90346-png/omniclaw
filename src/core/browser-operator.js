@@ -167,6 +167,8 @@ export class BrowserOperator {
     this.browserPath = process.platform === "win32" ? findWindowsBrowser() : process.env.OMNICLAW_BROWSER_PATH || "";
     this.userDataDir = "";
     this.lastPage = null;
+    this.lastSnapshot = null;
+    this.actionHistory = [];
     this.screenshotDir = path.join(rootDir, "data", "generated", "browser-screenshots");
   }
 
@@ -177,10 +179,13 @@ export class BrowserOperator {
       running: Boolean(this.browserProcess && !this.browserProcess.killed),
       port: this.browserPort || null,
       lastPage: this.lastPage,
+      lastSnapshot: this.lastSnapshot,
+      recentActions: this.actionHistory.slice(-10).reverse(),
       capabilities: {
         openUrl: true,
         readUrl: true,
         devtoolsNavigate: Boolean(this.browserPath),
+        snapshot: Boolean(this.browserPath),
         screenshot: Boolean(this.browserPath),
         text: Boolean(this.browserPath),
         links: Boolean(this.browserPath),
@@ -191,6 +196,24 @@ export class BrowserOperator {
         ? "Chromium/Edge DevTools automation is available."
         : "No Chrome/Edge browser executable was found. Set OMNICLAW_BROWSER_PATH to enable automation.",
     };
+  }
+
+  rememberAction(action, result = {}) {
+    const record = {
+      id: createId("browser_action"),
+      at: new Date().toISOString(),
+      action,
+      ok: Boolean(result.ok ?? result.opened ?? result.status === "success"),
+      url: result.url || result.snapshot?.url || this.lastSnapshot?.url || "",
+      title: result.title || result.snapshot?.title || this.lastSnapshot?.title || "",
+      screenshotPath: result.screenshot?.path || "",
+      error: result.error || "",
+    };
+    this.actionHistory.push(record);
+    if (this.actionHistory.length > 80) {
+      this.actionHistory = this.actionHistory.slice(-80);
+    }
+    return record;
   }
 
   async ensureBrowser() {
@@ -278,6 +301,9 @@ export class BrowserOperator {
     if (["navigate", "goto", "open"].includes(action)) {
       return this.navigate(input);
     }
+    if (["snapshot", "observe", "inspect"].includes(action)) {
+      return this.snapshot(input);
+    }
     if (["screenshot", "capture"].includes(action)) {
       return this.screenshot(input);
     }
@@ -316,6 +342,36 @@ export class BrowserOperator {
       if (screenshot) {
         result.screenshot = await this.captureScreenshot(client, "navigate");
       }
+      result.snapshot = await this.buildPageSnapshot(client);
+      this.lastSnapshot = result.snapshot;
+      this.rememberAction("navigate", result);
+      return result;
+    } finally {
+      await client.close();
+    }
+  }
+
+  async snapshot({ url = "", screenshot = false } = {}) {
+    const target = url ? normalizeUrl(url) : "";
+    const { page, client } = await this.connectPage(target);
+    try {
+      if (target) {
+        await client.send("Page.navigate", { url: target });
+        await sleep(1200);
+      }
+      const snapshot = await this.buildPageSnapshot(client);
+      const result = {
+        ok: true,
+        action: "snapshot",
+        pageId: page.id,
+        snapshot,
+      };
+      this.lastPage = page;
+      this.lastSnapshot = snapshot;
+      if (screenshot) {
+        result.screenshot = await this.captureScreenshot(client, "snapshot");
+      }
+      this.rememberAction("snapshot", result);
       return result;
     } finally {
       await client.close();
@@ -327,14 +383,19 @@ export class BrowserOperator {
     try {
       const title = await this.evaluate(client, "document.title");
       const screenshot = await this.captureScreenshot(client, "screenshot");
+      const snapshot = await this.buildPageSnapshot(client);
       this.lastPage = page;
-      return {
+      this.lastSnapshot = snapshot;
+      const result = {
         ok: true,
         action: "screenshot",
         pageId: page.id,
         title,
+        snapshot,
         screenshot,
       };
+      this.rememberAction("screenshot", result);
+      return result;
     } finally {
       await client.close();
     }
@@ -346,7 +407,7 @@ export class BrowserOperator {
       const expression = `(() => { const el = document.querySelector(${JSON.stringify(selector)}) || document.body; return el ? el.innerText.slice(0, 12000) : ""; })()`;
       const text = await this.evaluate(client, expression);
       this.lastPage = page;
-      return {
+      const result = {
         ok: true,
         action: "text",
         pageId: page.id,
@@ -354,6 +415,8 @@ export class BrowserOperator {
         text,
         length: String(text || "").length,
       };
+      this.rememberAction("text", result);
+      return result;
     } finally {
       await client.close();
     }
@@ -364,12 +427,14 @@ export class BrowserOperator {
     try {
       const links = await this.evaluate(client, `Array.from(document.querySelectorAll("a")).slice(0, 80).map((a) => ({ text: (a.innerText || a.title || "").trim().slice(0, 160), href: a.href }))`);
       this.lastPage = page;
-      return {
+      const result = {
         ok: true,
         action: "links",
         pageId: page.id,
         links: Array.isArray(links) ? links : [],
       };
+      this.rememberAction("links", result);
+      return result;
     } finally {
       await client.close();
     }
@@ -383,14 +448,19 @@ export class BrowserOperator {
     try {
       const result = await this.evaluate(client, `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return { clicked: false, reason: "not found" }; el.click(); return { clicked: true, text: (el.innerText || el.value || el.getAttribute("aria-label") || "").slice(0, 160) }; })()`);
       await sleep(800);
+      const snapshot = await this.buildPageSnapshot(client);
       this.lastPage = page;
-      return {
+      this.lastSnapshot = snapshot;
+      const output = {
         ok: Boolean(result?.clicked),
         action: "click",
         pageId: page.id,
         selector,
         result,
+        snapshot,
       };
+      this.rememberAction("click", output);
+      return output;
     } finally {
       await client.close();
     }
@@ -403,17 +473,70 @@ export class BrowserOperator {
     const { page, client } = await this.connectPage();
     try {
       const result = await this.evaluate(client, `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return { typed: false, reason: "not found" }; el.focus(); el.value = ${JSON.stringify(String(text || ""))}; el.dispatchEvent(new Event("input", { bubbles: true })); el.dispatchEvent(new Event("change", { bubbles: true })); return { typed: true, valueLength: el.value.length }; })()`);
+      const snapshot = await this.buildPageSnapshot(client);
       this.lastPage = page;
-      return {
+      this.lastSnapshot = snapshot;
+      const output = {
         ok: Boolean(result?.typed),
         action: "type",
         pageId: page.id,
         selector,
         result,
+        snapshot,
       };
+      this.rememberAction("type", output);
+      return output;
     } finally {
       await client.close();
     }
+  }
+
+  async buildPageSnapshot(client) {
+    return this.evaluate(client, `(() => {
+      const clean = (value, max = 180) => String(value || "").replace(/\\s+/g, " ").trim().slice(0, max);
+      const visible = (el) => {
+        const style = window.getComputedStyle(el);
+        const rect = el.getBoundingClientRect();
+        return style && style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
+      };
+      const selector = (el) => {
+        if (el.id) return "#" + CSS.escape(el.id);
+        const name = el.getAttribute("name");
+        if (name) return el.tagName.toLowerCase() + "[name=" + JSON.stringify(name) + "]";
+        const aria = el.getAttribute("aria-label");
+        if (aria) return el.tagName.toLowerCase() + "[aria-label=" + JSON.stringify(aria) + "]";
+        return el.tagName.toLowerCase();
+      };
+      return {
+        url: location.href,
+        title: document.title,
+        readyState: document.readyState,
+        textPreview: clean(document.body ? document.body.innerText : "", 1200),
+        links: Array.from(document.querySelectorAll("a")).filter(visible).slice(0, 30).map((a) => ({
+          text: clean(a.innerText || a.title || a.href),
+          href: a.href,
+          selector: selector(a),
+        })),
+        controls: Array.from(document.querySelectorAll("button,input,textarea,select,[role=button]")).filter(visible).slice(0, 50).map((el) => ({
+          tag: el.tagName.toLowerCase(),
+          type: el.getAttribute("type") || "",
+          text: clean(el.innerText || el.value || el.placeholder || el.getAttribute("aria-label") || el.getAttribute("name")),
+          selector: selector(el),
+          disabled: Boolean(el.disabled || el.getAttribute("aria-disabled") === "true"),
+        })),
+        forms: Array.from(document.querySelectorAll("form")).slice(0, 20).map((form, index) => ({
+          index,
+          action: form.action || "",
+          method: form.method || "get",
+          fields: Array.from(form.querySelectorAll("input,textarea,select")).slice(0, 30).map((el) => ({
+            name: el.getAttribute("name") || "",
+            type: el.getAttribute("type") || el.tagName.toLowerCase(),
+            placeholder: el.getAttribute("placeholder") || "",
+            selector: selector(el),
+          })),
+        })),
+      };
+    })()`);
   }
 
   async evaluate(client, expression) {
@@ -449,18 +572,22 @@ export class BrowserOperator {
       const target = normalizeUrl(url);
       const html = await this.fetchHtml(target);
       const markdown = this.htmlToMarkdown(html);
-      return {
+      const result = {
         url: target,
         content: markdown,
         length: markdown.length,
         status: "success",
       };
+      this.rememberAction("read_url", result);
+      return result;
     } catch (error) {
-      return {
+      const result = {
         url,
         error: error.message,
         status: "error",
       };
+      this.rememberAction("read_url", result);
+      return result;
     }
   }
 
@@ -474,11 +601,13 @@ export class BrowserOperator {
       windowsHide: true,
     });
     child.unref();
-    return {
+    const result = {
       opened: true,
       url: target,
       app: process.platform === "win32" ? "default Windows browser" : "default browser",
     };
+    this.rememberAction("open_url", result);
+    return result;
   }
 
   fetchHtml(url) {

@@ -7,6 +7,7 @@ OmniClaw runtime tools include:
 - computer_access_status, computer_access_audit, list_computer_directory, read_computer_file, write_computer_file, copy_computer_path, move_computer_path, delete_computer_path
 - OpenClaw-compatible aliases: read, write, edit, apply_patch
 - exec, process, code_execution
+- browser, browser_status, browser_audit, browser_snapshot, browser_links, browser_screenshot, browser_text
 - remember_note, list_notes, list_long_term_memory, promote_memory, dream_memory_sweep
 - memory_search, memory_get
 - create_task, list_tasks, run_task
