@@ -2170,6 +2170,26 @@ export class OmniClawAgent {
     if (modelToolLoop.toolOutputs.length > 0) {
       toolOutputs.push(...modelToolLoop.toolOutputs);
     }
+    if (toolOutputs.length > 0) {
+      const decoratedToolOutputs = toolOutputs.map((item) => this.decorateToolOutput(item));
+      toolOutputs.splice(0, toolOutputs.length, ...decoratedToolOutputs);
+      const needsAttention = decoratedToolOutputs.filter((item) =>
+        ["blocked", "failed", "pending-approval"].includes(item.toolSummary?.status),
+      );
+      if (needsAttention.length > 0) {
+        this.gateway.addEvent("tool.execution_needs_attention", {
+          runId: run.id,
+          sessionId: session.id,
+          agentId: routedAgent.id,
+          count: needsAttention.length,
+          tools: needsAttention.map((item) => ({
+            tool: item.tool,
+            status: item.toolSummary?.status || "failed",
+            nextFix: item.toolSummary?.nextFix || "",
+          })),
+        });
+      }
+    }
 
     for (const item of toolOutputs) {
       if (item.tool === "web_research" && item.output && !item.output.error) {
@@ -3311,6 +3331,162 @@ export class OmniClawAgent {
     return "";
   }
 
+  decorateToolOutput(item = {}) {
+    const status = this.classifyToolOutput(item);
+    const summary = this.summarizeToolOutputForUser(item);
+    const nextFix = this.nextFixForToolOutput(item, status);
+    return {
+      ...item,
+      toolSummary: {
+        status,
+        summary,
+        nextFix,
+      },
+    };
+  }
+
+  classifyToolOutput(item = {}) {
+    const output = item.output || {};
+    const execution = output.execution || (output.command && (output.stdout != null || output.stderr != null) ? output : null);
+    const status = String(output.status || execution?.status || "").toLowerCase();
+    if (output.approvalId || status === "approval-required" || status === "pending") {
+      return "pending-approval";
+    }
+    if (output.blocked || status === "blocked") {
+      return "blocked";
+    }
+    if (
+      output.error ||
+      output.ok === false ||
+      status === "failed" ||
+      status === "error" ||
+      execution?.timedOut ||
+      (execution && execution.exitCode != null && Number(execution.exitCode) !== 0)
+    ) {
+      return "failed";
+    }
+    return "completed";
+  }
+
+  summarizeToolOutputForUser(item = {}) {
+    const output = item.output || {};
+    if (output.error || output.blocked) {
+      return truncateTraceText(output.message || output.reason || output.stderr || "Tool blocked or failed.", 320);
+    }
+
+    const execution = output.execution || (output.command && (output.stdout != null || output.stderr != null) ? output : null);
+    if (execution) {
+      const body = execution.stdout || execution.stderr || execution.command || "No terminal output.";
+      const status = execution.status || output.status || "executed";
+      const exit = execution.exitCode != null ? `, exit ${execution.exitCode}` : "";
+      return truncateTraceText(`Terminal ${status}${exit}: ${body}`, 420);
+    }
+
+    if (Array.isArray(output.entries)) {
+      return `Listed ${output.entries.length} item(s) in ${output.path || "directory"}.`;
+    }
+
+    if (Array.isArray(output.results)) {
+      const first = output.results[0] || {};
+      return `${output.results.length} result(s)${first.title ? `, first: ${first.title}` : ""}.`;
+    }
+
+    if (Array.isArray(output.links)) {
+      return `Browser found ${output.links.length} link(s)${output.url ? ` at ${output.url}` : ""}.`;
+    }
+
+    if (output.title || output.url) {
+      return truncateTraceText(`Browser page: ${output.title || "untitled"}${output.url ? ` at ${output.url}` : ""}.`, 320);
+    }
+
+    if (output.screenshotPath || output.imagePath) {
+      return `Browser screenshot saved at ${output.screenshotPath || output.imagePath}.`;
+    }
+
+    if (output.path || output.file) {
+      const file = output.path || output.file;
+      if (output.bytesWritten != null) {
+        return `Wrote ${output.bytesWritten} byte(s) to ${file}.`;
+      }
+      if (output.deleted || output.trashPath) {
+        return `Deleted ${file}${output.trashPath ? ` to ${output.trashPath}` : ""}.`;
+      }
+      if (output.from && output.to) {
+        return `Moved/copied ${output.from} -> ${output.to}.`;
+      }
+      if (output.content != null) {
+        return `Read ${file}: ${truncateTraceText(output.content, 260)}`;
+      }
+      return `File operation completed: ${file}.`;
+    }
+
+    if (output.content != null || output.text != null) {
+      return truncateTraceText(output.content ?? output.text, 360);
+    }
+
+    return truncateTraceText(JSON.stringify(sanitizeTraceValue(output, { maxString: 220, maxArray: 5, maxDepth: 3 })), 420);
+  }
+
+  nextFixForToolOutput(item = {}, status = "") {
+    if (status === "completed") {
+      return "";
+    }
+    const tool = String(item.tool || "");
+    const output = item.output || {};
+    const text = `${output.message || ""} ${output.reason || ""} ${output.stderr || ""}`.toLowerCase();
+    if (status === "pending-approval") {
+      return "Approval panel me pending command/action approve karo, ya safer command bhejo.";
+    }
+    if (status === "blocked") {
+      return "Policy/allowed roots check karo; path ko allowed workspace root ke andar rakho ya trust setting badhao.";
+    }
+    if (/enoent|not found|cannot find|no such file|path/i.test(text)) {
+      return "Pehle directory list karo, exact path verify karo, phir command/file action rerun karo.";
+    }
+    if (/auth|login|api key|unauthorized|forbidden|credential/i.test(text)) {
+      return "Provider/API auth check karo: key, base URL, model, ya account login refresh karo.";
+    }
+    if (/timeout|timed out/i.test(text) || output.execution?.timedOut) {
+      return "Command/query ko chhota karo ya timeout badha kar rerun karo.";
+    }
+    if (/browser|url|navigation|page/i.test(tool) || /browser|url|navigation|page/i.test(text)) {
+      return "Browser status check karo, target URL open karo, phir snapshot/text/screenshot rerun karo.";
+    }
+    if (/terminal|shell|exec|command|code_execution|plan_shell_command/i.test(tool)) {
+      return "stderr/stdout inspect karo, command fix karo, phir terminal tool rerun karo.";
+    }
+    return "Tool output inspect karo, input/permission fix karo, phir same task rerun karo.";
+  }
+
+  buildToolExecutionReply({ toolOutputs = [] } = {}) {
+    if (!toolOutputs.length) {
+      return "";
+    }
+    const counts = toolOutputs.reduce((acc, item) => {
+      const status = item.toolSummary?.status || this.classifyToolOutput(item);
+      acc[status] = (acc[status] || 0) + 1;
+      return acc;
+    }, {});
+    const attentionCount = (counts.failed || 0) + (counts.blocked || 0) + (counts["pending-approval"] || 0);
+    const header = attentionCount > 0
+      ? `Tool run complete nahi hua: ${counts.completed || 0} completed, ${attentionCount} need attention.`
+      : `Tool run complete: ${counts.completed || toolOutputs.length} tool(s) completed.`;
+    const lines = toolOutputs.slice(0, 6).map((item) => {
+      const status = item.toolSummary?.status || this.classifyToolOutput(item);
+      const summary = item.toolSummary?.summary || this.summarizeToolOutputForUser(item);
+      return `- ${item.tool || "tool"} [${status}]: ${summary}`;
+    });
+    const fixes = toolOutputs
+      .map((item) => item.toolSummary?.nextFix || this.nextFixForToolOutput(item, item.toolSummary?.status))
+      .filter(Boolean);
+    return [
+      header,
+      ...lines,
+      fixes.length ? `Next fix: ${fixes[0]}` : "",
+      "Trace chat card me proof ke saath saved hai.",
+    ].filter(Boolean).join("\n");
+  }
+
   buildRuntimeToolReply({ intents = [], toolOutputs = [] } = {}) {
     const byTool = new Map(toolOutputs.map((item) => [item.tool, item.output || {}]));
     if (intents.includes("provider-status") && byTool.has("provider_status")) {
@@ -3399,6 +3575,10 @@ export class OmniClawAgent {
         `Browser: open URL ${access.browser?.openUrl ? "on" : "off"}, read URL ${access.browser?.readUrl ? "on" : "off"}.`,
         `Recent computer operations: ${access.operations?.recent?.length || 0}.`,
       ].join(" ");
+    }
+
+    if (toolOutputs.length > 0) {
+      return this.buildToolExecutionReply({ toolOutputs });
     }
 
     return "";

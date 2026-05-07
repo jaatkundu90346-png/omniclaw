@@ -60,6 +60,14 @@ function assert(condition, message) {
   }
 }
 
+function assertToolSummaries(toolOutputs, label) {
+  assert(Array.isArray(toolOutputs), `${label} should include toolOutputs array.`);
+  for (const item of toolOutputs) {
+    assert(item.toolSummary?.status, `${label} tool ${item.tool || "unknown"} should include toolSummary.status.`);
+    assert(item.toolSummary?.summary, `${label} tool ${item.tool || "unknown"} should include toolSummary.summary.`);
+  }
+}
+
 async function run() {
   const suffix = Date.now().toString(36);
   const originalProfile = fs.existsSync(profilePath) ? fs.readFileSync(profilePath, "utf8") : null;
@@ -93,6 +101,7 @@ async function run() {
       research.run?.status === "completed",
       "research request should finish instead of hanging after planning.",
     );
+    assertToolSummaries(research.toolOutputs, "research request");
 
     const task = await postChat("test karo", `chat-smoke-test-${suffix}`);
     const commands = task.toolOutputs.map((item) => item.output?.command || "");
@@ -104,6 +113,7 @@ async function run() {
       ),
       "test karo build command should complete.",
     );
+    assertToolSummaries(task.toolOutputs, "test request");
 
     const selfBuild = await postChat(
       "Codex plus OpenClaw combine karke OmniClaw self build plan",
@@ -114,6 +124,7 @@ async function run() {
       "self-build request should call self_build_plan.",
     );
     assert(selfBuild.reply && selfBuild.reply.length > 0, "self-build reply should be non-empty.");
+    assertToolSummaries(selfBuild.toolOutputs, "self-build request");
 
     console.log("Chat agent smoke test passed");
   } finally {

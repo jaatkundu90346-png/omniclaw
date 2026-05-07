@@ -659,12 +659,24 @@ function renderSessionDetail(session) {
 
 function summarizeToolOutput(item = {}) {
   const output = item.output || {};
+  if (item.toolSummary?.summary) {
+    return item.toolSummary.summary;
+  }
   if (output.error || output.blocked) {
     return output.message || output.reason || output.stderr || "Tool was blocked or failed.";
+  }
+  if (Array.isArray(output.entries)) {
+    return `Listed ${output.entries.length} item(s) in ${output.path || "directory"}.`;
   }
   if (Array.isArray(output.results)) {
     const first = output.results[0] || {};
     return `${output.results.length} result(s)${first.title ? `: ${first.title}` : ""}`;
+  }
+  if (Array.isArray(output.links)) {
+    return `Found ${output.links.length} link(s)${output.url ? ` at ${output.url}` : ""}.`;
+  }
+  if (output.title || output.url) {
+    return `Browser page: ${output.title || "untitled"}${output.url ? ` at ${output.url}` : ""}.`;
   }
   if (output.execution) {
     const execution = output.execution || {};
@@ -681,6 +693,28 @@ function summarizeToolOutput(item = {}) {
     return output.content;
   }
   return formatJson(output || {});
+}
+
+function toolOutputStatus(item = {}) {
+  if (item.toolSummary?.status) {
+    return item.toolSummary.status;
+  }
+  const output = item.output || {};
+  const execution = output.execution || {};
+  if (output.approvalId || output.status === "approval-required") {
+    return "pending-approval";
+  }
+  if (output.blocked || output.status === "blocked") {
+    return "blocked";
+  }
+  if (output.error || output.ok === false || execution.timedOut || (execution.exitCode != null && execution.exitCode !== 0)) {
+    return "failed";
+  }
+  return "completed";
+}
+
+function toolOutputNextFix(item = {}) {
+  return item.toolSummary?.nextFix || item.output?.nextFix || "";
 }
 
 function renderChatToolTrace(entry = {}) {
@@ -723,13 +757,19 @@ function renderChatToolTrace(entry = {}) {
     blocks.push([
       `<div class="chat-tool-strip">`,
       toolOutputs.map((item) => {
-        const failed = Boolean(item.output?.error || item.output?.blocked);
-        const label = item.source === "model-tool-loop" ? "brain" : "plan";
+        const toolStatus = toolOutputStatus(item);
+        const failed = ["failed", "blocked"].includes(toolStatus);
+        const pending = toolStatus === "pending-approval";
+        const label = toolStatus === "completed"
+          ? (item.source === "model-tool-loop" ? "brain" : "plan")
+          : toolStatus;
+        const nextFix = toolOutputNextFix(item);
         return [
           `<div class="chat-tool-card">`,
-          `<div class="chat-trace-head"><strong>${escapeHtml(item.tool || "tool")}</strong>${statusPill(failed ? "failed" : label, failed ? "danger" : "ok")}</div>`,
+          `<div class="chat-trace-head"><strong>${escapeHtml(item.tool || "tool")}</strong>${statusPill(label, failed ? "danger" : pending ? "warn" : "ok")}</div>`,
           item.reason ? `<small>${escapeHtml(item.reason)}</small>` : "",
           `<p>${escapeHtml(truncate(summarizeToolOutput(item), 220))}</p>`,
+          nextFix ? `<small class="chat-tool-nextfix">Next: ${escapeHtml(nextFix)}</small>` : "",
           `</div>`,
         ].join("");
       }).join(""),
