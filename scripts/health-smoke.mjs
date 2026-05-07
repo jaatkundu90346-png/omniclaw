@@ -47,6 +47,15 @@ async function run() {
       throw new Error("Health endpoint payload is not ok");
     }
 
+    const inspectorResponse = await fetch(`http://localhost:${port}/api/agents/main/inspector`);
+    if (!inspectorResponse.ok) {
+      throw new Error(`Agent inspector endpoint returned status ${inspectorResponse.status}`);
+    }
+    const inspectorPayload = await inspectorResponse.json();
+    if (!inspectorPayload.inspector?.workspace || !inspectorPayload.inspector?.memory) {
+      throw new Error("Agent inspector payload is missing workspace or memory.");
+    }
+
     console.log("Health smoke test passed");
   } finally {
     child.kill("SIGTERM");

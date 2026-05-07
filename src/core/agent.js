@@ -653,6 +653,86 @@ export class OmniClawAgent {
     };
   }
 
+  getAgentInspector(agentId = "main", options = {}) {
+    const agent = this.agents.resolveAgent(agentId);
+    const profile = this.agents.getProfileForAgent(agent.id);
+    const workspaceContext = this.loadWorkspaceContext(agent.id);
+    const profileFacts = this.readAgentProfileFacts(agent.id);
+    const sessions = this.sessions.listSessions(40).filter((session) => session.agentId === agent.id);
+    const requestedSessionId = String(options.sessionId || "").trim();
+    const selectedSession =
+      (requestedSessionId ? this.sessions.getSession(requestedSessionId, { messageLimit: 30 }) : null) ||
+      (sessions[0]?.id ? this.sessions.getSession(sessions[0].id, { messageLimit: 30 }) : null);
+    const memory = {
+      overview: this.memory.getOverview(agent.id),
+      recentConversations: this.memory.getRecentConversations(profile.maxRecentConversations || 12, agent.id),
+      longTerm: this.memory.getLongTermMemory(20, agent.id),
+      notes: this.memory.getNotes(agent.id),
+      research: this.memory.getResearch(8, agent.id),
+      artifacts: this.memory.getArtifacts(8, agent.id),
+    };
+    const sessionMessages = (selectedSession?.transcript || []).filter((entry) => entry.type === "message");
+    const userMessages = sessionMessages.filter((entry) => entry.role === "user");
+    const assistantMessages = sessionMessages.filter((entry) => entry.role === "assistant");
+
+    return sanitizeTraceValue(
+      {
+        agent: {
+          id: agent.id,
+          name: agent.name,
+          description: agent.description,
+          workspacePath: agent.workspacePath,
+          channels: agent.channels || [],
+        },
+        profile: {
+          id: profile.id,
+          description: profile.description,
+          allowToolExecution: profile.allowToolExecution,
+          enableSkillMatching: profile.enableSkillMatching,
+          maxRecentConversations: profile.maxRecentConversations,
+          contextBudget: this.contextEngine.getMaxChars(profile),
+        },
+        profileFacts,
+        workspace: {
+          agentId: workspaceContext.agentId,
+          loadedAt: workspaceContext.loadedAt,
+          heartbeatPrompt: workspaceContext.heartbeatPrompt,
+          files: workspaceContext.files.map((file) => ({
+            name: file.name,
+            scope: file.scope,
+            path: file.path,
+            chars: String(file.content || "").length,
+            contentPreview: file.content || "",
+          })),
+        },
+        memory,
+        sessions: {
+          count: sessions.length,
+          recent: sessions.slice(0, 12),
+          selected: selectedSession
+            ? {
+                id: selectedSession.id,
+                label: selectedSession.label,
+                status: selectedSession.status,
+                channel: selectedSession.channel,
+                messageCount: selectedSession.messageCount,
+                runCount: selectedSession.runCount,
+                transcriptEntryCount: selectedSession.transcriptEntryCount,
+                lastUserMessagePreview: selectedSession.lastUserMessagePreview,
+                lastAssistantPreview: selectedSession.lastAssistantPreview,
+                userMessageCount: userMessages.length,
+                assistantMessageCount: assistantMessages.length,
+                recentMessages: sessionMessages.slice(-8),
+              }
+            : null,
+        },
+        tools: this.tools.getAll({ agentId: agent.id }).slice(0, 80),
+        skills: this.agents.filterSkills(this.skills.getAll(), agent.id).slice(0, 40),
+      },
+      { maxString: 1200, maxArray: 80, maxDepth: 6 },
+    );
+  }
+
   getState() {
     this.provider = createProvider(this.config, this.secrets);
     const config = this.config.getConfig();

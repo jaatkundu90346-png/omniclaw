@@ -185,6 +185,7 @@ let selectedAdapterId = "";
 let selectedJobId = "";
 let selectedShellAuditId = "";
 let latestPluginDetail = null;
+let latestAgentInspector = null;
 let refreshTimer = null;
 let shellPolicyEditorDirty = false;
 let latestMediaSetup = null;
@@ -1108,7 +1109,73 @@ function agentCard(agent, selected) {
   ].join("");
 }
 
-function renderAgentDetail(agent) {
+function renderAgentInspector(inspector = null) {
+  if (!inspector) {
+    return `<div class="agent-inspector">${emptyState("Loading workspace and memory inspector...")}</div>`;
+  }
+  const workspaceFiles = inspector.workspace?.files || [];
+  const longTerm = inspector.memory?.longTerm || [];
+  const recentMessages = inspector.sessions?.selected?.recentMessages || [];
+  const facts = inspector.profileFacts || {};
+  const factLines = [
+    facts.assistantName ? `Assistant: ${facts.assistantName}` : "",
+    facts.userName ? `User: ${facts.userName}` : "",
+    facts.userLocation ? `Location: ${facts.userLocation}` : "",
+    ...(facts.preferences || []).slice(0, 4),
+  ].filter(Boolean);
+  const fileRows = workspaceFiles
+    .map((file) => [
+      `<details class="inspector-file">`,
+      `<summary><strong>${escapeHtml(file.scope || "workspace")} / ${escapeHtml(file.name || "file")}</strong><span>${escapeHtml(`${file.chars || 0} chars`)}</span></summary>`,
+      `<pre>${escapeHtml(file.contentPreview || "(empty)")}</pre>`,
+      `<small>${escapeHtml(file.path || "")}</small>`,
+      `</details>`,
+    ].join(""))
+    .join("");
+  const memoryRows = longTerm.slice(0, 8).map((item) => [
+    `<div class="stack-item">`,
+    `<div class="row-top"><strong>${escapeHtml(item.title || item.id || "memory")}</strong>${statusPill(item.importance || "memory", item.importance === "high" ? "ok" : "muted")}</div>`,
+    `<p>${escapeHtml(item.text || "")}</p>`,
+    `<small>${escapeHtml(item.sourceRef || item.sourceType || "memory")}</small>`,
+    `</div>`,
+  ].join("")).join("");
+  const sessionRows = recentMessages.slice(-6).map((entry) => [
+    `<div class="transcript-line transcript-line-compact">`,
+    `<span class="transcript-role">${escapeHtml(entry.role || "msg")}</span>`,
+    `<div><strong>${escapeHtml(formatDate(entry.at))}</strong><br>${escapeHtml(truncate(entry.text || "", 220))}</div>`,
+    `</div>`,
+  ].join("")).join("");
+
+  return [
+    `<div class="agent-inspector">`,
+    `<div class="mini-header"><span>Loaded identity and memory</span></div>`,
+    `<div class="metric-strip">`,
+    metricTile("Workspace files", workspaceFiles.length, "Prompt bootstrap files"),
+    metricTile("Long memory", inspector.memory?.overview?.longTerm || longTerm.length, "Promoted facts"),
+    metricTile("Sessions", inspector.sessions?.count || 0, "Agent lanes"),
+    metricTile("Context", inspector.profile?.contextBudget || 0, "Character budget"),
+    `</div>`,
+    `<div class="summary-grid">`,
+    summaryCard("Profile facts", factLines.join(" | ") || "No PROFILE.md facts saved yet.", `Source: ${inspector.agent?.workspacePath || "workspace"}`),
+    summaryCard(
+      "Selected session",
+      inspector.sessions?.selected
+        ? `${inspector.sessions.selected.label} | ${inspector.sessions.selected.messageCount || 0} messages | ${inspector.sessions.selected.runCount || 0} runs`
+        : "No selected session loaded.",
+      inspector.sessions?.selected?.lastUserMessagePreview || "No user preview.",
+    ),
+    `</div>`,
+    `<div class="split-columns">`,
+    `<div><div class="mini-header"><span>Workspace files loaded into prompt</span></div><div class="detail-list">${fileRows || emptyState("No workspace identity files loaded.")}</div></div>`,
+    `<div><div class="mini-header"><span>Long-term memory</span></div><div class="detail-list">${memoryRows || emptyState("No long-term memory promoted yet.")}</div></div>`,
+    `</div>`,
+    `<div class="mini-header"><span>Current session recent transcript</span></div>`,
+    `<div class="transcript-block transcript-block-compact">${sessionRows || emptyState("No recent messages for selected session.")}</div>`,
+    `</div>`,
+  ].join("");
+}
+
+function renderAgentDetail(agent, inspector = null) {
   if (!agent) {
     return emptyState("Select an agent to inspect its routed profile.");
   }
@@ -1161,6 +1228,7 @@ function renderAgentDetail(agent) {
     summaryCard("Restrictions", `Blocked permissions: ${blockedPermissions}`, `Blocked tools: ${blockedTools}`),
     summaryCard("Allowlist", `Allowed tools: ${allowedTools}`, `Allowed skills: ${(agent.allowedSkillIds || []).join(", ") || "all visible"}`),
     `</div>`,
+    renderAgentInspector(inspector),
     `<div class="split-columns">`,
     `<div><div class="mini-header"><span>Visible tools</span></div><div class="detail-list">${toolList || emptyState("No tools visible for this agent.")}</div></div>`,
     `<div><div class="mini-header"><span>Visible skills</span></div><div class="detail-list">${skillList || emptyState("No skills visible for this agent.")}</div></div>`,
@@ -1506,19 +1574,56 @@ function renderAgents(state) {
   agentOutput.innerHTML =
     agents.map((agent) => agentCard(agent, agent.id === selectedAgentId)).join("") ||
     emptyState("No agents configured.");
-  agentDetailOutput.innerHTML = renderAgentDetail(selectedAgentSummary());
+  const inspector = latestAgentInspector?.agent?.id === selectedAgentId ? latestAgentInspector : null;
+  agentDetailOutput.innerHTML = renderAgentDetail(selectedAgentSummary(), inspector);
+  void refreshAgentInspector(selectedAgentId);
 
   for (const button of agentOutput.querySelectorAll("[data-agent-id]")) {
     button.addEventListener("click", async () => {
       selectedAgentId = normalizeAgentId(button.dataset.agentId || "main");
       const session = pickSessionForAgent(selectedAgentId, latestState?.sessions || []);
       selectedSessionId = session?.id || "";
+      latestAgentInspector = null;
+      rememberSelectedSession({ id: selectedSessionId, agentId: selectedAgentId });
       if (session?.label) {
         sessionLabelInput.value = session.label;
       }
       agentSelect.value = selectedAgentId;
       await loadState();
     });
+  }
+}
+
+async function refreshAgentInspector(agentId = "main") {
+  const normalizedAgentId = normalizeAgentId(agentId);
+  if (!normalizedAgentId || !agentDetailOutput) {
+    return;
+  }
+  if (latestAgentInspector?.agent?.id === normalizedAgentId && latestAgentInspector?.sessionId === selectedSessionId) {
+    return;
+  }
+  try {
+    const params = selectedSessionId ? `?sessionId=${encodeURIComponent(selectedSessionId)}` : "";
+    const response = await fetch(`/api/agents/${encodeURIComponent(normalizedAgentId)}/inspector${params}`);
+    const data = await response.json();
+    if (!response.ok || data.error) {
+      throw new Error(data.error || "Agent inspector unavailable.");
+    }
+    if (selectedAgentId !== normalizedAgentId) {
+      return;
+    }
+    latestAgentInspector = {
+      ...(data.inspector || {}),
+      sessionId: selectedSessionId,
+    };
+    agentDetailOutput.innerHTML = renderAgentDetail(selectedAgentSummary(), latestAgentInspector);
+  } catch (error) {
+    if (selectedAgentId === normalizedAgentId) {
+      agentDetailOutput.innerHTML = [
+        renderAgentDetail(selectedAgentSummary(), null),
+        `<div class="empty-state">${escapeHtml(`Agent inspector failed: ${error.message}`)}</div>`,
+      ].join("");
+    }
   }
 }
 

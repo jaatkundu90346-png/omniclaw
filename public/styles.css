@@ -1108,12 +1108,21 @@ h3 {
   gap: 14px;
 }
 
+.agent-inspector {
+  display: grid;
+  gap: 14px;
+}
+
 .transcript-block {
   display: grid;
   gap: 10px;
   max-height: 420px;
   overflow: auto;
   padding-right: 6px;
+}
+
+.transcript-block-compact {
+  max-height: 260px;
 }
 
 .transcript-line {
@@ -1124,6 +1133,58 @@ h3 {
   border: 1px solid rgba(200, 185, 159, 0.64);
   border-radius: 16px;
   background: rgba(255, 255, 255, 0.56);
+}
+
+.transcript-line-compact {
+  padding: 10px;
+}
+
+.inspector-file {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-muted);
+  overflow: hidden;
+}
+
+.inspector-file summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  cursor: pointer;
+}
+
+.inspector-file summary strong,
+.inspector-file summary span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.inspector-file summary span {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.72rem;
+}
+
+.inspector-file pre {
+  margin: 0;
+  padding: 12px;
+  max-height: 220px;
+  overflow: auto;
+  border-top: 1px solid var(--line);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 0.76rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.inspector-file small {
+  display: block;
+  padding: 0 12px 12px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
 }
 
 .transcript-role {

@@ -312,6 +312,21 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (req.method === "GET" && pathname.startsWith("/api/agents/") && pathname.endsWith("/inspector")) {
+    const parts = pathname.split("/").filter(Boolean);
+    const agentId = parts[2] || "main";
+    try {
+      sendJson(res, 200, {
+        inspector: agent.getAgentInspector(agentId, {
+          sessionId: url.searchParams.get("sessionId") || "",
+        }),
+      });
+    } catch (error) {
+      sendJson(res, 404, { error: error.message });
+    }
+    return;
+  }
+
   if (req.method === "GET" && pathname.startsWith("/api/agents/")) {
     const agentId = pathname.slice("/api/agents/".length);
     const item = agent.getState().agents.find((entry) => entry.id === agentId) || null;
