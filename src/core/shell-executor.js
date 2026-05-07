@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import os from "node:os";
 import path from "node:path";
 
 import { analyzeShellCommand, DEFAULT_ALLOWLIST_PATTERNS, DEFAULT_BLOCKED_PATTERNS } from "./shell-policy.js";
@@ -11,6 +12,31 @@ function ensureWithinRoot(rootDir, candidatePath) {
     throw new Error("Execution cwd is outside the OmniClaw workspace.");
   }
   return resolvedCandidate;
+}
+
+function expandShellPath(rootDir, inputPath) {
+  const text = String(inputPath || "").trim();
+  if (!text) {
+    return path.resolve(rootDir);
+  }
+  if (text === "~" || text.startsWith("~/") || text.startsWith("~\\")) {
+    return path.resolve(path.join(os.homedir(), text.slice(2)));
+  }
+  return path.resolve(path.isAbsolute(text) ? text : path.join(rootDir, text));
+}
+
+function ensureWithinAnyRoot(rootDir, candidatePath, roots = []) {
+  const target = expandShellPath(rootDir, candidatePath);
+  const allowedRoots = Array.isArray(roots) && roots.length > 0 ? roots : ["~"];
+  const allowed = allowedRoots.some((root) => {
+    const resolvedRoot = expandShellPath(rootDir, root);
+    const relative = path.relative(resolvedRoot, target);
+    return relative === "" || (relative && !relative.startsWith("..") && !path.isAbsolute(relative));
+  });
+  if (!allowed) {
+    throw new Error("Execution cwd is outside configured computer access roots.");
+  }
+  return target;
 }
 
 function truncateOutput(value, maxBytes) {
@@ -43,6 +69,15 @@ export class ShellExecutor {
       cwd: shellConfig.cwd || ".",
       timeoutMs: Number(shellConfig.timeoutMs || 15000),
       maxOutputBytes: Number(shellConfig.maxOutputBytes || 12000),
+      allowExternalCwd: Boolean(shellConfig.allowExternalCwd),
+      externalCwdRoots: Array.isArray(shellConfig.externalCwdRoots)
+        ? shellConfig.externalCwdRoots
+        : Array.isArray(config.tools?.computerAccess?.allowedRoots)
+          ? config.tools.computerAccess.allowedRoots
+          : ["~"],
+      blockedPathPatterns: Array.isArray(config.tools?.computerAccess?.blockedPathPatterns)
+        ? config.tools.computerAccess.blockedPathPatterns
+        : [],
       allowlistMode: String(shellConfig.allowlistMode || "advisory").toLowerCase(),
       trustLevel: String(shellConfig.trustLevel || "protected").toLowerCase(),
       allowlistPatterns: Array.isArray(shellConfig.allowlistPatterns)
@@ -80,7 +115,15 @@ export class ShellExecutor {
     const policy = this.getPolicy();
     const safeCommand = this.validateCommand(command, policy);
     const analysis = analyzeShellCommand(safeCommand, policy);
-    const safeCwd = ensureWithinRoot(this.rootDir, path.join(this.rootDir, cwd || policy.cwd || "."));
+    const requestedCwd = cwd || policy.cwd || ".";
+    const safeCwd = policy.allowExternalCwd && (path.isAbsolute(String(requestedCwd)) || String(requestedCwd).startsWith("~"))
+      ? ensureWithinAnyRoot(this.rootDir, requestedCwd, policy.externalCwdRoots)
+      : ensureWithinRoot(this.rootDir, path.join(this.rootDir, requestedCwd));
+    const normalizedCwd = safeCwd.replace(/\\/g, "/");
+    const blockedCwd = policy.blockedPathPatterns.find((pattern) => new RegExp(pattern, "i").test(normalizedCwd));
+    if (blockedCwd) {
+      throw new Error(`Execution cwd is blocked by computer access policy: ${blockedCwd}`);
+    }
     const timeoutMs = Math.max(1000, Math.min(policy.timeoutMs, 120000));
     const maxOutputBytes = Math.max(1024, Math.min(policy.maxOutputBytes, 256000));
     const startedAt = new Date().toISOString();

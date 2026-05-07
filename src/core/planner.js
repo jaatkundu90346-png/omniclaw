@@ -123,6 +123,14 @@ export class Planner {
         reason: "User asked to give OmniClaw laptop/computer tools and understand current access policy.",
       });
     }
+    if (intents.includes("computer-search")) {
+      steps.push({
+        type: "tool",
+        tool: "search_computer_files",
+        input: { query: this.extractComputerSearchQuery(message), maxDepth: 4, maxResults: 80, maxScanMs: 7000 },
+        reason: "User asked OmniClaw to search laptop files through governed computer access.",
+      });
+    }
     if (intents.includes("browser-observe")) {
       steps.push({
         type: "tool",
@@ -551,6 +559,19 @@ JSON:`;
     return message
       .replace(/research|search web|look up|find on web/gi, "")
       .trim() || message;
+  }
+
+  extractComputerSearchQuery(message) {
+    const quoted = message.match(/["']([^"']+)["']/);
+    if (quoted) {
+      return quoted[1].trim();
+    }
+
+    return String(message || "")
+      .replace(/search file|find file|search laptop|search computer|laptop ki files|puri laptop ki files|pura laptop|puri laptop/gi, "")
+      .replace(/\b(file|folder|naam|name|dhund|dhoond|search|find|kar|karo|me|mein|ma)\b/gi, "")
+      .replace(/\s+/g, " ")
+      .trim() || "omniclaw";
   }
 
   extractDelegationRequest(message) {

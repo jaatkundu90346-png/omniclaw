@@ -66,6 +66,39 @@ function openBrowser(url) {
   spawn("xdg-open", [url], { detached: true, stdio: "ignore" }).unref();
 }
 
+function psEscape(value) {
+  return String(value).replace(/'/g, "''");
+}
+
+function ensureDesktopShortcut() {
+  if (process.platform !== "win32") {
+    return { created: false, skipped: "not-windows" };
+  }
+  const targetPath = process.pkg ? process.execPath : path.join(rootDir, "start-omniclaw.bat");
+  if (!fs.existsSync(targetPath)) {
+    return { created: false, skipped: "missing-target" };
+  }
+  const shortcutPath = path.join(os.homedir(), "Desktop", "OmniClaw.lnk");
+  if (fs.existsSync(shortcutPath)) {
+    return { created: false, path: shortcutPath, skipped: "already-exists" };
+  }
+  const script = [
+    "$shell = New-Object -ComObject WScript.Shell",
+    `$shortcut = $shell.CreateShortcut('${psEscape(shortcutPath)}')`,
+    `$shortcut.TargetPath = '${psEscape(targetPath)}'`,
+    `$shortcut.WorkingDirectory = '${psEscape(rootDir)}'`,
+    "$shortcut.Description = 'Start OmniClaw local gateway dashboard'",
+    "$shortcut.Save()",
+  ].join("; ");
+  const child = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script], {
+    detached: false,
+    stdio: "ignore",
+    windowsHide: true,
+  });
+  child.unref();
+  return { created: true, path: shortcutPath };
+}
+
 async function startServer() {
   ensureDirs();
   const existing = await requestJson(`${baseUrl}/api/health`);
@@ -113,7 +146,11 @@ function printStatus(result) {
 async function main() {
   const args = new Set(process.argv.slice(2));
   const result = await startServer();
+  const shortcut = ensureDesktopShortcut();
   printStatus(result);
+  if (shortcut.created) {
+    console.log(`Desktop shortcut created: ${shortcut.path}`);
+  }
   if (result.health?.ok && !args.has("--no-open")) {
     openBrowser(baseUrl);
   }

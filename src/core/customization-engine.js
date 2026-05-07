@@ -58,6 +58,62 @@ export class CustomizationEngine {
       };
     }
 
+    if (input.ownerMode === true || input.fullComputerAccess === true) {
+      patch.tools = {
+        ...(patch.tools || {}),
+        permissions: {
+          allowComputerAccess: true,
+          allowShellExecution: true,
+          allowShellPlanning: true,
+          allowBrowserControl: true,
+          allowFileRead: true,
+          allowDirectoryList: true,
+          allowFileWrite: true,
+          allowConfigWrite: true,
+          allowConnectorWrite: true,
+        },
+        computerAccess: {
+          enabled: true,
+          allowedRoots: ["~", "C:/", "D:/", "E:/", "F:/"],
+          allowWrite: true,
+          allowDelete: true,
+          allowPermanentDelete: false,
+          trashDir: "data/trash",
+          maxReadBytes: 262144,
+          blockedPathPatterns: [
+            "^[A-Z]:/Windows(?:/|$)",
+            "^[A-Z]:/Program Files(?:/|$)",
+            "^[A-Z]:/Program Files \\(x86\\)(?:/|$)",
+            "^[A-Z]:/ProgramData(?:/|$)",
+          ],
+        },
+        shellExecution: {
+          trustLevel: "full",
+          allowlistMode: "advisory",
+          allowExternalCwd: true,
+          timeoutMs: 120000,
+          maxOutputBytes: 256000,
+        },
+      };
+    }
+
+    if (input.computerAccess && typeof input.computerAccess === "object") {
+      patch.tools = {
+        ...(patch.tools || {}),
+        computerAccess: input.computerAccess,
+      };
+    }
+
+    if (input.shellExecution && typeof input.shellExecution === "object") {
+      patch.tools = {
+        ...(patch.tools || {}),
+        shellExecution: {
+          ...(patch.tools?.shellExecution || {}),
+          ...input.shellExecution,
+        },
+      };
+    }
+
     if (Object.keys(patch).length === 0) {
       return {
         updated: false,
@@ -216,6 +272,42 @@ export class CustomizationEngine {
         ? `Provider live test passed for ${candidate.model}.`
         : `Provider live test failed for ${candidate.model}: ${live.error}`,
     };
+  }
+
+  async listProviderModels(input = {}) {
+    const config = this.configStore.getConfig();
+    const profileId = String(input.profileId || "").trim();
+    const profile = profileId ? config.providerProfiles?.[profileId] : null;
+    const candidate = {
+      mode: String(input.mode || profile?.mode || config.provider.mode || "").trim(),
+      baseUrl: String(input.baseUrl || profile?.baseUrl || config.provider.baseUrl || "").trim(),
+      apiKeyProviderId: String(input.apiKeyProviderId || profile?.apiKeyProviderId || config.provider.apiKeyProviderId || "").trim(),
+      httpReferer: String(input.httpReferer || profile?.httpReferer || config.provider.httpReferer || "").trim(),
+      appTitle: String(input.appTitle || profile?.appTitle || config.provider.appTitle || config.app?.name || "").trim(),
+    };
+    if (candidate.mode === "mock") {
+      return {
+        ok: true,
+        endpoint: null,
+        models: [{ id: "local-rule-engine", ownedBy: "omniclaw" }],
+        count: 1,
+        message: "Offline provider has one local rule-engine model.",
+      };
+    }
+    if (candidate.mode === "codex-cli") {
+      return {
+        ok: true,
+        endpoint: null,
+        models: [{ id: "account-default", ownedBy: "codex-cli" }],
+        count: 1,
+        message: "Codex CLI uses the signed-in account model selection.",
+      };
+    }
+    const provider = new OpenAICompatibleProvider(this.configStore, this.secretStore);
+    return provider.listModels({
+      ...candidate,
+      apiKey: input.apiKey || "",
+    });
   }
 
   validateProviderProfile(profileId, profile) {

@@ -310,7 +310,11 @@
     "computerAccess": {
       "enabled": true,
       "allowedRoots": [
-        "~"
+        "~",
+        "C:/",
+        "D:/",
+        "E:/",
+        "F:/"
       ],
       "allowWrite": true,
       "allowDelete": true,
@@ -318,7 +322,6 @@
       "trashDir": "data/trash",
       "maxReadBytes": 131072,
       "blockedPathPatterns": [
-        "^[A-Z]:/$",
         "^[A-Z]:/Windows(?:/|$)",
         "^[A-Z]:/Program Files(?:/|$)",
         "^[A-Z]:/Program Files \\(x86\\)(?:/|$)",
@@ -335,9 +338,10 @@
     "shellExecution": {
       "cwd": ".",
       "allowlistMode": "advisory",
-      "trustLevel": "balanced",
-      "timeoutMs": 15000,
-      "maxOutputBytes": 12000,
+      "trustLevel": "full",
+      "allowExternalCwd": true,
+      "timeoutMs": 120000,
+      "maxOutputBytes": 256000,
       "allowlistPatterns": [
         "^node\\s+(-v|--version)$",
         "^npm\\s+(-v|--version)$",

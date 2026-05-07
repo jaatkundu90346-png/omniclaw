@@ -88,6 +88,11 @@ export class OpenAICompatibleProvider {
     );
   }
 
+  getModelsUrl(config = this.configStore.getConfig()) {
+    const baseUrl = String(config.provider.baseUrl || "").replace(/\/+$/, "");
+    return `${baseUrl}/models`;
+  }
+
   getInfo() {
     const config = this.configStore.getConfig();
     const readiness = this.getApiKeyReadiness(config);
@@ -197,6 +202,66 @@ export class OpenAICompatibleProvider {
       model: data.model || providerConfig.provider.model,
       responsePreview: String(data.choices?.[0]?.message?.content || "").slice(0, 140),
       usage: data.usage || null,
+    };
+  }
+
+  async listModels(input = {}) {
+    const config = this.configStore.getConfig();
+    const providerConfig = {
+      ...config,
+      provider: {
+        ...config.provider,
+        baseUrl: input.baseUrl || config.provider.baseUrl,
+        apiKeyProviderId: input.apiKeyProviderId || config.provider.apiKeyProviderId,
+      },
+    };
+    const apiKey = String(input.apiKey || "").trim() || this.getResolvedApiKey(providerConfig);
+    if (!apiKey) {
+      return {
+        ok: false,
+        endpoint: this.getModelsUrl(providerConfig),
+        models: [],
+        error: `API key missing for ${providerConfig.provider.apiKeyProviderId || providerConfig.provider.apiKeyEnv}.`,
+      };
+    }
+
+    let response;
+    try {
+      response = await fetchWithTimeout(this.getModelsUrl(providerConfig), {
+        method: "GET",
+        headers: this.getHeaders(providerConfig, apiKey),
+      }, Number(providerConfig.provider.timeoutMs || 45000));
+    } catch (error) {
+      return {
+        ok: false,
+        endpoint: this.getModelsUrl(providerConfig),
+        models: [],
+        error: `request failed: ${error.message}`,
+      };
+    }
+
+    if (!response.ok) {
+      return {
+        ok: false,
+        endpoint: this.getModelsUrl(providerConfig),
+        models: [],
+        error: await this.parseProviderError(response),
+      };
+    }
+
+    const data = await response.json();
+    const models = Array.isArray(data.data)
+      ? data.data.map((item) => ({
+          id: item.id || item.name || "",
+          ownedBy: item.owned_by || item.ownedBy || "",
+          created: item.created || null,
+        })).filter((item) => item.id)
+      : [];
+    return {
+      ok: true,
+      endpoint: this.getModelsUrl(providerConfig),
+      models,
+      count: models.length,
     };
   }
 

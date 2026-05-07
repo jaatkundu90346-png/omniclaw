@@ -243,6 +243,10 @@ a {
   gap: 10px;
 }
 
+.setup-choice-wide {
+  margin-top: 2px;
+}
+
 .setup-choice {
   display: grid;
   grid-template-columns: auto 1fr;
@@ -347,8 +351,25 @@ a {
   display: flex;
 }
 
+.input-with-action {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
 .input-with-toggle input {
   padding-right: 44px;
+}
+
+.btn-icon-text {
+  min-height: 42px;
+  padding: 0 14px;
+  border: 1px solid #2A2F3A;
+  border-radius: 10px;
+  color: #F0F3F6;
+  background: #161B22;
+  font-weight: 800;
+  cursor: pointer;
 }
 
 .toggle-visibility {

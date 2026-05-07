@@ -135,6 +135,7 @@ export class IntentEngine {
       lowered.includes("computer access") ||
       lowered.includes("laptop access") ||
       lowered.includes("pura computer") ||
+      lowered.includes("puri laptop") ||
       lowered.includes("files delete") ||
       lowered.includes("file delete") ||
       lowered.includes("browser access") ||
@@ -143,6 +144,19 @@ export class IntentEngine {
       lowered.includes("computer dana")
     ) {
       intents.push("computer-access");
+    }
+
+    if (
+      lowered.includes("search file") ||
+      lowered.includes("find file") ||
+      lowered.includes("search laptop") ||
+      lowered.includes("search computer") ||
+      lowered.includes("laptop ki files") ||
+      lowered.includes("puri laptop ki files") ||
+      lowered.includes("pura laptop") ||
+      lowered.includes("puri laptop")
+    ) {
+      intents.push("computer-search");
     }
 
     if (

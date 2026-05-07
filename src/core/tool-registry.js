@@ -592,6 +592,7 @@ export class ToolRegistry {
             operations: {
               available: [
                 "list_computer_directory",
+                "search_computer_files",
                 "read_computer_file",
                 "write_computer_file",
                 "create_computer_directory",
@@ -602,6 +603,19 @@ export class ToolRegistry {
               recent: recentOperations,
             },
           };
+        },
+      },
+      search_computer_files: {
+        description: "Search file and folder names across configured laptop access roots.",
+        permission: "allowComputerAccess",
+        run: async (input = {}, context) => {
+          const result = this.fileStore.searchComputerFiles(input, this.requireComputerAccessPolicy());
+          this.recordComputerAccessOperation("search", {
+            path: result.roots?.join(", ") || "",
+            type: "search",
+            bytes: result.results?.length || 0,
+          }, context);
+          return result;
         },
       },
       computer_access_audit: {
@@ -881,6 +895,11 @@ export class ToolRegistry {
         description: "Validate provider profile and key readiness.",
         permission: "allowConfigWrite",
         run: async (input) => this.customizationEngine.testProviderProfile(input),
+      },
+      list_provider_models: {
+        description: "Fetch available models from the selected provider's /models endpoint.",
+        permission: "allowConfigWrite",
+        run: async (input) => this.customizationEngine.listProviderModels(input),
       },
       exec: {
         description: "OpenClaw-compatible alias for governed terminal command execution.",

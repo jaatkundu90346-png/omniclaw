@@ -46,15 +46,39 @@
                 <option value="gemini">Gemini</option>
                 <option value="groq">Groq</option>
                 <option value="openrouter">OpenRouter</option>
+                <option value="nvidia">NVIDIA NIM</option>
+                <option value="mistral">Mistral</option>
+                <option value="deepseek">DeepSeek</option>
+                <option value="together">Together</option>
+                <option value="fireworks">Fireworks</option>
                 <option value="codex-cli">OpenAI account (Codex CLI)</option>
                 <option value="local-compatible">Local compatible</option>
               </select>
+            </div>
+            <div class="form-group">
+              <label for="first-provider-base-url">Base URL</label>
+              <input id="first-provider-base-url" type="url" placeholder="https://api.openai.com/v1" autocomplete="off" />
+            </div>
+            <div class="form-group">
+              <label for="first-provider-model">Model</label>
+              <div class="input-with-action">
+                <input id="first-provider-model" list="first-provider-model-list" type="text" placeholder="Fetch models or type model id" autocomplete="off" />
+                <button id="first-provider-fetch-models" type="button" class="btn-icon-text">Fetch</button>
+              </div>
+              <datalist id="first-provider-model-list"></datalist>
             </div>
             <div class="form-group">
               <label for="first-provider-key">API key</label>
               <input id="first-provider-key" type="password" placeholder="Paste key here" autocomplete="off" />
             </div>
           </div>
+          <label class="setup-choice setup-choice-wide">
+            <input type="checkbox" id="first-owner-mode" checked />
+            <span>
+              <strong>Owner mode</strong>
+              <small>Give OmniClaw laptop file search, browser, terminal, and governed write/delete access.</small>
+            </span>
+          </label>
           <div class="form-group">
             <label for="first-runtime-profile">Runtime profile</label>
             <select id="first-runtime-profile">

@@ -139,6 +139,113 @@ export class FileStore {
     };
   }
 
+  searchComputerFiles(input = {}, policy = {}) {
+    const query = String(input.query || input.pattern || input.name || "").trim().toLowerCase();
+    if (!query) {
+      throw new Error("A search query is required.");
+    }
+
+    const maxResults = Math.max(1, Math.min(500, Number(input.maxResults || 80)));
+    const maxDepth = Math.max(0, Math.min(12, Number(input.maxDepth ?? 4)));
+    const maxScanMs = Math.max(500, Math.min(30000, Number(input.maxScanMs || 7000)));
+    const startedAt = Date.now();
+    const roots = input.path || input.root
+      ? [input.path || input.root]
+      : Array.isArray(policy.allowedRoots) && policy.allowedRoots.length > 0
+        ? policy.allowedRoots
+        : ["~"];
+    const results = [];
+    const skipped = [];
+    let timedOut = false;
+    let scannedDirectories = 0;
+
+    for (const root of roots) {
+      if (results.length >= maxResults || timedOut) {
+        break;
+      }
+      let start;
+      try {
+        start = this.resolveComputerPath(root, policy);
+        if (!fs.existsSync(start)) {
+          skipped.push({ path: root, reason: "root does not exist" });
+          continue;
+        }
+      } catch (error) {
+        skipped.push({ path: root, reason: error.message });
+        continue;
+      }
+
+      const stack = [{ dir: start, depth: 0 }];
+      while (stack.length > 0 && results.length < maxResults) {
+        if (Date.now() - startedAt > maxScanMs) {
+          timedOut = true;
+          break;
+        }
+        const current = stack.pop();
+        let entries;
+        try {
+          entries = fs.readdirSync(current.dir, { withFileTypes: true });
+          scannedDirectories += 1;
+        } catch (error) {
+          skipped.push({ path: current.dir, reason: error.code || error.message });
+          continue;
+        }
+
+        for (const entry of entries) {
+          if (Date.now() - startedAt > maxScanMs) {
+            timedOut = true;
+            break;
+          }
+          if (results.length >= maxResults) {
+            break;
+          }
+          const absolutePath = path.join(current.dir, entry.name);
+          try {
+            this.resolveComputerPath(absolutePath, policy);
+          } catch {
+            continue;
+          }
+          if (entry.isSymbolicLink()) {
+            continue;
+          }
+
+          let stat = null;
+          try {
+            stat = fs.statSync(absolutePath);
+          } catch {
+            // Metadata is best effort.
+          }
+          if (entry.name.toLowerCase().includes(query)) {
+            results.push({
+              name: entry.name,
+              path: absolutePath,
+              type: entry.isDirectory() ? "directory" : "file",
+              size: stat?.size || 0,
+              modifiedAt: stat?.mtime ? stat.mtime.toISOString() : null,
+            });
+          }
+          if (entry.isDirectory() && current.depth < maxDepth) {
+            stack.push({ dir: absolutePath, depth: current.depth + 1 });
+          }
+        }
+      }
+    }
+
+    return {
+      query,
+      roots,
+      maxDepth,
+      maxResults,
+      maxScanMs,
+      scannedDirectories,
+      results,
+      skipped: skipped.slice(0, 50),
+      truncated: results.length >= maxResults || timedOut,
+      timedOut,
+      elapsedMs: Date.now() - startedAt,
+    };
+  }
+
   readComputerText(inputPath, maxBytes = 128 * 1024, policy = {}) {
     const target = this.resolveComputerPath(inputPath, policy);
     const buffer = fs.readFileSync(target);

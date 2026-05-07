@@ -4639,8 +4639,13 @@ function initGatewayConnection() {
   const firstLaunchStatus = document.getElementById("first-launch-status");
   const firstLaunchProviderFields = document.getElementById("first-launch-provider-fields");
   const firstProviderProfile = document.getElementById("first-provider-profile");
+  const firstProviderBaseUrl = document.getElementById("first-provider-base-url");
+  const firstProviderModel = document.getElementById("first-provider-model");
+  const firstProviderModelList = document.getElementById("first-provider-model-list");
+  const firstProviderFetchModels = document.getElementById("first-provider-fetch-models");
   const firstProviderKey = document.getElementById("first-provider-key");
   const firstRuntimeProfile = document.getElementById("first-runtime-profile");
+  const firstOwnerMode = document.getElementById("first-owner-mode");
   const skipFirstLaunchButton = document.getElementById("skip-first-launch");
 
   function hasCompletedSetup() {
@@ -4663,8 +4668,15 @@ function initGatewayConnection() {
   function updateSetupMode() {
     const mode = firstLaunchForm?.querySelector('input[name="setup-mode"]:checked')?.value || "offline";
     const profileId = firstProviderProfile?.value || "openai";
+    const preset = PROVIDER_PRESETS[profileId] || PROVIDER_PRESETS.openai;
     if (firstLaunchProviderFields) {
       firstLaunchProviderFields.hidden = mode !== "openai";
+    }
+    if (firstProviderBaseUrl && !firstProviderBaseUrl.value.trim()) {
+      firstProviderBaseUrl.value = preset.baseUrl || "";
+    }
+    if (firstProviderModel && !firstProviderModel.value.trim()) {
+      firstProviderModel.value = preset.model || "";
     }
     if (firstProviderKey) {
       const usesCodexCli = mode === "openai" && profileId === "codex-cli";
@@ -4674,6 +4686,47 @@ function initGatewayConnection() {
         firstProviderKey.value = "";
       }
     }
+  }
+
+  function resetFirstProviderPreset() {
+    const profileId = firstProviderProfile?.value || "openai";
+    const preset = PROVIDER_PRESETS[profileId] || PROVIDER_PRESETS.openai;
+    if (firstProviderBaseUrl) {
+      firstProviderBaseUrl.value = preset.baseUrl || "";
+    }
+    if (firstProviderModel) {
+      firstProviderModel.value = preset.model || "";
+    }
+    if (firstProviderModelList) {
+      firstProviderModelList.innerHTML = "";
+    }
+    updateSetupMode();
+  }
+
+  async function fetchFirstLaunchModels() {
+    const profileId = firstProviderProfile?.value || "openai";
+    const preset = PROVIDER_PRESETS[profileId] || PROVIDER_PRESETS.openai;
+    const usesCodexCli = profileId === "codex-cli";
+    firstLaunchStatus.textContent = "Fetching available models...";
+    const data = await postJson("/api/provider/models", {
+      profileId,
+      baseUrl: firstProviderBaseUrl?.value.trim() || preset.baseUrl || "",
+      apiKeyProviderId: preset.providerId,
+      apiKey: usesCodexCli ? "" : firstProviderKey?.value.trim() || "",
+    });
+    if (data.error || data.ok === false) {
+      throw new Error(data.error || data.message || "Model fetch failed.");
+    }
+    if (firstProviderModelList) {
+      firstProviderModelList.innerHTML = (data.models || [])
+        .slice(0, 250)
+        .map((model) => `<option value="${escapeHtml(model.id || model)}"></option>`)
+        .join("");
+    }
+    if (firstProviderModel && !firstProviderModel.value.trim() && data.models?.[0]?.id) {
+      firstProviderModel.value = data.models[0].id;
+    }
+    firstLaunchStatus.textContent = `Fetched ${data.count || data.models?.length || 0} model(s).`;
   }
 
   async function applyFirstLaunchSetup() {
@@ -4686,6 +4739,7 @@ function initGatewayConnection() {
         profile,
         providerMode: "mock",
         model: "local-rule-engine",
+        ownerMode: firstOwnerMode?.checked !== false,
       });
       if (data.error) {
         throw new Error(data.error);
@@ -4697,6 +4751,8 @@ function initGatewayConnection() {
     const profileId = firstProviderProfile?.value || "openai";
     const preset = PROVIDER_PRESETS[profileId] || PROVIDER_PRESETS.openai;
     const apiKey = firstProviderKey?.value.trim() || "";
+    const baseUrl = firstProviderBaseUrl?.value.trim() || preset.baseUrl || "";
+    const model = firstProviderModel?.value.trim() || preset.model || "";
     const usesCodexCli = profileId === "codex-cli";
     if (!usesCodexCli && !apiKey) {
       throw new Error("API key is required for provider mode. Pick Offline mode to skip it.");
@@ -4717,6 +4773,9 @@ function initGatewayConnection() {
     }
     const runtimeData = await postJson("/api/config", {
       profile,
+      ownerMode: firstOwnerMode?.checked !== false,
+      ...(baseUrl ? { baseUrl } : {}),
+      ...(model ? { model } : {}),
       ...(usesCodexCli ? {} : { apiKeyProviderId: preset.providerId }),
     });
     if (runtimeData.error) {
@@ -4762,6 +4821,17 @@ function initGatewayConnection() {
   }
 
   firstLaunchForm?.addEventListener("change", updateSetupMode);
+  firstProviderProfile?.addEventListener("change", resetFirstProviderPreset);
+  firstProviderFetchModels?.addEventListener("click", async () => {
+    try {
+      firstProviderFetchModels.disabled = true;
+      await fetchFirstLaunchModels();
+    } catch (error) {
+      firstLaunchStatus.textContent = error.message;
+    } finally {
+      firstProviderFetchModels.disabled = false;
+    }
+  });
   firstLaunchForm?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const submitButton = firstLaunchForm.querySelector('button[type="submit"]');
@@ -4784,7 +4854,6 @@ function initGatewayConnection() {
   });
 
   updateSetupMode();
-  firstProviderProfile?.addEventListener("change", updateSetupMode);
   if (!hasCompletedSetup() && firstLaunchForm) {
     gatewayCard?.classList.add("is-first-launch");
     return;

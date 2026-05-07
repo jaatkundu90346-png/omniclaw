@@ -1764,6 +1764,17 @@ if (req.method === "GET" && pathname === "/api/workspace") {
     return;
   }
 
+  if (req.method === "POST" && pathname === "/api/provider/models") {
+    try {
+      const body = await parseBody(req);
+      const result = await agent.tools.run("list_provider_models", body);
+      sendJson(res, 200, result);
+    } catch (error) {
+      sendJson(res, 400, { error: error.message });
+    }
+    return;
+  }
+
   if (req.method === "POST" && pathname === "/api/provider/codex/login") {
     try {
       const result = startCodexLoginWindow();
