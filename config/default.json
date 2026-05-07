@@ -7,9 +7,11 @@
     "activeProfile": "balanced",
     "modelToolLoop": {
       "enabled": true,
-      "maxRounds": 2,
+      "maxRounds": 3,
       "maxToolCallsPerRound": 3,
-      "runWhenHeuristicHasTools": false
+      "runWhenHeuristicHasTools": false,
+      "recoverMissingToolCalls": true,
+      "maxRepeatedToolCalls": 1
     },
     "profiles": {
       "lite": {

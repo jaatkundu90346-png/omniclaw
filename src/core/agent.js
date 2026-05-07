@@ -2282,6 +2282,10 @@ export class OmniClawAgent {
           tools: availableTools,
           skills: matchedSkills,
           toolOutputs,
+        }) || this.buildUngroundedToolClaimFallback({
+          providerResponse,
+          intents,
+          toolOutputs,
         }) || providerResponse;
       }
 
@@ -2403,6 +2407,8 @@ export class OmniClawAgent {
       maxRounds: Math.max(0, Math.min(5, Number(loop.maxRounds || 2))),
       maxToolCallsPerRound: Math.max(1, Math.min(8, Number(loop.maxToolCallsPerRound || 3))),
       runWhenHeuristicHasTools: Boolean(loop.runWhenHeuristicHasTools),
+      recoverMissingToolCalls: loop.recoverMissingToolCalls !== false,
+      maxRepeatedToolCalls: Math.max(1, Math.min(4, Number(loop.maxRepeatedToolCalls || 1))),
     };
   }
 
@@ -2476,25 +2482,100 @@ export class OmniClawAgent {
   }
 
   parseModelToolCalls(text, allowedToolIds, maxCalls) {
+    return this.parseModelToolLoopResponse(text, allowedToolIds, maxCalls).calls;
+  }
+
+  parseModelToolLoopResponse(text, allowedToolIds, maxCalls) {
     const raw = String(text || "").trim();
+    const response = {
+      raw: truncateTraceText(raw, 2000),
+      validJson: false,
+      finalReady: false,
+      reason: "",
+      calls: [],
+      rejectedCalls: [],
+      missingToolCallClaim: this.looksLikeUnexecutedToolClaim(raw),
+    };
     if (!raw) {
-      return [];
+      response.reason = "empty-model-tool-loop-response";
+      return response;
     }
     let parsed = null;
     try {
       parsed = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || raw);
-    } catch {
-      return [];
+      response.validJson = true;
+    } catch (error) {
+      response.reason = `invalid-json: ${error.message}`;
+      return response;
     }
-    const calls = Array.isArray(parsed.toolCalls) ? parsed.toolCalls : Array.isArray(parsed.tools) ? parsed.tools : [];
-    return calls
+    response.finalReady = Boolean(parsed.finalReady || parsed.done || parsed.complete);
+    response.reason = String(parsed.reason || parsed.summary || "").trim();
+    const calls = Array.isArray(parsed.toolCalls)
+      ? parsed.toolCalls
+      : Array.isArray(parsed.tools)
+        ? parsed.tools
+        : Array.isArray(parsed.calls)
+          ? parsed.calls
+          : [];
+    const normalized = calls
       .map((call) => ({
         tool: String(call.tool || call.name || "").trim(),
         input: this.normalizeModelToolInput(call),
         reason: String(call.reason || "Provider requested this tool.").trim(),
-      }))
-      .filter((call) => call.tool && allowedToolIds.has(call.tool))
-      .slice(0, maxCalls);
+      }));
+    response.rejectedCalls = normalized.filter((call) => !call.tool || !allowedToolIds.has(call.tool));
+    response.calls = normalized.filter((call) => call.tool && allowedToolIds.has(call.tool)).slice(0, maxCalls);
+    return response;
+  }
+
+  looksLikeUnexecutedToolClaim(text = "") {
+    return /\b(research(?:ing)?|search(?:ing)?|look(?:ing)? up|browse|fetch|open(?:ing)?|read(?:ing)? file|run(?:ning)? command|screenshot|inspect(?:ing)?|check(?:ing)? the web)\b/i.test(String(text || ""));
+  }
+
+  buildFallbackToolCall({ message = "", intents = [], allowedToolIds = new Set() } = {}) {
+    const lowered = String(message || "").toLowerCase();
+    const candidates = [];
+    if (intents.includes("research") || /\b(research|search web|look up|find on web)\b/i.test(lowered)) {
+      candidates.push({
+        tool: "web_research",
+        input: { query: this.planner.extractResearchQuery(message) },
+        reason: "Recovered a missing web research tool call from provider text.",
+      });
+      candidates.push({
+        tool: "web_search",
+        input: { query: this.planner.extractResearchQuery(message) },
+        reason: "Recovered a missing web search tool call from provider text.",
+      });
+    }
+    if (intents.includes("browser-observe") || /\b(browser snapshot|inspect browser|page snapshot)\b/i.test(lowered)) {
+      candidates.push({
+        tool: "browser_snapshot",
+        input: { screenshot: /screenshot|capture/i.test(message) },
+        reason: "Recovered a missing browser snapshot tool call from provider text.",
+      });
+    }
+    if (intents.includes("file-list")) {
+      candidates.push({
+        tool: "list_files",
+        input: { path: this.planner.extractPath(message, ".") },
+        reason: "Recovered a missing workspace file listing tool call.",
+      });
+    }
+    if (intents.includes("file-read")) {
+      candidates.push({
+        tool: "read_file",
+        input: { path: this.planner.extractPath(message) },
+        reason: "Recovered a missing workspace file read tool call.",
+      });
+    }
+    if (intents.includes("system-status")) {
+      candidates.push({
+        tool: "computer_system_status",
+        input: {},
+        reason: "Recovered a missing system status tool call.",
+      });
+    }
+    return candidates.find((call) => allowedToolIds.has(call.tool)) || null;
   }
 
   normalizeModelToolInput(call = {}) {
@@ -2532,6 +2613,12 @@ export class OmniClawAgent {
       rounds: 0,
       toolCallCount: 0,
       skippedReason: "",
+      stoppedReason: "",
+      finalReady: false,
+      recoveredToolCalls: 0,
+      repeatedToolCallsSkipped: 0,
+      rejectedToolCalls: [],
+      roundDetails: [],
       errors: [],
     };
     if (!this.shouldRunModelToolLoop({ forcedResponse, runtimeToolReply, profile, toolOutputs, intents })) {
@@ -2541,10 +2628,17 @@ export class OmniClawAgent {
 
     const allowedToolIds = new Set((tools || []).map((tool) => tool.id));
     const extraOutputs = [];
+    const callCounts = new Map();
     report.attempted = true;
 
     for (let round = 1; round <= settings.maxRounds; round += 1) {
       report.rounds = round;
+      this.gateway.addEvent("model_tool_loop.round_started", {
+        runId: run.id,
+        sessionId: session.id,
+        agentId: agent.id,
+        round,
+      });
       let completion;
       try {
         completion = await this.provider.complete([
@@ -2565,15 +2659,84 @@ export class OmniClawAgent {
         ]);
       } catch (error) {
         report.errors.push(error.message);
+        report.roundDetails.push({
+          round,
+          status: "provider-error",
+          error: error.message,
+        });
+        this.gateway.addEvent("model_tool_loop.round_failed", {
+          runId: run.id,
+          sessionId: session.id,
+          agentId: agent.id,
+          round,
+          error: error.message,
+        });
         break;
       }
 
-      const calls = this.parseModelToolCalls(completion?.text || "", allowedToolIds, settings.maxToolCallsPerRound);
+      const parsed = this.parseModelToolLoopResponse(completion?.text || "", allowedToolIds, settings.maxToolCallsPerRound);
+      let calls = parsed.calls;
+      if (parsed.rejectedCalls.length > 0) {
+        report.rejectedToolCalls.push(...parsed.rejectedCalls.map((call) => ({
+          round,
+          tool: call.tool || "",
+          reason: call.tool ? "tool-not-allowed-or-unknown" : "missing-tool-name",
+        })));
+      }
       if (calls.length === 0) {
-        break;
+        const fallback = settings.recoverMissingToolCalls && parsed.missingToolCallClaim
+          ? this.buildFallbackToolCall({ message, intents, allowedToolIds })
+          : null;
+        if (fallback) {
+          calls = [fallback];
+          report.recoveredToolCalls += 1;
+          this.gateway.addEvent("model_tool_loop.missing_tool_call_recovered", {
+            runId: run.id,
+            sessionId: session.id,
+            agentId: agent.id,
+            round,
+            tool: fallback.tool,
+            reason: fallback.reason,
+          });
+        } else {
+          report.finalReady = Boolean(parsed.finalReady);
+          report.stoppedReason = parsed.finalReady ? "model-final-ready" : parsed.reason || "no-tool-calls";
+          report.roundDetails.push({
+            round,
+            status: parsed.finalReady ? "final-ready" : "no-tool-calls",
+            validJson: parsed.validJson,
+            missingToolCallClaim: parsed.missingToolCallClaim,
+            reason: parsed.reason,
+          });
+          this.gateway.addEvent("model_tool_loop.round_stopped", {
+            runId: run.id,
+            sessionId: session.id,
+            agentId: agent.id,
+            round,
+            reason: report.stoppedReason,
+          });
+          break;
+        }
       }
 
+      let executedThisRound = 0;
       for (const call of calls) {
+        const callKey = `${call.tool}:${JSON.stringify(call.input || {})}`;
+        const seenCount = callCounts.get(callKey) || 0;
+        if (seenCount >= settings.maxRepeatedToolCalls) {
+          report.repeatedToolCallsSkipped += 1;
+          this.gateway.addEvent("model_tool_loop.tool_skipped", {
+            runId: run.id,
+            sessionId: session.id,
+            agentId: agent.id,
+            round,
+            tool: call.tool,
+            reason: "repeat-call-budget-exceeded",
+          });
+          continue;
+        }
+        callCounts.set(callKey, seenCount + 1);
+        executedThisRound += 1;
         const toolTraceId = createToolTraceId();
         const toolStartedAt = new Date().toISOString();
         this.upsertRunToolTrace(run.id, {
@@ -2649,6 +2812,29 @@ export class OmniClawAgent {
           error: Boolean(output?.error),
         });
       }
+      report.roundDetails.push({
+        round,
+        status: executedThisRound > 0 ? "tools-executed" : "all-tools-skipped",
+        validJson: parsed.validJson,
+        callCount: executedThisRound,
+        skippedCallCount: calls.length - executedThisRound,
+        recovered: !parsed.calls.length && calls.length > 0,
+        rejectedCallCount: parsed.rejectedCalls.length,
+      });
+      this.gateway.addEvent("model_tool_loop.round_completed", {
+        runId: run.id,
+        sessionId: session.id,
+        agentId: agent.id,
+        round,
+        callCount: executedThisRound,
+      });
+      if (executedThisRound === 0) {
+        report.stoppedReason = "repeat-call-budget-exceeded";
+        break;
+      }
+    }
+    if (!report.stoppedReason) {
+      report.stoppedReason = report.rounds >= settings.maxRounds ? "max-rounds-reached" : "completed";
     }
 
     return { report, toolOutputs: extraOutputs };
@@ -3147,6 +3333,30 @@ export class OmniClawAgent {
       toolSummary,
       `Main ${agent.name || agent.id || "active agent"} as OmniClaw local runtime abhi bhi sessions, memory, tools, gateway aur safe computer access sambhal sakta hoon.`,
       `Fix: BYOK panel se provider switch karo ya terminal me codex login chalao. Detail: ${text.slice(0, 420)}`,
+    ].join(" ");
+  }
+
+  buildUngroundedToolClaimFallback({ providerResponse = "", intents = [], toolOutputs = [] } = {}) {
+    const text = String(providerResponse || "").trim();
+    if (!this.looksLikeUnexecutedToolClaim(text) || toolOutputs.length > 0) {
+      return "";
+    }
+    const toolLikelyIntents = new Set([
+      "research",
+      "browser-observe",
+      "file-read",
+      "file-list",
+      "shell-plan",
+      "system-status",
+      "computer-access",
+    ]);
+    if (!intents.some((intent) => toolLikelyIntents.has(intent))) {
+      return "";
+    }
+    return [
+      "Provider ne tool use ka claim kiya, lekin OmniClaw trace me koi tool execution record nahi mila.",
+      "Isliye maine is reply ko grounded result ki tarah accept nahi kiya.",
+      "Dobara request bhejo with explicit target, jaise: research query, browser snapshot URL, file path, ya terminal command.",
     ].join(" ");
   }
 
