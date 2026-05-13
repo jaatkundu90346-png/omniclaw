@@ -4045,7 +4045,7 @@ form.addEventListener("submit", async (event) => {
     await loadState();
   } catch (error) {
     chatOutput.textContent =
-      error?.name === "AbortError" ? "Run aborted from the local UI." : `Run failed: ${error.message}`;
+      error?.name === "AbortError" ? "Task stopped. Conversation history is still saved." : `Run failed: ${error.message}`;
   } finally {
     activeChatController = null;
     if (abortRunButton) {

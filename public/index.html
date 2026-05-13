@@ -318,19 +318,49 @@
                 </div>
                 <div class="chat-output-container">
                   <div class="output-header">
-                    <span>Conversation</span>
+                    <span>Task conversation</span>
                     <div class="output-actions">
-                      <button type="button" class="button button-ghost button-small" id="clear-output">Clear</button>
+                      <button type="button" class="button button-ghost button-small" id="clear-output">Clear chat</button>
                     </div>
                   </div>
                   <div id="chat-transcript" class="chat-transcript">No conversation loaded yet.</div>
                   <pre id="chat-output" class="console-output chat-output">Waiting for input...</pre>
                 </div>
-                <div>
+                <aside class="manus-computer-panel" aria-label="OmniClaw live workspace">
+                  <div class="computer-panel-head">
+                    <div class="computer-thumb" aria-hidden="true">
+                      <span></span>
+                    </div>
+                    <div>
+                      <strong>Live workspace</strong>
+                      <small id="computer-mode-status">Waiting for a task</small>
+                    </div>
+                    <button type="button" class="icon-button" id="computer-panel-toggle" aria-label="Focus live workspace">▣</button>
+                  </div>
+                  <div class="computer-screen">
+                    <div class="browser-bar">
+                      <span></span>
+                      <p id="computer-url-status">local://omniclaw/task</p>
+                    </div>
+                    <div class="computer-stage">
+                      <span class="stage-orb"></span>
+                      <strong>Browser, files, terminal, and memory show up here.</strong>
+                      <p>When a task is running, this area becomes the agent's visible work log.</p>
+                    </div>
+                  </div>
+                  <div class="computer-progress-card">
+                    <div class="progress-title">
+                      <strong>Task progress</strong>
+                      <span id="computer-progress-count">0/0</span>
+                    </div>
+                    <div id="live-run-output" class="live-run-output">No active run.</div>
+                  </div>
+                </aside>
+                <div class="message-composer">
                   <label for="message">Message</label>
                   <textarea
                     id="message"
-                    rows="6"
+                    rows="4"
                     placeholder="Ask OmniClaw to research, build, inspect files, run a command, browse a page, or automate a workflow..."
                   ></textarea>
                 </div>
@@ -343,39 +373,10 @@
                 </div>
                 <div class="chat-actions">
                   <button type="submit" class="button button-primary">Start task</button>
-                  <button type="button" class="button button-ghost" id="abort-run" disabled>Abort</button>
+                  <button type="button" class="button button-ghost" id="abort-run" disabled title="Stop the currently running task only. It does not delete chat history.">Stop task</button>
+                  <small class="stop-help">Stops only the active run. Chat history stays saved.</small>
                 </div>
               </form>
-              <aside class="manus-computer-panel" aria-label="OmniClaw computer activity">
-                <div class="computer-panel-head">
-                  <div class="computer-thumb" aria-hidden="true">
-                    <span></span>
-                  </div>
-                  <div>
-                    <strong>OmniClaw's Computer</strong>
-                    <small id="computer-mode-status">Waiting for a task</small>
-                  </div>
-                  <button type="button" class="icon-button" id="computer-panel-toggle" aria-label="Focus computer panel">▣</button>
-                </div>
-                <div class="computer-screen">
-                  <div class="browser-bar">
-                    <span></span>
-                    <p id="computer-url-status">local://omniclaw/task</p>
-                  </div>
-                  <div class="computer-stage">
-                    <span class="stage-orb"></span>
-                    <strong>Ready to use browser, files, terminal, and memory.</strong>
-                    <p>Task previews and tool progress appear here while OmniClaw works.</p>
-                  </div>
-                </div>
-                <div class="computer-progress-card">
-                  <div class="progress-title">
-                    <strong>Task progress</strong>
-                    <span id="computer-progress-count">0/0</span>
-                  </div>
-                  <div id="live-run-output" class="live-run-output">No active run.</div>
-                </div>
-              </aside>
             </div>
           </section>
 
