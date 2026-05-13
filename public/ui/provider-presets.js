@@ -5,6 +5,7 @@ export const PROVIDER_PRESETS = {
   groq: { providerId: "groq", baseUrl: "https://api.groq.com/openai/v1", model: "llama-3.1-70b-versatile" },
   openrouter: { providerId: "openrouter", baseUrl: "https://openrouter.ai/api/v1", model: "openai/gpt-4o-mini" },
   nvidia: { providerId: "nvidia", baseUrl: "https://integrate.api.nvidia.com/v1", model: "z-ai/glm-5.1" },
+  minimax: { providerId: "minimax", baseUrl: "https://api.minimax.io/v1", model: "MiniMax-M2.7" },
   "codex-cli": { providerId: "codex-cli", baseUrl: "", model: "account-default" },
   "local-compatible": { providerId: "local-compatible", baseUrl: "http://localhost:11434/v1", model: "llama3.2" },
   ollama: { providerId: "ollama", baseUrl: "http://localhost:11434/v1", model: "llama3.1" },

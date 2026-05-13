@@ -35,6 +35,15 @@ const providerStatusOutput = document.querySelector("#provider-status-output");
 const testProviderButton = document.querySelector("#test-provider");
 const openCodexLoginButton = document.querySelector("#open-codex-login");
 const providerCodexHelp = document.querySelector("#provider-codex-help");
+const providerProfileInput = document.querySelector("#provider-profile");
+const providerKeyIdInput = document.querySelector("#provider-key-id");
+const providerKeyInput = document.querySelector("#provider-key");
+const providerBaseUrlInput = document.querySelector("#provider-base-url");
+const providerModelSetupInput = document.querySelector("#provider-model-setup");
+const providerModelList = document.querySelector("#provider-model-list");
+const providerFetchModelsButton = document.querySelector("#provider-fetch-models");
+const providerChatEndpoint = document.querySelector("#provider-chat-endpoint");
+const providerModelsEndpoint = document.querySelector("#provider-models-endpoint");
 const designBridgeForm = document.querySelector("#design-bridge-form");
 const designBridgeText = document.querySelector("#design-bridge-text");
 const designBridgeOutput = document.querySelector("#design-bridge-output");
@@ -1034,16 +1043,21 @@ function syncRuntimeControls(state) {
   const runtimeProfile = (state.runtime && state.runtime.profile && state.runtime.profile.id) || config.runtime?.activeProfile;
   const providerConfig = config.provider || {};
   const providerProfileId = providerConfig.apiKeyProviderId;
-  const providerInput = document.querySelector("#provider-key");
   const removeKeyInput = document.querySelector("#provider-remove-key");
 
   document.querySelector("#profile").value = runtimeProfile || "balanced";
   document.querySelector("#provider-mode").value = providerConfig.mode || "mock";
   document.querySelector("#provider-model").value = providerConfig.model || "";
-  document.querySelector("#provider-key-id").value = providerProfileId || "openai";
-  document.querySelector("#provider-profile").value = inferProfileFromProviderId(providerProfileId || "openai");
-  if (providerInput && document.activeElement !== providerInput) {
-    providerInput.value = "";
+  if (providerKeyIdInput) providerKeyIdInput.value = providerProfileId || "openai";
+  if (providerProfileInput) providerProfileInput.value = inferProfileFromProviderId(providerProfileId || "openai");
+  if (providerBaseUrlInput && document.activeElement !== providerBaseUrlInput) {
+    providerBaseUrlInput.value = providerConfig.baseUrl || "";
+  }
+  if (providerModelSetupInput && document.activeElement !== providerModelSetupInput) {
+    providerModelSetupInput.value = providerConfig.model || "";
+  }
+  if (providerKeyInput && document.activeElement !== providerKeyInput) {
+    providerKeyInput.value = "";
   }
   if (removeKeyInput) {
     removeKeyInput.checked = false;
@@ -1052,11 +1066,9 @@ function syncRuntimeControls(state) {
 }
 
 function updateProviderProfileControls() {
-  const profileInput = document.querySelector("#provider-profile");
-  const keyInput = document.querySelector("#provider-key");
-  const keyIdInput = document.querySelector("#provider-key-id");
   const removeKeyInput = document.querySelector("#provider-remove-key");
-  const profileId = profileInput?.value || "openai";
+  const profileId = providerProfileInput?.value || "openai";
+  const preset = PROVIDER_PRESETS[profileId] || PROVIDER_PRESETS.openai;
   const isCodexCli = profileId === "codex-cli";
   if (providerCodexHelp) {
     providerCodexHelp.hidden = !isCodexCli;
@@ -1064,21 +1076,31 @@ function updateProviderProfileControls() {
   if (openCodexLoginButton) {
     openCodexLoginButton.hidden = !isCodexCli;
   }
-  if (keyInput) {
-    keyInput.disabled = isCodexCli;
-    keyInput.placeholder = isCodexCli ? "No API key needed" : "sk-...";
+  if (providerKeyInput) {
+    providerKeyInput.disabled = isCodexCli;
+    providerKeyInput.placeholder = isCodexCli ? "No API key needed" : "Paste provider API key";
     if (isCodexCli) {
-      keyInput.value = "";
+      providerKeyInput.value = "";
     }
   }
-  if (keyIdInput) {
-    keyIdInput.readOnly = isCodexCli;
+  if (providerKeyIdInput) {
+    providerKeyIdInput.readOnly = isCodexCli;
   }
+  if (providerBaseUrlInput) providerBaseUrlInput.disabled = isCodexCli;
+  if (providerModelSetupInput) providerModelSetupInput.disabled = isCodexCli;
+  if (providerFetchModelsButton) providerFetchModelsButton.disabled = isCodexCli;
   if (removeKeyInput) {
     removeKeyInput.disabled = isCodexCli;
     if (isCodexCli) {
       removeKeyInput.checked = false;
     }
+  }
+  const baseUrl = String(providerBaseUrlInput?.value || preset.baseUrl || "").replace(/\/+$/, "");
+  if (providerChatEndpoint) {
+    providerChatEndpoint.textContent = isCodexCli ? "codex exec" : baseUrl ? `${baseUrl}/chat/completions` : "Set base URL";
+  }
+  if (providerModelsEndpoint) {
+    providerModelsEndpoint.textContent = isCodexCli ? "account default" : baseUrl ? `${baseUrl}/models` : "Set base URL";
   }
 }
 
@@ -3707,10 +3729,16 @@ async function testProviderReadiness() {
     return;
   }
   providerOutput.textContent = "Checking provider readiness...";
-  const profileId = document.querySelector("#provider-profile").value;
+  const profileId = providerProfileInput?.value || "openai";
   const preset = PROVIDER_PRESETS[profileId] || PROVIDER_PRESETS.openai;
-  const providerId = document.querySelector("#provider-key-id").value.trim() || preset.providerId;
-  const data = await postJson("/api/provider/test", { profileId, apiKeyProviderId: providerId, live: true });
+  const providerId = providerKeyIdInput?.value.trim() || preset.providerId;
+  const data = await postJson("/api/provider/test", {
+    profileId,
+    apiKeyProviderId: providerId,
+    baseUrl: providerBaseUrlInput?.value.trim() || preset.baseUrl || "",
+    model: providerModelSetupInput?.value.trim() || preset.model || "",
+    live: true,
+  });
   providerOutput.textContent = formatJson(data);
   await loadState();
 }
@@ -4562,18 +4590,21 @@ providerForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   providerOutput.textContent = "Saving provider settings...";
 
-  const profileId = document.querySelector("#provider-profile").value;
+  const profileId = providerProfileInput?.value || "openai";
   const preset = PROVIDER_PRESETS[profileId] || PROVIDER_PRESETS.openai;
-  const providerId = document.querySelector("#provider-key-id").value.trim() || preset.providerId;
-  const apiKey = document.querySelector("#provider-key").value.trim();
+  const providerId = providerKeyIdInput?.value.trim() || preset.providerId;
+  const baseUrl = providerBaseUrlInput?.value.trim() || preset.baseUrl || "";
+  const model = providerModelSetupInput?.value.trim() || preset.model || "";
+  const apiKey = providerKeyInput?.value.trim() || "";
   const removeKey = Boolean(document.querySelector("#provider-remove-key")?.checked);
   const usesCodexCli = profileId === "codex-cli";
 
   const profileData = await postJson("/api/provider/profile", { profileId });
-  const keyRouteData =
-    !usesCodexCli && providerId && providerId !== preset.providerId
-      ? await postJson("/api/config", { apiKeyProviderId: providerId })
-      : { skipped: true };
+  const runtimeData = await postJson("/api/config", {
+    providerMode: usesCodexCli ? "codex-cli" : "openai-compatible",
+    apiKeyProviderId: providerId,
+    ...(usesCodexCli ? {} : { baseUrl, model }),
+  });
   let keyData = usesCodexCli
     ? { skipped: true, reason: "Codex CLI uses ChatGPT account login, not a BYOK key." }
     : { skipped: true, reason: "No key entered; stored key was left unchanged." };
@@ -4585,11 +4616,15 @@ providerForm.addEventListener("submit", async (event) => {
   const testData = await postJson("/api/provider/test", {
     profileId,
     apiKeyProviderId: providerId,
+    baseUrl,
+    model,
     live: true,
   });
 
-  providerOutput.textContent = formatJson({ test: testData, profile: profileData, keyRoute: keyRouteData, key: keyData });
-  document.querySelector("#provider-key").value = "";
+  providerOutput.textContent = formatJson({ test: testData, runtime: runtimeData, profile: profileData, key: keyData });
+  if (providerKeyInput) {
+    providerKeyInput.value = "";
+  }
   if (document.querySelector("#provider-remove-key")) {
     document.querySelector("#provider-remove-key").checked = false;
   }
@@ -4597,10 +4632,56 @@ providerForm.addEventListener("submit", async (event) => {
 });
 
 testProviderButton?.addEventListener("click", testProviderReadiness);
-document.querySelector("#provider-profile")?.addEventListener("change", () => {
-  const profileId = document.querySelector("#provider-profile").value;
+async function fetchProviderModels() {
+  if (!providerOutput) {
+    return;
+  }
+  const profileId = providerProfileInput?.value || "openai";
   const preset = PROVIDER_PRESETS[profileId] || PROVIDER_PRESETS.openai;
-  document.querySelector("#provider-key-id").value = preset.providerId;
+  const providerId = providerKeyIdInput?.value.trim() || preset.providerId;
+  providerOutput.textContent = "Fetching provider models...";
+  const data = await postJson("/api/provider/models", {
+    profileId,
+    baseUrl: providerBaseUrlInput?.value.trim() || preset.baseUrl || "",
+    apiKeyProviderId: providerId,
+    apiKey: providerKeyInput?.value.trim() || "",
+  });
+  if (providerModelList) {
+    providerModelList.innerHTML = (data.models || [])
+      .slice(0, 300)
+      .map((model) => `<option value="${escapeHtml(model.id || model)}"></option>`)
+      .join("");
+  }
+  if (providerModelSetupInput && !providerModelSetupInput.value.trim() && data.models?.[0]?.id) {
+    providerModelSetupInput.value = data.models[0].id;
+  }
+  providerOutput.textContent = formatJson(data);
+  updateProviderProfileControls();
+}
+
+providerFetchModelsButton?.addEventListener("click", async () => {
+  try {
+    providerFetchModelsButton.disabled = true;
+    await fetchProviderModels();
+  } catch (error) {
+    providerOutput.textContent = error.message;
+  } finally {
+    updateProviderProfileControls();
+  }
+});
+providerProfileInput?.addEventListener("change", () => {
+  const profileId = providerProfileInput.value;
+  const preset = PROVIDER_PRESETS[profileId] || PROVIDER_PRESETS.openai;
+  if (providerKeyIdInput) providerKeyIdInput.value = preset.providerId;
+  if (providerBaseUrlInput) providerBaseUrlInput.value = preset.baseUrl || "";
+  if (providerModelSetupInput) providerModelSetupInput.value = preset.model || "";
+  if (providerModelList) providerModelList.innerHTML = "";
+  updateProviderProfileControls();
+});
+providerBaseUrlInput?.addEventListener("input", updateProviderProfileControls);
+providerModelSetupInput?.addEventListener("input", updateProviderProfileControls);
+providerKeyIdInput?.addEventListener("input", updateProviderProfileControls);
+document.querySelector("#provider-profile")?.addEventListener("change", () => {
   updateProviderProfileControls();
 });
 openCodexLoginButton?.addEventListener("click", async () => {
@@ -4932,18 +5013,18 @@ const routeMeta = {
     title: "Overview",
     body: "Gateway status, sessions, tools, approvals, agents, and local runtime controls in one focused operator shell.",
   },
-  "sessions-panel": { kicker: "Control", title: "Sessions", body: "Active lanes, archived sessions, and transcript inspection." },
-  "execution-panel": { kicker: "Control", title: "Execution", body: "Shell policy, approvals, audit, and execution safety." },
-  "scheduler-panel": { kicker: "Control", title: "Scheduler", body: "Recurring tool runs, jobs, retry state, and manual run controls." },
-  "connectors-panel": { kicker: "Control", title: "Connectors", body: "Messaging channels, adapters, attachment cache, and media routes." },
+  "sessions-panel": { kicker: "Control center", title: "Task History", body: "Past conversations, run traces, archived sessions, and transcript inspection." },
+  "execution-panel": { kicker: "Control center", title: "Terminal", body: "Shell policy, approvals, command audit, and execution safety." },
+  "scheduler-panel": { kicker: "Control center", title: "Scheduled", body: "Recurring tasks, jobs, retry state, and manual run controls." },
+  "connectors-panel": { kicker: "Control center", title: "Channels", body: "Messaging channels, adapters, attachment cache, and media routes." },
   "agents-panel": { kicker: "Agent", title: "Agents", body: "Agent lanes, workspaces, delegated tasks, and scoped capabilities." },
   "skill-panel": { kicker: "Agent", title: "Skills", body: "Installed skills, runtime tools, and local skill creation." },
-  "trust-panel": { kicker: "Agent", title: "Nodes", body: "Pairing, trusted devices, gateway tokens, and trust audit history." },
-  "memory-panel": { kicker: "Agent", title: "Dreaming", body: "Long-term memory, promotion candidates, and dream sweep review." },
+  "trust-panel": { kicker: "Agent", title: "Devices", body: "Pairing, trusted devices, gateway tokens, and trust audit history." },
+  "memory-panel": { kicker: "Agent", title: "Memory", body: "Long-term memory, promotion candidates, and dream sweep review." },
   "research-panel": { kicker: "Agent", title: "Research", body: "Saved lookups and generated artifacts." },
-  "runtime-panel": { kicker: "Settings", title: "Config", body: "Profiles, provider mode, and compact raw state." },
-  "provider-panel": { kicker: "Settings", title: "Providers", body: "Provider profiles, local secret readiness, and model settings." },
-  "design-panel": { kicker: "Settings", title: "Appearance", body: "Design contract handoff and UI direction notes." },
+  "runtime-panel": { kicker: "Settings", title: "Permissions", body: "Profiles, computer access, terminal trust, and compact raw state." },
+  "provider-panel": { kicker: "Settings", title: "Brain Setup", body: "Provider, base URL, model, API key, model fetch, and live readiness in one place." },
+  "design-panel": { kicker: "Settings", title: "Design System", body: "Design contract handoff and UI direction notes." },
   "plugin-panel": { kicker: "Settings", title: "Plugins", body: "Manifest lifecycle, plugin config, and runnable plugin jobs." },
 };
 

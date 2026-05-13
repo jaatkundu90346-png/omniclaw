@@ -47,6 +47,7 @@
                 <option value="groq">Groq</option>
                 <option value="openrouter">OpenRouter</option>
                 <option value="nvidia">NVIDIA NIM</option>
+                <option value="minimax">MiniMax</option>
                 <option value="mistral">Mistral</option>
                 <option value="deepseek">DeepSeek</option>
                 <option value="together">Together</option>
@@ -141,19 +142,19 @@
         <div id="rail-health" class="rail-health">Loading gateway status...</div>
 
         <div class="nav-group">
-          <p class="nav-group-title">CHAT</p>
+          <p class="nav-group-title">WORK</p>
           <a href="#chat-panel" class="nav-link active">
             <span class="nav-icon">💬</span> Chat
           </a>
         </div>
 
         <div class="nav-group">
-          <p class="nav-group-title">CONTROL</p>
-          <a href="#overview-panel" class="nav-link">Overview</a>
-          <a href="#sessions-panel" class="nav-link">Sessions</a>
-          <a href="#execution-panel" class="nav-link">Execution</a>
-          <a href="#scheduler-panel" class="nav-link">Scheduler</a>
-          <a href="#connectors-panel" class="nav-link">Connectors</a>
+          <p class="nav-group-title">CONTROL CENTER</p>
+          <a href="#overview-panel" class="nav-link">Dashboard</a>
+          <a href="#sessions-panel" class="nav-link">Task history</a>
+          <a href="#execution-panel" class="nav-link">Terminal</a>
+          <a href="#scheduler-panel" class="nav-link">Scheduled</a>
+          <a href="#connectors-panel" class="nav-link">Channels</a>
         </div>
 
         <div class="nav-group">
@@ -164,16 +165,16 @@
           <a href="#skill-panel" class="nav-link">
             <span class="nav-icon">⚡</span> Skills
           </a>
-          <a href="#trust-panel" class="nav-link">Nodes</a>
-          <a href="#memory-panel" class="nav-link">Dreaming</a>
+          <a href="#trust-panel" class="nav-link">Devices</a>
+          <a href="#memory-panel" class="nav-link">Memory</a>
           <a href="#research-panel" class="nav-link">Research</a>
         </div>
 
         <div class="nav-group">
           <p class="nav-group-title">SETTINGS</p>
-          <a href="#runtime-panel" class="nav-link">Runtime</a>
-          <a href="#provider-panel" class="nav-link">BYOK</a>
-          <a href="#design-panel" class="nav-link">Stitch Bridge</a>
+          <a href="#runtime-panel" class="nav-link">Permissions</a>
+          <a href="#provider-panel" class="nav-link">Brain setup</a>
+          <a href="#design-panel" class="nav-link">Design system</a>
           <a href="#plugin-panel" class="nav-link">Plugins</a>
         </div>
 
@@ -943,30 +944,66 @@
           <section id="provider-panel" class="surface surface-provider">
             <div class="surface-header">
               <div>
-                <p class="section-kicker">BYOK</p>
-                <h3>Provider vault and profile</h3>
+                <p class="section-kicker">Brain setup</p>
+                <h3>Model, endpoint, and API key</h3>
               </div>
             </div>
             <div class="surface-body">
+              <div class="provider-setup-hero">
+                <div>
+                  <p class="section-kicker">One-screen setup</p>
+                  <h4>Choose provider, paste key, fetch models, test, save.</h4>
+                  <p>Base URL is the provider root ending in /v1. OmniClaw builds the chat endpoint and model discovery endpoint automatically.</p>
+                </div>
+                <div class="provider-endpoints">
+                  <span><strong>Chat</strong><small id="provider-chat-endpoint">/chat/completions</small></span>
+                  <span><strong>Models</strong><small id="provider-models-endpoint">/models</small></span>
+                </div>
+              </div>
               <div id="provider-status-output" class="stack-list">
                 <div class="empty-state">Loading provider readiness...</div>
               </div>
               <form id="provider-form" class="stack-form">
-                <label for="provider-profile">Provider profile</label>
-                <select id="provider-profile">
-                  <option value="openai">openai</option>
-                  <option value="anthropic">anthropic</option>
-                  <option value="gemini">gemini</option>
-                  <option value="groq">groq</option>
-                  <option value="openrouter">openrouter</option>
-                  <option value="codex-cli">openai-account / codex-cli</option>
-                  <option value="local-compatible">local-compatible</option>
-                </select>
+                <div class="provider-grid">
+                  <div>
+                    <label for="provider-profile">Provider</label>
+                    <select id="provider-profile">
+                      <option value="openai">OpenAI</option>
+                      <option value="openrouter">OpenRouter</option>
+                      <option value="nvidia">NVIDIA NIM</option>
+                      <option value="minimax">MiniMax</option>
+                      <option value="anthropic">Anthropic</option>
+                      <option value="gemini">Gemini</option>
+                      <option value="groq">Groq</option>
+                      <option value="mistral">Mistral</option>
+                      <option value="deepseek">DeepSeek</option>
+                      <option value="together">Together</option>
+                      <option value="fireworks">Fireworks</option>
+                      <option value="ollama">Ollama</option>
+                      <option value="codex-cli">OpenAI account / Codex CLI</option>
+                      <option value="local-compatible">Local compatible</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label for="provider-key-id">Key vault ID</label>
+                    <input id="provider-key-id" type="text" value="openai" />
+                  </div>
+                  <div class="provider-wide">
+                    <label for="provider-base-url">Base URL</label>
+                    <input id="provider-base-url" type="url" placeholder="https://api.openai.com/v1" autocomplete="off" />
+                  </div>
+                  <div class="provider-wide">
+                    <label for="provider-model-setup">Model</label>
+                    <div class="input-with-action">
+                      <input id="provider-model-setup" list="provider-model-list" type="text" placeholder="Fetch models or type model id" autocomplete="off" />
+                      <button id="provider-fetch-models" type="button" class="btn-icon-text">Fetch</button>
+                    </div>
+                    <datalist id="provider-model-list"></datalist>
+                  </div>
+                </div>
                 <div id="provider-codex-help" class="provider-callout" hidden>
                   This uses the official Codex CLI login. Install Codex, click Open Codex login, choose Sign in with ChatGPT, then save this profile.
                 </div>
-                <label for="provider-key-id">Key ID</label>
-                <input id="provider-key-id" type="text" value="openai-compatible" />
                 <label for="provider-key">API key</label>
                 <input id="provider-key" type="password" placeholder="sk-..." />
                 <label class="check-row" for="provider-remove-key">
@@ -974,7 +1011,7 @@
                   Remove stored key for this Key ID
                 </label>
                 <div class="hero-actions">
-                  <button type="submit" class="button button-primary">Save provider</button>
+                  <button type="submit" class="button button-primary">Save and test brain</button>
                   <button id="test-provider" type="button" class="button button-ghost">Test readiness</button>
                   <button id="open-codex-login" type="button" class="button button-ghost">Open Codex setup</button>
                 </div>

@@ -93,6 +93,14 @@
       "httpReferer": "http://localhost:3147",
       "appTitle": "OmniClaw"
     },
+    "minimax": {
+      "mode": "openai-compatible",
+      "baseUrl": "https://api.minimax.io/v1",
+      "model": "MiniMax-M2.7",
+      "apiKeyProviderId": "minimax",
+      "httpReferer": "http://localhost:3147",
+      "appTitle": "OmniClaw"
+    },
     "codex-cli": {
       "mode": "codex-cli",
       "baseUrl": "",
