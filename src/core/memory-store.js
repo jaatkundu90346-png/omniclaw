@@ -547,11 +547,46 @@ ${JSON.stringify(candidates.map(c => ({ id: c.id, title: c.title, text: c.text }
   }
 
   searchAll(query, agentId = "") {
+    const q = String(query || "").toLowerCase().trim();
+    const data = this.read();
+    const conversations = !q ? [] : this.filterByAgent(data.conversations, agentId).filter(item =>
+      (item.user || "").toLowerCase().includes(q) ||
+      (item.assistant || "").toLowerCase().includes(q) ||
+      JSON.stringify(item.intents || []).toLowerCase().includes(q)
+    );
+    const attachmentExtracts = !q ? [] : this.filterByAgent(data.attachmentExtracts, agentId).filter(item =>
+      (item.title || "").toLowerCase().includes(q) ||
+      (item.text || "").toLowerCase().includes(q) ||
+      JSON.stringify(item.tags || []).toLowerCase().includes(q)
+    );
     return {
       notes: this.searchNotes(query, agentId),
       longTerm: this.searchLongTerm(query, agentId),
       research: this.searchResearch(query, agentId),
       artifacts: this.searchArtifacts(query, agentId),
+      conversations,
+      attachmentExtracts,
+    };
+  }
+
+  prefetchAll({ query = "", agentId = "", limit = 12 } = {}) {
+    const overview = this.getOverview(agentId);
+    const search = query ? this.searchAll(query, agentId) : null;
+    return {
+      agentId: normalizeAgentId(agentId),
+      overview,
+      recentConversations: this.getRecentConversations(limit, agentId),
+      notes: this.getNotes(agentId).slice(-limit),
+      longTermMemory: this.getLongTermMemory(limit, agentId),
+      dreams: this.getDreams(Math.min(limit, 8), agentId),
+      search,
+      lifecycle: [
+        "prefetch_all: gather memory before LLM call",
+        "fenced block: inject as memory/context data, not active instructions",
+        "sync_all: persist notes, conversations, research, artifacts, and promoted memory after turn",
+        "queue_prefetch_all: heartbeat/dream sweep refreshes candidates for future turns",
+      ],
+      providerRule: "Built-in JSON + MEMORY.md provider is always present; external memory plugins should be additive and not replace core memory.",
     };
   }
 }

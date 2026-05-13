@@ -172,6 +172,30 @@ async function run() {
     );
     assertToolSummaries(promptAssembly.toolOutputs, "prompt assembly request");
 
+    const compression = await postChat("context compression status", `chat-smoke-context-compression-${suffix}`);
+    assert(
+      compression.toolOutputs.some((item) => item.tool === "context_compression_status"),
+      "Context compression request should call context_compression_status.",
+    );
+    assert(compression.reply.includes("context compression status"), "Context compression reply should be grounded.");
+    assertToolSummaries(compression.toolOutputs, "context compression request");
+
+    const memoryStatus = await postChat("memory lifecycle session search status", `chat-smoke-memory-life-${suffix}`);
+    assert(
+      memoryStatus.toolOutputs.some((item) => item.tool === "memory_lifecycle_status"),
+      "Memory lifecycle request should call memory_lifecycle_status.",
+    );
+    assert(memoryStatus.reply.includes("memory lifecycle status"), "Memory lifecycle reply should be grounded.");
+    assertToolSummaries(memoryStatus.toolOutputs, "memory lifecycle request");
+
+    const skillStatus = await postChat("skills system progressive disclosure status", `chat-smoke-skill-system-${suffix}`);
+    assert(
+      skillStatus.toolOutputs.some((item) => item.tool === "skill_system_status"),
+      "Skill system request should call skill_system_status.",
+    );
+    assert(skillStatus.reply.includes("skill system status"), "Skill system reply should be grounded.");
+    assertToolSummaries(skillStatus.toolOutputs, "skill system request");
+
     console.log("Chat agent smoke test passed");
   } finally {
     child.kill("SIGTERM");

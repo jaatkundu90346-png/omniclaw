@@ -61,6 +61,21 @@ The screenshots show Hermes building the system prompt from identity, SOUL, cont
 - `prompt_assembly_status` reports loaded context files, scopes, context budget, and suspicious findings.
 - The agent reply layer has a grounded response for architecture/prompt-assembly questions instead of generic chat.
 
+## Toolsets, Compression, Memory, And Skills
+
+The newer architecture screenshots add four more Hermes ideas now mapped into OmniClaw:
+
+- `hermes_tool_catalog` now reports composable toolsets such as web, terminal, file, browser, memory, and skills, with native/alias/partial/placeholder status for each Hermes-compatible tool.
+- `context_compression_status` reports the active profile budget, compression threshold, active session size, summary presence, and the intended head/middle/tail compression algorithm.
+- `memory_lifecycle_status` reports prefetch, fenced memory injection, sync, dream sweep, and session search status. Memory search now includes conversations and attachment extracts in addition to notes, long-term memories, research, and artifacts.
+- `skill_system_status` reports local OmniClaw skills, vendored Hermes skills, progressive disclosure tiers, agentskills-style frontmatter support, and the remaining `skill_manage` self-improvement gap.
+
+Current honest gaps:
+
+- Session search is still JSON full-text scan; SQLite FTS5 indexing is the next upgrade.
+- Skill self-improvement is not fully automatic yet; it needs a reviewable `hermes_skill_import` / `skill_manage` update flow.
+- Context compression has diagnostic awareness and background summarization, but full head+tail preservation with middle-summary rewrite is still next.
+
 ## Vendored Source Layout
 
 - `vendor/hermes-agent/agent`: model adapters, context, memory, prompt, tool, and runtime helpers.

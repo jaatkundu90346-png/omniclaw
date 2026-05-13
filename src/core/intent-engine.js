@@ -90,11 +90,45 @@ export class IntentEngine {
       lowered.includes("hermes tools") ||
       lowered.includes("hermes ke tools") ||
       lowered.includes("hermes ka tools") ||
+      lowered.includes("toolset") ||
+      lowered.includes("tools & toolsets") ||
       lowered.includes("copy hermes tools") ||
       lowered.includes("40+ tools") ||
       lowered.includes("40 tools")
     ) {
       intents.push("hermes-tools");
+    }
+
+    if (
+      lowered.includes("context compression") ||
+      lowered.includes("context compressor") ||
+      lowered.includes("token budget") ||
+      lowered.includes("summary framing") ||
+      lowered.includes("smart model routing")
+    ) {
+      intents.push("context-compression");
+    }
+
+    if (
+      lowered.includes("memory system") ||
+      lowered.includes("memory lifecycle") ||
+      lowered.includes("session search") ||
+      lowered.includes("fts5") ||
+      lowered.includes("prefetch_all") ||
+      lowered.includes("sync_all")
+    ) {
+      intents.push("memory-lifecycle");
+    }
+
+    if (
+      lowered.includes("skills system") ||
+      lowered.includes("skill system") ||
+      lowered.includes("progressive disclosure") ||
+      lowered.includes("agentskills") ||
+      lowered.includes("skill self") ||
+      lowered.includes("skill_manage")
+    ) {
+      intents.push("skill-system");
     }
 
     if (

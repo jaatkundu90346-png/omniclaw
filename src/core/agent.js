@@ -3577,6 +3577,40 @@ export class OmniClawAgent {
       ].join(" ");
     }
 
+    if (intents.includes("context-compression") && byTool.has("context_compression_status")) {
+      const status = byTool.get("context_compression_status");
+      return [
+        "Hermes-style context compression status ready.",
+        `Profile ${status.profile || "balanced"} budget ${status.maxChars || 0} chars, compression threshold ${status.compressionThreshold || 0}.`,
+        `Session ${status.activeSessionId || "none"} transcript entries ${status.transcriptEntryCount || 0}, summary ${status.summaryPresent ? "present" : "missing"}.`,
+        `Algorithm: ${(status.algorithm || []).slice(0, 4).join(" | ")}.`,
+        `Next upgrade: ${status.nextUpgrade || "head/middle/tail compaction improve karo"}`,
+      ].join(" ");
+    }
+
+    if (intents.includes("memory-lifecycle") && byTool.has("memory_lifecycle_status")) {
+      const status = byTool.get("memory_lifecycle_status");
+      const overview = status.overview || {};
+      return [
+        "Hermes-style memory lifecycle status ready.",
+        `Memory counts: notes ${overview.notes || 0}, conversations ${overview.conversations || 0}, research ${overview.research || 0}, long-term ${overview.longTerm || 0}, dreams ${overview.dreams || 0}.`,
+        `Lifecycle: ${(status.lifecycle || []).join(" | ")}.`,
+        `Session search: ${status.sessionSearch?.ready ? "on" : "off"} (${status.sessionSearch?.mode || "unknown"}).`,
+        status.fencedBlockRule || "",
+      ].filter(Boolean).join(" ");
+    }
+
+    if (intents.includes("skill-system") && byTool.has("skill_system_status")) {
+      const status = byTool.get("skill_system_status");
+      return [
+        "Hermes-style skill system status ready.",
+        `OmniClaw skills: ${status.omniSkillCount || 0}; vendored Hermes skills: ${status.hermesVendoredSkillCount || 0}.`,
+        `Progressive disclosure: ${(status.progressiveDisclosure || []).join(" | ")}.`,
+        `Self-improvement gap: ${status.selfImprovement?.gap || "unknown"}.`,
+        `Next upgrade: ${status.selfImprovement?.nextUpgrade || "skill_manage import/update flow"}`,
+      ].join(" ");
+    }
+
     if (intents.includes("hermes-doctor")) {
       const provider = byTool.get("provider_status") || {};
       const access = byTool.get("computer_access_status") || {};

@@ -95,6 +95,33 @@ export class Planner {
       });
     }
 
+    if (intents.includes("context-compression")) {
+      steps.push({
+        type: "tool",
+        tool: "context_compression_status",
+        input: {},
+        reason: "User shared Hermes context compression architecture and wants OmniClaw improved.",
+      });
+    }
+
+    if (intents.includes("memory-lifecycle")) {
+      steps.push({
+        type: "tool",
+        tool: "memory_lifecycle_status",
+        input: {},
+        reason: "User shared Hermes memory lifecycle/session search architecture.",
+      });
+    }
+
+    if (intents.includes("skill-system")) {
+      steps.push({
+        type: "tool",
+        tool: "skill_system_status",
+        input: {},
+        reason: "User shared Hermes skills system architecture.",
+      });
+    }
+
     if (intents.includes("hermes-doctor")) {
       steps.push({
         type: "tool",

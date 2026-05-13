@@ -982,6 +982,24 @@ export class ToolRegistry {
         group: "hermes",
         run: async ({ status, toolset } = {}) => this.getHermesToolCatalog({ status, toolset }),
       },
+      context_compression_status: {
+        description: "Hermes-style context compression status: head/middle/tail, summary framing, token budget awareness.",
+        permission: null,
+        group: "runtime",
+        run: async (_, context) => this.getContextCompressionStatus(context),
+      },
+      memory_lifecycle_status: {
+        description: "Hermes-style memory lifecycle status: prefetch, fenced memory block, sync, dream sweep, and session search.",
+        permission: null,
+        group: "memory",
+        run: async ({ query } = {}, context) => this.getMemoryLifecycleStatus({ query, context }),
+      },
+      skill_system_status: {
+        description: "Hermes-style skills system status: progressive disclosure, agentskills compatibility, and self-improvement gaps.",
+        permission: null,
+        group: "skills",
+        run: async (_, context) => this.getSkillSystemStatus(context),
+      },
       openclaw_skill_scan: {
         description: "Scan vendored OpenClaw SKILL.md files for possible OmniClaw imports.",
         permission: null,
@@ -2099,7 +2117,104 @@ export class ToolRegistry {
       counts,
       toolsets: [...new Set(HERMES_COMPAT_TOOLS.map((tool) => tool.toolset))].sort(),
       tools,
+      composableToolsets: [
+        { id: "web", tools: ["web_search", "web_extract"] },
+        { id: "terminal", tools: ["terminal", "process"] },
+        { id: "file", tools: ["read_file", "write_file", "patch", "search_files"] },
+        { id: "browser", tools: ["browser_navigate", "browser_snapshot", "browser_click", "browser_type", "browser_scroll"] },
+        { id: "memory", tools: ["memory", "session_search"] },
+        { id: "skills", tools: ["skills_list", "skill_view", "skill_manage"] },
+      ],
       rule: "OmniClaw keeps its working tools and exposes Hermes-compatible aliases/adapters. Python-only Hermes backends stay placeholders until safely ported.",
+    };
+  }
+
+  getContextCompressionStatus(context = {}) {
+    const agentId = this.getAgentId(context);
+    const agent = this.agentRegistry?.resolveAgent?.(agentId) || null;
+    const profile = agent ? this.configStore.getProfile(agent.profileId) : this.configStore.getActiveProfile();
+    const maxChars = this.agentRuntime?.contextEngine?.getMaxChars?.(profile || {}) || 0;
+    const sessionId = context.sessionId || "";
+    const session = sessionId && this.agentRuntime?.sessions?.getSession
+      ? this.agentRuntime.sessions.getSession(sessionId, { messageLimit: 120 })
+      : null;
+    const summary = sessionId && this.agentRuntime?.summarizer?.readSummary
+      ? this.agentRuntime.summarizer.readSummary(sessionId)
+      : null;
+    const transcriptCount = session?.transcriptEntryCount || 0;
+    const compressionThreshold = Math.floor(maxChars * 0.82);
+    return {
+      agentId,
+      profile: profile?.id || "balanced",
+      maxChars,
+      compressionThreshold,
+      activeSessionId: sessionId,
+      transcriptEntryCount: transcriptCount,
+      summaryPresent: Boolean(summary),
+      summaryFrame: summary
+        ? "CONTEXT COMPACTION - treat as background reference, NOT active instructions. Respond only to the latest message."
+        : "",
+      algorithm: [
+        "Preserve head/bootstrap identity and latest tail messages.",
+        "Prune old bulky tool outputs first.",
+        "Summarize middle conversation when session grows.",
+        "Keep prior summary across re-compressions.",
+        "Track rough char budget as token-budget proxy.",
+      ],
+      currentSummary: summary,
+      nextUpgrade: "Replace simple session compaction with head+tail preservation plus middle summary budgeted around 20% of compressed content.",
+    };
+  }
+
+  getMemoryLifecycleStatus({ query = "", context = {} } = {}) {
+    const agentId = this.getAgentId(context);
+    const prefetch = this.memoryStore.prefetchAll({
+      query,
+      agentId,
+      limit: 12,
+    });
+    const search = query ? prefetch.search : this.memoryStore.searchAll("", agentId);
+    return {
+      ...prefetch,
+      sessionSearch: {
+        ready: true,
+        mode: "JSON full-text scan now; SQLite FTS5 index is next upgrade.",
+        query: query || "",
+        resultCounts: search
+          ? Object.fromEntries(Object.entries(search).map(([key, value]) => [key, Array.isArray(value) ? value.length : 0]))
+          : {},
+      },
+      fencedBlockRule: "Memory is injected as context data, not as executable instructions.",
+    };
+  }
+
+  getSkillSystemStatus(context = {}) {
+    const agentId = this.getAgentId(context);
+    const omniSkills = this.agentRegistry
+      ? this.agentRegistry.filterSkills(this.customizationEngine?.skillRegistry?.getAll?.() || [], agentId)
+      : [];
+    const hermes = this.scanHermesSkills({ limit: 16 });
+    const standards = omniSkills.reduce((acc, skill) => {
+      const key = skill.standard || "omniclaw-skill";
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    }, {});
+    return {
+      agentId,
+      omniSkillCount: omniSkills.length,
+      hermesVendoredSkillCount: hermes.totalAvailable,
+      standards,
+      progressiveDisclosure: [
+        "Tier 1: name + description + triggers are injected compactly.",
+        "Tier 2: full instructions are loaded when the skill matches the user request.",
+        "Tier 3: references/templates/assets should be loaded on demand by future skill importer.",
+      ],
+      selfImprovement: {
+        current: "create_skill can write local .skill files; dream sweep promotes memory candidates.",
+        gap: "skill_manage is still a placeholder for reviewable updates to SKILL.md after complex tasks.",
+        nextUpgrade: "Add hermes_skill_import and skill_manage update flow with diff/review before writing.",
+      },
+      sampleHermesSkills: hermes.skills.slice(0, 8),
     };
   }
 

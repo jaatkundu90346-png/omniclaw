@@ -9,6 +9,29 @@ function parseList(value) {
 }
 
 function parseSkillFile(contents) {
+  const frontmatter = contents.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
+  if (frontmatter) {
+    const meta = {};
+    for (const line of frontmatter[1].split(/\r?\n/)) {
+      const item = line.match(/^([a-zA-Z0-9_-]+):\s*(.*)$/);
+      if (item) {
+        meta[item[1].toLowerCase()] = item[2].replace(/^["']|["']$/g, "").trim();
+      }
+    }
+    const body = contents.slice(frontmatter[0].length).trim();
+    return {
+      id: meta.id || slugify(meta.name || "skill"),
+      name: meta.name || meta.id || "Unnamed Skill",
+      triggers: parseList(meta.triggers || meta.keywords).map((item) => item.toLowerCase()),
+      agents: parseList(meta.agents),
+      description: meta.description || "",
+      instructions: body,
+      standard: "agentskills.io/frontmatter",
+      license: meta.license || "",
+      version: meta.version || "",
+    };
+  }
+
   const lines = contents.split(/\r?\n/);
   const meta = {};
   const body = [];
@@ -34,6 +57,7 @@ function parseSkillFile(contents) {
     agents: parseList(meta.agents),
     description: meta.description || "",
     instructions: body.join("\n").trim(),
+    standard: "omniclaw-skill",
   };
 }
 
