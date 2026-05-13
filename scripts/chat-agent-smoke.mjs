@@ -126,6 +126,26 @@ async function run() {
     assert(selfBuild.reply && selfBuild.reply.length > 0, "self-build reply should be non-empty.");
     assertToolSummaries(selfBuild.toolOutputs, "self-build request");
 
+    const doctor = await postChat("/doctor", `chat-smoke-hermes-doctor-${suffix}`);
+    assert(
+      doctor.toolOutputs.some((item) => item.tool === "provider_status"),
+      "/doctor should call provider_status.",
+    );
+    assert(
+      doctor.toolOutputs.some((item) => item.tool === "computer_access_status"),
+      "/doctor should call computer_access_status.",
+    );
+    assert(doctor.reply.includes("/doctor complete"), "/doctor should return a grounded doctor reply.");
+    assertToolSummaries(doctor.toolOutputs, "hermes doctor request");
+
+    const hermes = await postChat("hermes agent reference compare karo", `chat-smoke-hermes-ref-${suffix}`);
+    assert(
+      hermes.toolOutputs.some((item) => item.tool === "hermes_reference_status"),
+      "Hermes reference requests should call hermes_reference_status.",
+    );
+    assert(hermes.reply.includes("Hermes reference mapping"), "Hermes reference reply should be grounded.");
+    assertToolSummaries(hermes.toolOutputs, "hermes reference request");
+
     console.log("Chat agent smoke test passed");
   } finally {
     child.kill("SIGTERM");

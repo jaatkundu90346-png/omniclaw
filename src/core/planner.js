@@ -71,6 +71,120 @@ export class Planner {
   buildPlan({ message, intents, skills, tools, profile }) {
     const steps = [];
 
+    if (intents.includes("hermes-reference")) {
+      steps.push({
+        type: "tool",
+        tool: "hermes_reference_status",
+        input: {},
+        reason: "User referenced Hermes Agent as an OpenClaw alternative and wants OmniClaw to learn from it.",
+      });
+    }
+
+    if (intents.includes("hermes-doctor")) {
+      steps.push({
+        type: "tool",
+        tool: "provider_status",
+        input: { verify: false },
+        reason: "Hermes-style /doctor should inspect brain readiness without hanging on a live auth call.",
+      });
+      steps.push({
+        type: "tool",
+        tool: "computer_access_status",
+        input: {},
+        reason: "Hermes-style /doctor should show local hands/eyes access.",
+      });
+      steps.push({
+        type: "tool",
+        tool: "session_status",
+        input: {},
+        reason: "Hermes-style /doctor should show session and gateway health.",
+      });
+      steps.push({
+        type: "tool",
+        tool: "v2_status",
+        input: {},
+        reason: "Hermes-style /doctor should expose V2 feature health.",
+      });
+    }
+
+    if (intents.includes("hermes-model")) {
+      steps.push({
+        type: "tool",
+        tool: "provider_status",
+        input: { verify: false },
+        reason: "Hermes-style /model should show the selected model/provider.",
+      });
+      steps.push({
+        type: "tool",
+        tool: "list_provider_models",
+        input: {},
+        reason: "Hermes-style /model should fetch available provider models when configured.",
+      });
+    }
+
+    if (intents.includes("hermes-skills")) {
+      steps.push({
+        type: "tool",
+        tool: "capability_demo",
+        input: {},
+        reason: "Hermes-style /skills should show real tools and loaded skills.",
+      });
+      steps.push({
+        type: "tool",
+        tool: "agents_list",
+        input: {},
+        reason: "Hermes-style /skills should show configured agents.",
+      });
+    }
+
+    if (intents.includes("hermes-usage")) {
+      steps.push({
+        type: "tool",
+        tool: "runtime_summary",
+        input: {},
+        reason: "Hermes-style /usage should summarize active runtime profile.",
+      });
+      steps.push({
+        type: "tool",
+        tool: "session_status",
+        input: {},
+        reason: "Hermes-style /usage should show current session context.",
+      });
+      steps.push({
+        type: "tool",
+        tool: "list_long_term_memory",
+        input: {},
+        reason: "Hermes-style /usage should show memory state.",
+      });
+    }
+
+    if (intents.includes("hermes-platforms")) {
+      steps.push({
+        type: "tool",
+        tool: "computer_access_status",
+        input: {},
+        reason: "Hermes-style /platforms should show laptop, terminal, and browser access.",
+      });
+      steps.push({
+        type: "tool",
+        tool: "nodes",
+        input: {},
+        reason: "Hermes-style /platforms should show paired nodes.",
+      });
+      steps.push({
+        type: "tool",
+        tool: "cron",
+        input: { limit: 20 },
+        reason: "Hermes-style /platforms should show background jobs.",
+      });
+      steps.push({
+        type: "tool",
+        tool: "gateway",
+        input: { limit: 8 },
+        reason: "Hermes-style /platforms should show gateway events and approvals.",
+      });
+    }
+
     if (intents.includes("greeting") || intents.includes("api-setup") || intents.includes("capabilities")) {
       steps.push({
         type: "respond",
@@ -140,7 +254,7 @@ export class Planner {
       });
     }
 
-    if (intents.includes("provider-status")) {
+    if (intents.includes("provider-status") && !intents.includes("hermes-doctor") && !intents.includes("hermes-model")) {
       steps.push({
         type: "tool",
         tool: "provider_status",
@@ -149,7 +263,7 @@ export class Planner {
       });
     }
 
-    if (intents.includes("capabilities") && !intents.includes("provider-status")) {
+    if (intents.includes("capabilities") && !intents.includes("provider-status") && !intents.includes("hermes-skills")) {
       steps.push({
         type: "tool",
         tool: "capability_demo",

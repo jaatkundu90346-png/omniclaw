@@ -3489,6 +3489,98 @@ export class OmniClawAgent {
 
   buildRuntimeToolReply({ intents = [], toolOutputs = [] } = {}) {
     const byTool = new Map(toolOutputs.map((item) => [item.tool, item.output || {}]));
+    if (intents.includes("hermes-reference") && byTool.has("hermes_reference_status")) {
+      const hermes = byTool.get("hermes_reference_status");
+      const now = hermes.omniClawNow || {};
+      const gaps = Array.isArray(hermes.gaps) ? hermes.gaps.slice(0, 3) : [];
+      const next = Array.isArray(hermes.nextBuildActions) ? hermes.nextBuildActions.slice(0, 3) : [];
+      return [
+        "Hermes reference mapping ready hai.",
+        `${hermes.source?.name || "Hermes Agent"} (${hermes.source?.license || "MIT"}) se useful pattern: slash commands, skill growth, session search, gateways, subagents, terminal backends.`,
+        `OmniClaw now: provider ${now.provider || "unknown"} (${now.providerReady ? "ready" : "not ready"}), model ${now.model || "unset"}, V2 score ${now.v2Score || 0}/100, tools ${now.toolCount || 0}, agents ${now.agentCount || 0}.`,
+        `Added command surface: ${(now.commandSurface || []).join(", ")}.`,
+        gaps.length ? `Gaps: ${gaps.join(" | ")}` : "",
+        next.length ? `Next build: ${next.join(" | ")}` : "",
+      ].filter(Boolean).join(" ");
+    }
+
+    if (intents.includes("hermes-doctor")) {
+      const provider = byTool.get("provider_status") || {};
+      const access = byTool.get("computer_access_status") || {};
+      const session = byTool.get("session_status") || {};
+      const v2 = byTool.get("v2_status") || {};
+      return [
+        "/doctor complete.",
+        `Brain: ${provider.ready ? "ready" : "not ready"} (${provider.provider || "unknown"}${provider.model ? `/${provider.model}` : ""}).`,
+        `Hands/eyes: roots ${(access.allowedRoots || []).length}, terminal ${access.terminal?.enabled ? "on" : "off"}, browser ${access.browser?.automation?.enabled === false ? "partial" : "on"}.`,
+        `Session: ${session.sessionId || "unknown"}, gateway runs ${session.gateway?.runs || 0}, approvals ${session.gateway?.approvals || 0}.`,
+        `V2: score ${v2.score || 0}/100, ready ${v2.summary?.ready || 0}, partial ${v2.summary?.partial || 0}, missing ${v2.summary?.missing || 0}.`,
+        `Next fix: ${provider.nextFix || "Run /model and /platforms for deeper diagnosis."}`,
+      ].join(" ");
+    }
+
+    if (intents.includes("hermes-model")) {
+      const provider = byTool.get("provider_status") || {};
+      const models = byTool.get("list_provider_models") || {};
+      const list = Array.isArray(models.models) ? models.models.slice(0, 8) : [];
+      const names = list.map((model) => model.id || model.name || model).filter(Boolean);
+      return [
+        "/model complete.",
+        `Active provider: ${provider.provider || "unknown"}, model: ${provider.model || "unset"}, ready: ${provider.ready ? "yes" : "no"}.`,
+        models.ok === false || models.error ? `Model fetch error: ${String(models.error || models.message || "unknown").slice(0, 260)}.` : "",
+        names.length ? `Available models sample: ${names.join(", ")}.` : "Available model list empty ya provider endpoint configured nahi hai.",
+        `Next fix: ${provider.nextFix || "Provider profile/base URL/key check karo."}`,
+      ].filter(Boolean).join(" ");
+    }
+
+    if (intents.includes("hermes-skills")) {
+      const demo = byTool.get("capability_demo") || {};
+      const agents = byTool.get("agents_list") || {};
+      const coreTools = Array.isArray(demo.coreTools) ? demo.coreTools.slice(0, 14) : [];
+      const skillNames = Array.isArray(demo.skills)
+        ? demo.skills.map((skill) => skill.name || skill.id).filter(Boolean).slice(0, 10)
+        : [];
+      const agentNames = Array.isArray(agents.agents)
+        ? agents.agents.map((agent) => agent.name || agent.id).filter(Boolean).slice(0, 8)
+        : [];
+      return [
+        "/skills complete.",
+        `Tools visible: ${demo.toolCount || 0}; core: ${coreTools.join(", ") || "none"}.`,
+        `Skills loaded: ${demo.skillCount || 0}; ${skillNames.join(", ") || "none"}.`,
+        `Agents: ${agentNames.join(", ") || "main"}.`,
+        Array.isArray(demo.demos) && demo.demos.length ? `Demo prompts: ${demo.demos.slice(0, 3).join(" | ")}` : "",
+      ].filter(Boolean).join(" ");
+    }
+
+    if (intents.includes("hermes-usage")) {
+      const runtime = byTool.get("runtime_summary") || {};
+      const session = byTool.get("session_status") || {};
+      const memory = byTool.get("list_long_term_memory") || {};
+      const profile = runtime.profile || {};
+      return [
+        "/usage complete.",
+        `Agent: ${runtime.agent?.name || runtime.agent?.id || session.agent?.name || "main"}.`,
+        `Profile: ${profile.id || "unknown"}, provider mode: ${runtime.providerMode || "unknown"}.`,
+        `Session: ${session.sessionId || "unknown"}, run: ${session.runId || "unknown"}.`,
+        `Memory: ${(memory.memories || []).length} promoted items visible, ${(memory.dreams || []).length} dreams visible.`,
+      ].join(" ");
+    }
+
+    if (intents.includes("hermes-platforms")) {
+      const access = byTool.get("computer_access_status") || {};
+      const nodes = byTool.get("nodes") || {};
+      const cron = byTool.get("cron") || {};
+      const gateway = byTool.get("gateway") || {};
+      return [
+        "/platforms complete.",
+        `Computer roots: ${(access.allowedRoots || []).join(", ") || "none"}.`,
+        `Terminal ${access.terminal?.enabled ? "on" : "off"}, browser ops: ${(access.browser?.operations || []).join(", ") || "none"}.`,
+        `Node: ${nodes.localNode?.id || "local"} (${nodes.localNode?.status || "unknown"}), trusted devices ${(nodes.devices || []).length}.`,
+        `Cron schedules ${(cron.schedules || []).length}, jobs ${(cron.jobs || []).length}.`,
+        `Gateway events ${(gateway.events || []).length}, runs ${(gateway.runs || []).length}, approvals ${(gateway.approvals || []).length}.`,
+      ].join(" ");
+    }
+
     if (intents.includes("provider-status") && byTool.has("provider_status")) {
       const status = byTool.get("provider_status");
       const live = status.live || {};

@@ -826,6 +826,69 @@ export class ToolRegistry {
         group: "openclaw",
         run: async () => this.getOpenClawVendorStatus(),
       },
+      hermes_reference_status: {
+        description: "Summarize Hermes Agent reference ideas and map them to OmniClaw's current runtime.",
+        permission: null,
+        group: "hermes",
+        run: async () => {
+          const provider = this.agentRuntime?.getProviderInfo?.() || {};
+          const report = this.agentRuntime?.getV2Report?.() || {};
+          const agentCount = this.agentRegistry?.getAll?.()?.length || 0;
+          const tools = this.getAll({ agentId: "main" });
+          const toolIds = tools.map((tool) => tool.id);
+          return {
+            source: {
+              name: "Hermes Agent",
+              repo: "https://github.com/nousresearch/hermes-agent",
+              license: "MIT",
+              status: "external reference, not vendored into OmniClaw",
+            },
+            usefulPatterns: [
+              "Slash command surface for /model, /skills, /usage, /doctor, and platform status.",
+              "Self-improving skill library that grows from agent work.",
+              "Full-text session/history search so old chats are first-class context.",
+              "Gateway/channel layer for chat, cron, and background jobs.",
+              "Subagents and terminal backends for real execution instead of prompt-only claims.",
+            ],
+            omniClawNow: {
+              providerReady: Boolean(provider.ready),
+              provider: provider.id || "unknown",
+              model: provider.model || "",
+              v2Score: report.score || 0,
+              agentCount,
+              toolCount: tools.length,
+              commandSurface: ["/doctor", "/model", "/skills", "/usage", "/platforms", "/hermes"],
+              matchingTools: toolIds.filter((id) => [
+                "provider_status",
+                "list_provider_models",
+                "capability_demo",
+                "sessions_list",
+                "sessions_history",
+                "memory_search",
+                "gateway",
+                "cron",
+                "nodes",
+                "subagents",
+                "run_terminal_command",
+                "browser_snapshot",
+                "computer_access_status",
+              ].includes(id)),
+            },
+            gaps: [
+              "Self-improving skills are still manual/local skill writes, not automatic promotion from successful runs.",
+              "Session history exists, but fast full-text search/indexing needs a stronger search layer.",
+              "Gateways exist locally, but WhatsApp/Slack/Signal/iMessage adapters still need real account pairing.",
+              "Terminal/browser tools are governed, but hard sandbox isolation is still partial.",
+            ],
+            nextBuildActions: [
+              "Add Hermes-style slash commands that always execute runtime tools.",
+              "Make /doctor the first debugging path for provider, gateway, memory, tools, and permissions.",
+              "Grow skill promotion from successful workflows into editable SKILL.md files.",
+              "Index sessions and memories for laptop-wide recall/search.",
+            ],
+          };
+        },
+      },
       openclaw_skill_scan: {
         description: "Scan vendored OpenClaw SKILL.md files for possible OmniClaw imports.",
         permission: null,

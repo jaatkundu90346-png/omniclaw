@@ -4,6 +4,30 @@ export class IntentEngine {
 
     const intents = [];
     const compact = lowered.replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+    const slashCommand = lowered.match(/^\/([a-z0-9_-]+)\b/);
+
+    if (slashCommand) {
+      const command = slashCommand[1];
+      const commandMap = {
+        doctor: "hermes-doctor",
+        status: "hermes-doctor",
+        health: "hermes-doctor",
+        model: "hermes-model",
+        models: "hermes-model",
+        skills: "hermes-skills",
+        tools: "hermes-skills",
+        usage: "hermes-usage",
+        context: "hermes-usage",
+        memory: "hermes-usage",
+        platforms: "hermes-platforms",
+        gateways: "hermes-platforms",
+        channels: "hermes-platforms",
+        hermes: "hermes-reference",
+      };
+      if (commandMap[command]) {
+        intents.push(commandMap[command]);
+      }
+    }
 
     if (/^(hi|hii|hello|hey|hlo|helo|salam|assalam|namaste|yo)\b/i.test(compact)) {
       intents.push("greeting");
@@ -37,6 +61,7 @@ export class IntentEngine {
     if (
       lowered.includes("codex") ||
       lowered.includes("openclaw") ||
+      lowered.includes("hermes") ||
       lowered.includes("omniclaw") ||
       lowered.includes("v2") ||
       lowered.includes("weak") ||
@@ -50,6 +75,15 @@ export class IntentEngine {
       lowered.includes("brain")
     ) {
       intents.push("self-build");
+    }
+
+    if (
+      lowered.includes("hermes agent") ||
+      lowered.includes("hermes-agent") ||
+      lowered.includes("hermes alternative") ||
+      lowered.includes("openclaw alternative")
+    ) {
+      intents.push("hermes-reference");
     }
 
     if (
