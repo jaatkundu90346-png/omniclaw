@@ -122,6 +122,60 @@ export class Planner {
       });
     }
 
+    if (intents.includes("messaging-gateway")) {
+      steps.push({
+        type: "tool",
+        tool: "messaging_gateway_status",
+        input: {},
+        reason: "User shared Hermes messaging gateway architecture.",
+      });
+    }
+
+    if (intents.includes("terminal-backends")) {
+      steps.push({
+        type: "tool",
+        tool: "terminal_backends_status",
+        input: {},
+        reason: "User shared Hermes terminal backend architecture.",
+      });
+    }
+
+    if (intents.includes("model-provider")) {
+      steps.push({
+        type: "tool",
+        tool: "model_provider_status",
+        input: {},
+        reason: "User shared Hermes multi-provider model support architecture.",
+      });
+    }
+
+    if (intents.includes("subagent-delegation")) {
+      steps.push({
+        type: "tool",
+        tool: "subagent_delegation_status",
+        input: {},
+        reason: "User shared Hermes subagent delegation architecture.",
+      });
+    }
+
+    if (intents.includes("mcp-integration")) {
+      steps.push({
+        type: "tool",
+        tool: "mcp_integration_status",
+        input: {},
+        reason: "User shared Hermes MCP integration architecture.",
+      });
+    }
+
+    if (intents.includes("cron-scheduler")) {
+      steps.push({
+        type: "tool",
+        tool: "cron_scheduler_status",
+        input: {},
+        reason: "User shared Hermes cron scheduler architecture.",
+      });
+    }
+
     if (intents.includes("hermes-doctor")) {
       steps.push({
         type: "tool",

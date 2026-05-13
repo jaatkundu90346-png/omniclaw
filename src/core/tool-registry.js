@@ -1000,6 +1000,42 @@ export class ToolRegistry {
         group: "skills",
         run: async (_, context) => this.getSkillSystemStatus(context),
       },
+      messaging_gateway_status: {
+        description: "Hermes-style messaging gateway status: adapters, session routing, voice/media ingestion, and DM security.",
+        permission: null,
+        group: "gateway",
+        run: async (_, context) => this.getMessagingGatewayStatus(context),
+      },
+      terminal_backends_status: {
+        description: "Hermes-style terminal backend status: local/docker/ssh/cloud backends, process registry, and approval gates.",
+        permission: null,
+        group: "runtime",
+        run: async (_, context) => this.getTerminalBackendsStatus(context),
+      },
+      model_provider_status: {
+        description: "Hermes-style multi-provider model support status: API mode, credential pool, failover, and model discovery.",
+        permission: null,
+        group: "provider",
+        run: async (_, context) => this.getModelProviderStatus(context),
+      },
+      subagent_delegation_status: {
+        description: "Hermes-style subagent delegation status: isolation, blocked child tools, concurrency, and shared budget.",
+        permission: null,
+        group: "delegation",
+        run: async (_, context) => this.getSubagentDelegationStatus(context),
+      },
+      mcp_integration_status: {
+        description: "Hermes-style MCP integration status: configured servers, live tool registry, aliases, and ACP gap.",
+        permission: null,
+        group: "mcp",
+        run: async (_, context) => this.getMcpIntegrationStatus(context),
+      },
+      cron_scheduler_status: {
+        description: "Hermes-style built-in cron scheduler status: schedules, background jobs, triggers, and delivery path.",
+        permission: null,
+        group: "cron",
+        run: async (_, context) => this.getCronSchedulerStatus(context),
+      },
       openclaw_skill_scan: {
         description: "Scan vendored OpenClaw SKILL.md files for possible OmniClaw imports.",
         permission: null,
@@ -2215,6 +2251,273 @@ export class ToolRegistry {
         nextUpgrade: "Add hermes_skill_import and skill_manage update flow with diff/review before writing.",
       },
       sampleHermesSkills: hermes.skills.slice(0, 8),
+    };
+  }
+
+  getMessagingGatewayStatus(context = {}) {
+    const agentId = this.getAgentId(context);
+    const adapters = this.connectorStore?.listAdapters?.() || [];
+    const overview = this.connectorStore?.getAdaptersOverview?.() || {
+      total: adapters.length,
+      enabled: adapters.filter((adapter) => adapter.enabled).length,
+      ready: adapters.filter((adapter) => ["ready", "configured"].includes(adapter.status)).length,
+      needsSecret: adapters.filter((adapter) => adapter.status === "needs-secret").length,
+    };
+    const gateway = this.agentRuntime?.gateway;
+    const sessions = this.agentRuntime?.sessions?.listSessions?.(20) || [];
+    const deliveries = this.connectorStore?.listAdapterDeliveries?.({ limit: 12 }) || [];
+    const webhookDeliveries = this.connectorStore?.listWebhookDeliveries?.(12) || [];
+    const configuredPlatforms = adapters.map((adapter) => ({
+      id: adapter.id,
+      name: adapter.name,
+      transport: adapter.transport,
+      direction: adapter.direction,
+      enabled: adapter.enabled,
+      status: adapter.status,
+      defaultAgentId: adapter.defaultAgentId,
+      secretConfigured: adapter.secretConfigured,
+      capabilities: adapter.capabilities || [],
+    }));
+    return {
+      agentId,
+      mode: "single gateway process routes all configured platform adapters into agent sessions",
+      overview,
+      configuredPlatforms,
+      supportedTargets: ["telegram", "discord", "http-webhook", "webchat"],
+      plannedTargets: ["whatsapp", "slack", "signal", "email", "matrix", "mattermost", "dingtalk", "wecom", "feishu"],
+      sessionRouting: {
+        ready: true,
+        rule: "platform/user/channel ids map into persistent OmniClaw sessions; webchat uses sessionId/sessionKey.",
+        recentSessionCount: sessions.length,
+        recentSessions: sessions.slice(0, 6).map((session) => ({
+          id: session.id,
+          key: session.key,
+          agentId: session.agentId,
+          messageCount: session.messageCount,
+          updatedAt: session.updatedAt,
+        })),
+      },
+      voiceTranscription: {
+        status: "partial",
+        current: "attachments are cached/extracted/analyzed through media-provider adapters when configured",
+        gap: "automatic voice memo transcription and audio reply synthesis need speech/TTS provider plugins",
+      },
+      dmPairingSecurity: {
+        trustStore: Boolean(this.agentRuntime?.trust),
+        approvals: gateway?.listApprovals?.("")?.length || 0,
+        rule: "gateway tokens, adapter secrets, device pairing, and shell approvals guard risky operations",
+      },
+      recentTraffic: {
+        adapterDeliveries: deliveries.length,
+        webhookDeliveries: webhookDeliveries.length,
+        recentEvents: gateway?.listEvents?.(8) || [],
+      },
+      nextUpgrade: "Promote Telegram/Discord workers plus webhook into a unified gateway adapter dashboard, then add WhatsApp/Slack/Signal/Email account pairing.",
+    };
+  }
+
+  async getTerminalBackendsStatus(context = {}) {
+    const config = this.configStore.getConfig();
+    const shellPermissions = config.tools?.permissions || {};
+    const shellPolicy = config.tools?.shell || {};
+    const audit = this.agentRuntime?.shellAudit?.list?.({ limit: 12 }) || [];
+    const processes = await (this.systemMonitor?.listProcesses?.("") || Promise.resolve({ processes: [], count: 0 }));
+    const sandboxStatus = this.sandboxRunner?.getStatus?.() || {};
+    return {
+      agentId: this.getAgentId(context),
+      defaultBackend: "local",
+      backends: [
+        { id: "local", status: shellPermissions.allowShellExecution ? "ready" : "permission-disabled", detail: "Direct governed subprocess execution on this Windows laptop." },
+        { id: "docker", status: sandboxStatus.enabled ? "partial" : "missing", detail: "Sandbox runner exists, hard container isolation needs a stricter Docker backend." },
+        { id: "ssh", status: "planned", detail: "Remote command backend not wired yet." },
+        { id: "daytona", status: "planned", detail: "Serverless dev environment backend not wired yet." },
+        { id: "modal", status: "planned", detail: "Serverless GPU/cloud backend not wired yet." },
+        { id: "singularity", status: "planned", detail: "HPC container backend not wired yet." },
+      ],
+      persistentEnvironments: {
+        status: "partial",
+        current: "process registry and background jobs exist; per-backend long-lived environment reuse is next",
+      },
+      processRegistry: {
+        ready: true,
+        processSampleCount: Array.isArray(processes.processes) ? Math.min(processes.processes.length, 20) : 0,
+        auditCount: audit.length,
+        recentShellAudit: audit.slice(0, 5),
+      },
+      approvalGates: {
+        enabled: Boolean(shellPolicy.requireApproval || shellPermissions.allowShellPlanning),
+        shellExecutionAllowed: Boolean(shellPermissions.allowShellExecution),
+        shellPlanningAllowed: Boolean(shellPermissions.allowShellPlanning),
+        policy: shellPolicy,
+      },
+      nextUpgrade: "Add backend selection to terminal/process tools so local/docker/ssh/cloud execution can be chosen per tool call.",
+    };
+  }
+
+  getModelProviderStatus(context = {}) {
+    const config = this.configStore.getConfig();
+    const provider = this.agentRuntime?.getProviderInfo?.() || {};
+    const profiles = config.providerProfiles || {};
+    const secretStatuses = this.agentRuntime?.secrets?.getAllStatuses?.() || [];
+    const activeProfile = Object.entries(profiles).find(([, profile]) =>
+      profile?.mode === config.provider?.mode &&
+      profile?.baseUrl === config.provider?.baseUrl &&
+      profile?.model === config.provider?.model
+    );
+    const baseUrl = String(config.provider?.baseUrl || "");
+    const apiMode = provider.mode === "codex-cli"
+      ? "codex_responses"
+      : /anthropic|claude/i.test(baseUrl)
+        ? "anthropic_messages"
+        : "chat_completions";
+    return {
+      agentId: this.getAgentId(context),
+      active: {
+        provider: provider.id || "unknown",
+        ready: Boolean(provider.ready),
+        mode: provider.mode || config.provider?.mode || "",
+        model: provider.model || config.provider?.model || "",
+        baseUrl,
+        apiMode,
+        profileId: activeProfile?.[0] || "",
+      },
+      autoDetection: {
+        ready: true,
+        rule: "provider mode/baseUrl select chat_completions, anthropic_messages-style, or codex_responses command bridge",
+        supportedModes: ["mock", "openai-compatible", "codex-cli"],
+      },
+      credentialPool: {
+        status: "partial",
+        configuredKeys: secretStatuses.filter((item) => item.configured).length,
+        keys: secretStatuses,
+        gap: "round-robin key rotation per provider is not implemented yet",
+      },
+      smartFailover: {
+        status: "partial",
+        current: "provider failures are classified and converted into fallback replies/status",
+        gap: "automatic secondary model failover and jittered retry policy still need a provider router",
+      },
+      rateLimitTracker: {
+        status: "planned",
+        current: "provider test responses expose errors, but rate-limit headers are not persisted yet",
+      },
+      modelDiscovery: {
+        ready: true,
+        tool: "list_provider_models",
+        rule: "OpenAI-compatible /models endpoint can be fetched after base URL and key are configured",
+      },
+      nextUpgrade: "Add provider router with key pool rotation, rate-limit header storage, and fallback model chain.",
+    };
+  }
+
+  getSubagentDelegationStatus(context = {}) {
+    const agents = this.agentRegistry?.getAll?.() || [];
+    const delegations = this.agentRuntime?.gateway?.listDelegations?.({ limit: 20 }) || [];
+    const visibleTools = new Set(this.getAll({ agentId: "main" }).map((tool) => tool.id));
+    return {
+      agentId: this.getAgentId(context),
+      availableAgents: agents.map((agent) => ({
+        id: agent.id,
+        name: agent.name,
+        role: agent.role || "",
+        profileId: agent.profileId,
+        toolCount: Array.isArray(agent.tools) ? agent.tools.length : 0,
+      })),
+      delegationToolReady: visibleTools.has("delegate_task"),
+      isolationGuarantees: {
+        childGetsParentHistory: false,
+        resultMode: "summary result only",
+        maxDepth: 1,
+        defaultConcurrentChildren: 1,
+        blockedChildTools: ["delegate_task", "clarify", "memory", "send_message", "execute_code"],
+        gap: "current delegate_task queues a routed task; full isolated child execution loop is still partial",
+      },
+      sharedIterationBudget: {
+        status: "planned",
+        current: "parent run records delegation request; separate shared budget object is next",
+      },
+      executeCodeTool: {
+        ready: visibleTools.has("execute_code") || visibleTools.has("code_execution"),
+        note: "execute_code exists for compact local scripts, governed by shell execution permissions",
+      },
+      recentDelegations: delegations.slice(0, 8),
+      nextUpgrade: "Turn queued delegations into real child agent runs with isolated context, bounded toolsets, and collected summaries.",
+    };
+  }
+
+  getMcpIntegrationStatus(context = {}) {
+    const mcp = this.agentRuntime?.mcp;
+    const status = mcp?.getStatus?.() || {};
+    const tools = mcp?.getAllTools?.() || [];
+    const configPath = mcp?.configPath || "config/mcp-servers.json";
+    let configuredServers = [];
+    try {
+      const parsed = fs.existsSync(configPath) ? JSON.parse(fs.readFileSync(configPath, "utf8")) : {};
+      configuredServers = Object.entries(parsed.servers || {}).map(([id, server]) => ({
+        id,
+        transport: server.transport || "stdio",
+        command: server.command || "",
+        url: server.url || "",
+      }));
+    } catch {
+      configuredServers = [];
+    }
+    return {
+      agentId: this.getAgentId(context),
+      configPath,
+      configuredServers,
+      connectedServers: Object.values(status).filter((item) => item.connected).length,
+      status,
+      liveToolCount: tools.length,
+      liveTools: tools.slice(0, 20),
+      resolutionFlow: [
+        "MCP server configured in config/mcp-servers.json",
+        "mcp.connectServer/connectAll starts the server",
+        "tools/list populates first-class mcp_* tool ids",
+        "model/tool loop can call mcp tool through registry",
+      ],
+      explicitAliases: {
+        ready: configuredServers.length > 0,
+        rule: "server id is embedded in generated mcp_<server>_<tool> id to avoid ambiguous tool names",
+      },
+      servesOmniClawToo: {
+        status: "planned",
+        gap: "OmniClaw can consume MCP servers; exposing OmniClaw itself as an MCP server is not wired yet",
+      },
+      acpAdapter: {
+        status: "planned",
+        gap: "Agent Communication Protocol adapter is not wired yet",
+      },
+      nextUpgrade: "Add dashboard connect/test buttons for MCP servers, then expose connected MCP tools in capability_demo.",
+    };
+  }
+
+  getCronSchedulerStatus(context = {}) {
+    const overview = this.agentRuntime?.scheduler?.getOverview?.() || {};
+    const schedules = this.agentRuntime?.schedules?.listSchedules?.(20) || [];
+    const jobs = this.agentRuntime?.jobs?.listJobs?.(20) || [];
+    return {
+      agentId: this.getAgentId(context),
+      overview,
+      schedules: schedules.slice(0, 10),
+      recentJobs: jobs.slice(0, 10),
+      howItWorks: [
+        "create_schedule/cronjob creates a persisted schedule",
+        "scheduler ticks independently of the chat request",
+        "due schedule enqueues a fresh background tool job",
+        "job output is recorded in jobs/gateway logs and can be delivered through messaging adapters",
+      ],
+      unattendedOperation: {
+        status: "partial",
+        current: "scheduler runs inside the local gateway process while OmniClaw is running",
+        gap: "OS-level service/auto-start and cloud serverless backends are next",
+      },
+      deliveryPath: {
+        ready: true,
+        current: "background worker -> gateway event/job log; send_message can route adapter outbox when configured",
+      },
+      cliReference: ["cron", "cronjob", "create_schedule", "delete_schedule", "run_schedule_now"],
+      nextUpgrade: "Add natural-language schedule parsing and per-platform delivery selection from chat.",
     };
   }
 

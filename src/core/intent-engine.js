@@ -132,6 +132,82 @@ export class IntentEngine {
     }
 
     if (
+      lowered.includes("messaging gateway") ||
+      lowered.includes("gateway process") ||
+      lowered.includes("session routing") ||
+      lowered.includes("voice transcription") ||
+      lowered.includes("dm pairing") ||
+      lowered.includes("telegram") ||
+      lowered.includes("discord") ||
+      lowered.includes("whatsapp") ||
+      lowered.includes("slack") ||
+      lowered.includes("signal")
+    ) {
+      intents.push("messaging-gateway");
+    }
+
+    if (
+      lowered.includes("terminal backend") ||
+      lowered.includes("terminal backends") ||
+      lowered.includes("persistent environment") ||
+      lowered.includes("process registry") ||
+      lowered.includes("approval gate") ||
+      lowered.includes("docker") ||
+      lowered.includes("ssh backend") ||
+      lowered.includes("daytona") ||
+      lowered.includes("modal") ||
+      lowered.includes("singularity")
+    ) {
+      intents.push("terminal-backends");
+    }
+
+    if (
+      lowered.includes("multi-provider") ||
+      lowered.includes("model support") ||
+      lowered.includes("api mode") ||
+      lowered.includes("credential pool") ||
+      lowered.includes("smart failover") ||
+      lowered.includes("rate limit tracker") ||
+      lowered.includes("openrouter") ||
+      lowered.includes("anthropic_messages") ||
+      lowered.includes("chat_completions") ||
+      lowered.includes("codex_responses")
+    ) {
+      intents.push("model-provider");
+    }
+
+    if (
+      lowered.includes("subagent delegation") ||
+      lowered.includes("delegate_task") ||
+      lowered.includes("isolation guarantee") ||
+      lowered.includes("shared iteration budget") ||
+      lowered.includes("parallelism")
+    ) {
+      intents.push("subagent-delegation");
+    }
+
+    if (
+      lowered.includes("mcp integration") ||
+      lowered.includes("model context protocol") ||
+      lowered.includes("mcp server") ||
+      lowered.includes("mcp tools") ||
+      lowered.includes("acp adapter")
+    ) {
+      intents.push("mcp-integration");
+    }
+
+    if (
+      lowered.includes("cron scheduler") ||
+      lowered.includes("built-in cron") ||
+      lowered.includes("cronjob") ||
+      lowered.includes("schedule") ||
+      lowered.includes("scheduled task") ||
+      lowered.includes("unattended operation")
+    ) {
+      intents.push("cron-scheduler");
+    }
+
+    if (
       lowered.includes("v2") ||
       lowered.includes("weak") ||
       lowered.includes("kami") ||

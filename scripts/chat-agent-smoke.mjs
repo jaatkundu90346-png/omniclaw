@@ -196,6 +196,54 @@ async function run() {
     assert(skillStatus.reply.includes("skill system status"), "Skill system reply should be grounded.");
     assertToolSummaries(skillStatus.toolOutputs, "skill system request");
 
+    const gatewayStatus = await postChat("messaging gateway session routing status", `chat-smoke-msg-gateway-${suffix}`);
+    assert(
+      gatewayStatus.toolOutputs.some((item) => item.tool === "messaging_gateway_status"),
+      "Messaging gateway request should call messaging_gateway_status.",
+    );
+    assert(gatewayStatus.reply.includes("messaging gateway status"), "Messaging gateway reply should be grounded.");
+    assertToolSummaries(gatewayStatus.toolOutputs, "messaging gateway request");
+
+    const terminalStatus = await postChat("terminal backends process registry approval gates", `chat-smoke-terminal-backends-${suffix}`);
+    assert(
+      terminalStatus.toolOutputs.some((item) => item.tool === "terminal_backends_status"),
+      "Terminal backend request should call terminal_backends_status.",
+    );
+    assert(terminalStatus.reply.includes("terminal backends status"), "Terminal backend reply should be grounded.");
+    assertToolSummaries(terminalStatus.toolOutputs, "terminal backend request");
+
+    const modelStatus = await postChat("multi-provider model support credential pool smart failover", `chat-smoke-model-provider-${suffix}`);
+    assert(
+      modelStatus.toolOutputs.some((item) => item.tool === "model_provider_status"),
+      "Model provider request should call model_provider_status.",
+    );
+    assert(modelStatus.reply.includes("multi-provider model status"), "Model provider reply should be grounded.");
+    assertToolSummaries(modelStatus.toolOutputs, "model provider request");
+
+    const delegationStatus = await postChat("subagent delegation isolation guarantees shared iteration budget", `chat-smoke-subagent-delegation-${suffix}`);
+    assert(
+      delegationStatus.toolOutputs.some((item) => item.tool === "subagent_delegation_status"),
+      "Subagent delegation request should call subagent_delegation_status.",
+    );
+    assert(delegationStatus.reply.includes("subagent delegation status"), "Subagent delegation reply should be grounded.");
+    assertToolSummaries(delegationStatus.toolOutputs, "subagent delegation request");
+
+    const mcpStatus = await postChat("mcp integration model context protocol server aliases", `chat-smoke-mcp-${suffix}`);
+    assert(
+      mcpStatus.toolOutputs.some((item) => item.tool === "mcp_integration_status"),
+      "MCP integration request should call mcp_integration_status.",
+    );
+    assert(mcpStatus.reply.includes("MCP integration status"), "MCP integration reply should be grounded.");
+    assertToolSummaries(mcpStatus.toolOutputs, "mcp integration request");
+
+    const cronStatus = await postChat("built-in cron scheduler cronjob unattended operation", `chat-smoke-cron-${suffix}`);
+    assert(
+      cronStatus.toolOutputs.some((item) => item.tool === "cron_scheduler_status"),
+      "Cron scheduler request should call cron_scheduler_status.",
+    );
+    assert(cronStatus.reply.includes("cron scheduler status"), "Cron scheduler reply should be grounded.");
+    assertToolSummaries(cronStatus.toolOutputs, "cron scheduler request");
+
     console.log("Chat agent smoke test passed");
   } finally {
     child.kill("SIGTERM");

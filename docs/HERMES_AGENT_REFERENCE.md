@@ -76,6 +76,26 @@ Current honest gaps:
 - Skill self-improvement is not fully automatic yet; it needs a reviewable `hermes_skill_import` / `skill_manage` update flow.
 - Context compression has diagnostic awareness and background summarization, but full head+tail preservation with middle-summary rewrite is still next.
 
+## Gateway, Backends, Provider, Delegation, MCP, And Cron
+
+The latest screenshot set adds six more Hermes architecture areas now mapped into OmniClaw as grounded runtime status tools:
+
+- `messaging_gateway_status` reports connector adapters, session routing, recent sessions, webhook/adapter traffic, voice/media ingestion status, and DM/security gates.
+- `terminal_backends_status` reports local/docker/ssh/cloud backend readiness, shell audit/process registry, persistent-environment gap, and approval gates.
+- `model_provider_status` reports active provider/model, inferred API mode (`chat_completions`, `anthropic_messages`, or `codex_responses`), credential status, model discovery, failover gap, and rate-limit tracker gap.
+- `subagent_delegation_status` reports configured agents, `delegate_task` readiness, child isolation rules, blocked child tools, execute-code status, and the shared-budget gap.
+- `mcp_integration_status` reports configured MCP servers, connected server/tool counts, MCP tool resolution flow, explicit aliasing rule, and the remaining OmniClaw-as-MCP/ACP gaps.
+- `cron_scheduler_status` reports active schedules, recent jobs, scheduler flow, delivery path, and unattended-operation gap.
+
+Current honest gaps:
+
+- Messaging has webchat, HTTP webhook, Telegram/Discord skeletons and media ingestion plumbing; WhatsApp/Slack/Signal/Email/Matrix account pairing still needs production adapters.
+- Terminal is real and governed on the local machine; Docker/SSH/Daytona/Modal/Singularity are now tracked as backend targets, not fully wired execution modes.
+- Provider setup supports mock, OpenAI-compatible BYOK, Codex CLI, and model discovery; credential pool rotation, rate-limit storage, and automatic fallback chain are next.
+- Delegation can route/queue tasks to named agents, but isolated child agent execution with shared iteration budget is still next.
+- MCP client exists and can consume configured MCP servers; dashboard controls and exposing OmniClaw as an MCP server are next.
+- Scheduler runs inside the local gateway process; OS auto-start/cloud serverless unattended operation is next.
+
 ## Vendored Source Layout
 
 - `vendor/hermes-agent/agent`: model adapters, context, memory, prompt, tool, and runtime helpers.

@@ -3611,6 +3611,79 @@ export class OmniClawAgent {
       ].join(" ");
     }
 
+    if (intents.includes("messaging-gateway") && byTool.has("messaging_gateway_status")) {
+      const status = byTool.get("messaging_gateway_status");
+      const overview = status.overview || {};
+      return [
+        "Hermes-style messaging gateway status ready.",
+        `Adapters: total ${overview.total || 0}, enabled ${overview.enabled || 0}, ready ${overview.ready || 0}, needs-secret ${overview.needsSecret || 0}.`,
+        `Session routing: ${status.sessionRouting?.ready ? "on" : "off"}; recent sessions ${status.sessionRouting?.recentSessionCount || 0}.`,
+        `Voice/media: ${status.voiceTranscription?.status || "unknown"} - ${status.voiceTranscription?.current || ""}.`,
+        `Security: approvals ${status.dmPairingSecurity?.approvals || 0}, trust store ${status.dmPairingSecurity?.trustStore ? "on" : "off"}.`,
+        `Next upgrade: ${status.nextUpgrade || "gateway adapters improve karo"}`,
+      ].filter(Boolean).join(" ");
+    }
+
+    if (intents.includes("terminal-backends") && byTool.has("terminal_backends_status")) {
+      const status = byTool.get("terminal_backends_status");
+      const backends = Array.isArray(status.backends) ? status.backends.map((backend) => `${backend.id}:${backend.status}`).join(", ") : "";
+      return [
+        "Hermes-style terminal backends status ready.",
+        `Default backend: ${status.defaultBackend || "local"}. Backends: ${backends || "none"}.`,
+        `Process registry: ${status.processRegistry?.ready ? "on" : "off"}, process sample ${status.processRegistry?.processSampleCount || 0}, shell audit ${status.processRegistry?.auditCount || 0}.`,
+        `Approval gates: shell execution ${status.approvalGates?.shellExecutionAllowed ? "allowed" : "disabled"}, planning ${status.approvalGates?.shellPlanningAllowed ? "allowed" : "disabled"}.`,
+        `Next upgrade: ${status.nextUpgrade || "terminal backend selection add karo"}`,
+      ].join(" ");
+    }
+
+    if (intents.includes("model-provider") && byTool.has("model_provider_status")) {
+      const status = byTool.get("model_provider_status");
+      const active = status.active || {};
+      return [
+        "Hermes-style multi-provider model status ready.",
+        `Active: ${active.provider || "unknown"} ${active.model || "unset"} (${active.ready ? "ready" : "not ready"}), API mode ${active.apiMode || "unknown"}.`,
+        `Credential pool: ${status.credentialPool?.configuredKeys || 0} configured key(s); status ${status.credentialPool?.status || "unknown"}.`,
+        `Failover: ${status.smartFailover?.status || "unknown"}; rate limits: ${status.rateLimitTracker?.status || "unknown"}.`,
+        `Model discovery tool: ${status.modelDiscovery?.tool || "list_provider_models"}.`,
+        `Next upgrade: ${status.nextUpgrade || "provider router add karo"}`,
+      ].join(" ");
+    }
+
+    if (intents.includes("subagent-delegation") && byTool.has("subagent_delegation_status")) {
+      const status = byTool.get("subagent_delegation_status");
+      return [
+        "Hermes-style subagent delegation status ready.",
+        `Agents available: ${(status.availableAgents || []).length}; delegate_task ${status.delegationToolReady ? "ready" : "missing"}.`,
+        `Isolation: child parent-history ${status.isolationGuarantees?.childGetsParentHistory ? "yes" : "no"}, max depth ${status.isolationGuarantees?.maxDepth || 1}, result mode ${status.isolationGuarantees?.resultMode || "summary"}.`,
+        `Execute-code tool: ${status.executeCodeTool?.ready ? "ready" : "missing"}.`,
+        `Recent delegations: ${(status.recentDelegations || []).length}.`,
+        `Next upgrade: ${status.nextUpgrade || "real child agent runs add karo"}`,
+      ].join(" ");
+    }
+
+    if (intents.includes("mcp-integration") && byTool.has("mcp_integration_status")) {
+      const status = byTool.get("mcp_integration_status");
+      return [
+        "Hermes-style MCP integration status ready.",
+        `Configured servers: ${(status.configuredServers || []).length}; connected ${status.connectedServers || 0}; live tools ${status.liveToolCount || 0}.`,
+        `Resolution: ${(status.resolutionFlow || []).join(" | ")}.`,
+        `OmniClaw as MCP server: ${status.servesOmniClawToo?.status || "unknown"}; ACP: ${status.acpAdapter?.status || "unknown"}.`,
+        `Next upgrade: ${status.nextUpgrade || "MCP dashboard connect/test add karo"}`,
+      ].join(" ");
+    }
+
+    if (intents.includes("cron-scheduler") && byTool.has("cron_scheduler_status")) {
+      const status = byTool.get("cron_scheduler_status");
+      const overview = status.overview || {};
+      return [
+        "Hermes-style cron scheduler status ready.",
+        `Schedules: total ${overview.scheduleCount || 0}, active ${overview.activeCount || 0}, paused ${overview.pausedCount || 0}, next ${overview.nextRunAt || "none"}.`,
+        `Recent jobs: ${(status.recentJobs || []).length}; delivery path ${status.deliveryPath?.ready ? "ready" : "partial"}.`,
+        `Flow: ${(status.howItWorks || []).slice(0, 3).join(" | ")}.`,
+        `Next upgrade: ${status.nextUpgrade || "natural language cron parser add karo"}`,
+      ].join(" ");
+    }
+
     if (intents.includes("hermes-doctor")) {
       const provider = byTool.get("provider_status") || {};
       const access = byTool.get("computer_access_status") || {};
