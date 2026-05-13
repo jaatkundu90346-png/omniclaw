@@ -10,10 +10,50 @@ function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
+function compactRun(run = {}) {
+  const compactPlan = run.plan
+    ? {
+        ...run.plan,
+        profile: run.plan.profile
+          ? {
+              id: run.plan.profile.id,
+              description: run.plan.profile.description,
+              allowToolExecution: run.plan.profile.allowToolExecution,
+              enableSkillMatching: run.plan.profile.enableSkillMatching,
+            }
+          : run.plan.profile,
+        toolsAvailable: Array.isArray(run.plan.toolsAvailable)
+          ? run.plan.toolsAvailable.map((tool) => ({
+              id: tool.id,
+              permission: tool.permission || null,
+            }))
+          : [],
+      }
+    : run.plan;
+
+  return {
+    ...run,
+    plan: compactPlan,
+    toolOutputs: Array.isArray(run.toolOutputs) ? run.toolOutputs.slice(-12) : run.toolOutputs,
+  };
+}
+
+function normalizeGatewayData(parsed = {}) {
+  const runs = Array.isArray(parsed.runs) ? parsed.runs.slice(-120).map(compactRun) : [];
+  return {
+    seq: Number(parsed.seq || 0),
+    events: Array.isArray(parsed.events) ? parsed.events.slice(-200) : [],
+    runs,
+    approvals: Array.isArray(parsed.approvals) ? parsed.approvals.slice(-200) : [],
+    delegations: Array.isArray(parsed.delegations) ? parsed.delegations.slice(-120) : [],
+  };
+}
+
 export class GatewayStore {
   constructor(rootDir) {
     this.filePath = path.join(rootDir, "data", "gateway.json");
     this.emitter = new EventEmitter();
+    this.cache = null;
     this.ensureFile();
   }
 
@@ -28,29 +68,38 @@ export class GatewayStore {
   }
 
   read() {
+    const stat = fs.statSync(this.filePath);
+    if (this.cache && this.cache.mtimeMs === stat.mtimeMs && this.cache.size === stat.size) {
+      return this.cache.data;
+    }
     const parsed = JSON.parse(fs.readFileSync(this.filePath, "utf8"));
-    return {
-      seq: Number(parsed.seq || 0),
-      events: Array.isArray(parsed.events) ? parsed.events : [],
-      runs: Array.isArray(parsed.runs) ? parsed.runs : [],
-      approvals: Array.isArray(parsed.approvals) ? parsed.approvals : [],
-      delegations: Array.isArray(parsed.delegations) ? parsed.delegations : [],
+    const data = normalizeGatewayData(parsed);
+    this.cache = {
+      mtimeMs: stat.mtimeMs,
+      size: stat.size,
+      data,
     };
+    return data;
   }
 
   write(data) {
     const tmpPath = `${this.filePath}.${process.pid}.${Date.now()}.tmp`;
+    data = normalizeGatewayData(data);
     const nextJson = JSON.stringify(data, null, 2);
     fs.writeFileSync(tmpPath, nextJson);
     for (let attempt = 0; attempt < 8; attempt += 1) {
       try {
         fs.renameSync(tmpPath, this.filePath);
+        const stat = fs.statSync(this.filePath);
+        this.cache = { mtimeMs: stat.mtimeMs, size: stat.size, data };
         return;
       } catch (error) {
         if (!["EPERM", "EBUSY", "EACCES"].includes(error.code) || attempt === 7) {
           try {
             fs.writeFileSync(this.filePath, nextJson);
             fs.rmSync(tmpPath, { force: true });
+            const stat = fs.statSync(this.filePath);
+            this.cache = { mtimeMs: stat.mtimeMs, size: stat.size, data };
             return;
           } catch {
             throw error;

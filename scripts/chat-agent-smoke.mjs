@@ -244,6 +244,28 @@ async function run() {
     assert(cronStatus.reply.includes("cron scheduler status"), "Cron scheduler reply should be grounded.");
     assertToolSummaries(cronStatus.toolOutputs, "cron scheduler request");
 
+    const learningArchitecture = await postChat(
+      "trajectory generation RL training closed learning loop use cases design principles",
+      `chat-smoke-learning-architecture-${suffix}`,
+    );
+    assert(
+      learningArchitecture.toolOutputs.some((item) => item.tool === "trajectory_training_status"),
+      "Learning architecture request should call trajectory_training_status.",
+    );
+    assert(
+      learningArchitecture.toolOutputs.some((item) => item.tool === "closed_learning_loop_status"),
+      "Learning architecture request should call closed_learning_loop_status.",
+    );
+    assert(
+      learningArchitecture.toolOutputs.some((item) => item.tool === "hermes_use_cases_status"),
+      "Learning architecture request should call hermes_use_cases_status.",
+    );
+    assert(
+      learningArchitecture.toolOutputs.some((item) => item.tool === "design_principles_status"),
+      "Learning architecture request should call design_principles_status.",
+    );
+    assertToolSummaries(learningArchitecture.toolOutputs, "learning architecture request");
+
     console.log("Chat agent smoke test passed");
   } finally {
     child.kill("SIGTERM");

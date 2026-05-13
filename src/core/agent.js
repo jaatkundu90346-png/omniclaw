@@ -1925,6 +1925,7 @@ export class OmniClawAgent {
       profile,
       provider: this.provider,
     });
+    plan = this.compactPlanForStorage(plan);
     const toolOutputs = [];
     const approvals = [];
 
@@ -2331,7 +2332,7 @@ export class OmniClawAgent {
           model: providerInfo.model || "",
           ready: providerInfo.ready !== false,
         });
-        const providerResponse = await this.provider.respond({
+        const providerPayload = {
           message,
           intents,
           agent: contextBundle.agent,
@@ -2348,7 +2349,18 @@ export class OmniClawAgent {
           tasks: contextBundle.tasks,
           tools: contextBundle.tools,
           contextBundle,
-        });
+        };
+        const providerTimeoutMs = Math.max(
+          5000,
+          Math.min(45000, Number(this.config.getConfig().provider?.timeoutMs || 45000)),
+        );
+        const providerResponse = await Promise.race([
+          this.provider.respond(providerPayload),
+          new Promise((resolve) => setTimeout(
+            () => resolve(`Provider request timed out after ${providerTimeoutMs}ms. OmniClaw local tools completed, but the model bridge did not return in time.`),
+            providerTimeoutMs,
+          )),
+        ]);
         const outcome = classifyProviderOutcome(providerResponse);
         providerDiagnostics = {
           ok: outcome.ok,
@@ -2747,7 +2759,12 @@ export class OmniClawAgent {
       });
       let completion;
       try {
-        completion = await this.provider.complete([
+        const loopTimeoutMs = Math.max(
+          5000,
+          Math.min(30000, Number(this.config.getConfig().provider?.timeoutMs || 30000)),
+        );
+        completion = await Promise.race([
+          this.provider.complete([
           {
             role: "system",
             content: "You are an OmniClaw tool-call planner. Return only valid JSON.",
@@ -2762,6 +2779,11 @@ export class OmniClawAgent {
               round,
             }),
           },
+          ]),
+          new Promise((_, reject) => setTimeout(
+            () => reject(new Error(`Model tool loop timed out after ${loopTimeoutMs}ms`)),
+            loopTimeoutMs,
+          )),
         ]);
       } catch (error) {
         report.errors.push(error.message);
@@ -3321,6 +3343,30 @@ export class OmniClawAgent {
     return this.readAgentProfileText(agentId).replace(/^# PROFILE\s*/i, "").trim().length > 0;
   }
 
+  compactPlanForStorage(plan = {}) {
+    const tools = Array.isArray(plan.toolsAvailable)
+      ? plan.toolsAvailable.map((tool) => ({
+          id: tool.id,
+          permission: tool.permission || null,
+        }))
+      : [];
+    const compactProfile = plan.profile
+      ? {
+          id: plan.profile.id,
+          description: plan.profile.description,
+          allowToolExecution: plan.profile.allowToolExecution,
+          enableSkillMatching: plan.profile.enableSkillMatching,
+        }
+      : plan.profile;
+
+    return {
+      ...plan,
+      profile: compactProfile,
+      toolsAvailable: tools,
+      toolCount: tools.length,
+    };
+  }
+
   buildOnboardingReply({ agentId = "main", intents = [], session = {}, profileUpdated = false } = {}) {
     if (profileUpdated) {
       return "";
@@ -3670,6 +3716,52 @@ export class OmniClawAgent {
         `OmniClaw as MCP server: ${status.servesOmniClawToo?.status || "unknown"}; ACP: ${status.acpAdapter?.status || "unknown"}.`,
         `Next upgrade: ${status.nextUpgrade || "MCP dashboard connect/test add karo"}`,
       ].join(" ");
+    }
+
+    if (intents.includes("trajectory-training") && byTool.has("trajectory_training_status")) {
+      const status = byTool.get("trajectory_training_status");
+      const counts = status.counts || {};
+      return [
+        "Hermes-style trajectory and RL training status ready.",
+        `Pipeline: ${status.pipeline?.status || "unknown"} (${status.pipeline?.mode || "gateway traces"}), skip context files ${status.pipeline?.skipContextFiles ? "on" : "off"}.`,
+        `Counts: runs ${counts.runs || 0}, tool events ${counts.toolEvents || 0}, shell audit ${counts.shellAudit || 0}, jobs ${counts.jobs || 0}.`,
+        `Components: ${(status.components || []).map((item) => `${item.id}:${item.status}`).join(", ")}.`,
+        `RL: ${status.rlTraining?.status || "unknown"} - ${status.rlTraining?.gap || ""}.`,
+        `Next upgrade: ${status.nextUpgrade || "trajectory exporter add karo"}`,
+      ].filter(Boolean).join(" ");
+    }
+
+    if (intents.includes("closed-learning-loop") && byTool.has("closed_learning_loop_status")) {
+      const status = byTool.get("closed_learning_loop_status");
+      return [
+        "Hermes-style closed learning loop status ready.",
+        `Loop: ${(status.loop || []).map((item) => `${item.step}:${item.status}`).join(", ")}.`,
+        `Memory lifecycle: ${(status.memoryLifecycle || []).join(" | ")}.`,
+        status.closedLoopRule || "",
+        `Next upgrade: ${status.nextUpgrade || "post-run learner add karo"}`,
+      ].filter(Boolean).join(" ");
+    }
+
+    if (intents.includes("hermes-use-cases") && byTool.has("hermes_use_cases_status")) {
+      const status = byTool.get("hermes_use_cases_status");
+      const summary = status.summary || {};
+      return [
+        "Hermes use-case capability matrix ready.",
+        `Summary: ready ${summary.ready || 0}, partial ${summary.partial || 0}, seeded ${summary.seeded || 0}, missing ${summary.missing || 0}.`,
+        `Use cases: ${(status.cases || []).map((item) => `${item.label}:${item.status}`).join(" | ")}.`,
+        status.rule || "",
+        `Next upgrade: ${status.nextUpgrade || "one use case end-to-end ready karo"}`,
+      ].filter(Boolean).join(" ");
+    }
+
+    if (intents.includes("design-principles") && byTool.has("design_principles_status")) {
+      const status = byTool.get("design_principles_status");
+      return [
+        "Hermes-style design principles status ready.",
+        `Principles: ${(status.principles || []).map((item) => `${item.id}:${item.status}`).join(" | ")}.`,
+        status.rule || "",
+        `Next upgrade: ${status.nextUpgrade || "artifact store and platform formatting add karo"}`,
+      ].filter(Boolean).join(" ");
     }
 
     if (intents.includes("cron-scheduler") && byTool.has("cron_scheduler_status")) {

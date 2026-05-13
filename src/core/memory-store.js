@@ -27,6 +27,7 @@ export class MemoryStore {
     this.rootDir = rootDir;
     this.filePath = path.join(rootDir, "data", "memory.json");
     this.markdownPath = path.join(rootDir, "data", "MEMORY.md");
+    this.cache = null;
     this.ensureFile();
     this.ensureMarkdownFile();
   }
@@ -54,8 +55,12 @@ export class MemoryStore {
   }
 
   read() {
+    const stat = fs.statSync(this.filePath);
+    if (this.cache && this.cache.mtimeMs === stat.mtimeMs && this.cache.size === stat.size) {
+      return this.cache.data;
+    }
     const parsed = JSON.parse(fs.readFileSync(this.filePath, "utf8"));
-    return {
+    const data = {
       conversations: Array.isArray(parsed.conversations) ? parsed.conversations : [],
       notes: Array.isArray(parsed.notes) ? parsed.notes : [],
       research: Array.isArray(parsed.research) ? parsed.research : [],
@@ -64,10 +69,22 @@ export class MemoryStore {
       longTerm: Array.isArray(parsed.longTerm) ? parsed.longTerm : [],
       dreams: Array.isArray(parsed.dreams) ? parsed.dreams : [],
     };
+    this.cache = {
+      mtimeMs: stat.mtimeMs,
+      size: stat.size,
+      data,
+    };
+    return data;
   }
 
   write(data) {
     fs.writeFileSync(this.filePath, JSON.stringify(data, null, 2));
+    const stat = fs.statSync(this.filePath);
+    this.cache = {
+      mtimeMs: stat.mtimeMs,
+      size: stat.size,
+      data,
+    };
   }
 
   ensureMarkdownFile() {

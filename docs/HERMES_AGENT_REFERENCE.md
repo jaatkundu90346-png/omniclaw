@@ -96,6 +96,23 @@ Current honest gaps:
 - MCP client exists and can consume configured MCP servers; dashboard controls and exposing OmniClaw as an MCP server are next.
 - Scheduler runs inside the local gateway process; OS auto-start/cloud serverless unattended operation is next.
 
+## Trajectories, Learning Loop, Use Cases, And Design Principles
+
+The final screenshot set adds research/training and design-philosophy areas. OmniClaw now exposes these as runtime diagnostics instead of vague claims:
+
+- `trajectory_training_status` reports gateway runs, tool/provider events, shell audits, jobs, trajectory components, RL gap, and the `skip_context_files` rule so private identity/context does not pollute future training exports.
+- `closed_learning_loop_status` reports the loop from user interaction to tool execution, session logging, memory nudges, skill candidates, user-model updates, and the smarter next interaction.
+- `hermes_use_cases_status` maps Hermes use cases to OmniClaw's current real surfaces: software engineering, research/analysis, personal assistant, DevOps, ML research, and team workflows.
+- `design_principles_status` tracks OpenAI-compatible provider routing, stateless prompt assembly, one external memory provider, trajectory redaction, idempotent tool calls, and platform-aware formatting.
+- `mcp_connect_all` can connect all configured MCP servers through the existing `McpRegistry`, then refresh status/tool counts.
+
+Current honest gaps:
+
+- Trajectory data is traceable through gateway/session/job/shell logs, but a redacted JSONL exporter and reward labels are not built yet.
+- The closed learning loop has memory/session state, but automatic post-run `SKILL.md` refinement is still a proposed/reviewable workflow.
+- Use-case coverage is mostly partial; OmniClaw should drive one slice at a time to ready with an end-to-end smoke test.
+- Design principles are tracked, but idempotent large-output artifact persistence and per-platform response formatters still need implementation.
+
 ## Vendored Source Layout
 
 - `vendor/hermes-agent/agent`: model adapters, context, memory, prompt, tool, and runtime helpers.

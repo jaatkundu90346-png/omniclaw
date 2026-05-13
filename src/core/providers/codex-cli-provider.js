@@ -72,6 +72,7 @@ function commandUsable(command) {
 function runProcess(command, args, options = {}) {
   return new Promise((resolve) => {
     const wrapped = wrapCommandForSpawn(command, args);
+    let settled = false;
     const child = spawn(wrapped.command, wrapped.args, {
       cwd: options.cwd || process.cwd(),
       shell: false,
@@ -81,9 +82,43 @@ function runProcess(command, args, options = {}) {
     let stdout = "";
     let stderr = "";
     const maxOutput = Number(options.maxOutputBytes || 80_000);
+    const timeoutMs = Number(options.timeoutMs || 45_000);
+    const finish = (result) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
+    const killTree = () => {
+      try {
+        if (process.platform === "win32" && child.pid) {
+          spawnSync("taskkill.exe", ["/pid", String(child.pid), "/t", "/f"], {
+            encoding: "utf8",
+            timeout: 5000,
+            windowsHide: true,
+          });
+        } else {
+          child.kill("SIGKILL");
+        }
+      } catch {
+        try {
+          child.kill("SIGKILL");
+        } catch {}
+      }
+    };
     const timer = setTimeout(() => {
-      child.kill("SIGTERM");
-    }, Number(options.timeoutMs || 120_000));
+      killTree();
+      finish({
+        ok: false,
+        exitCode: null,
+        stdout,
+        stderr,
+        timedOut: true,
+        error: `Codex CLI provider timed out after ${timeoutMs}ms.`,
+      });
+    }, timeoutMs);
 
     child.stdout.on("data", (chunk) => {
       stdout = truncateText(stdout + chunk.toString("utf8"), maxOutput);
@@ -92,12 +127,10 @@ function runProcess(command, args, options = {}) {
       stderr = truncateText(stderr + chunk.toString("utf8"), maxOutput);
     });
     child.on("error", (error) => {
-      clearTimeout(timer);
-      resolve({ ok: false, exitCode: null, stdout, stderr, error: error.message });
+      finish({ ok: false, exitCode: null, stdout, stderr, error: error.message });
     });
     child.on("close", (exitCode) => {
-      clearTimeout(timer);
-      resolve({ ok: exitCode === 0, exitCode, stdout, stderr });
+      finish({ ok: exitCode === 0, exitCode, stdout, stderr });
     });
 
     if (options.stdin) {
@@ -119,7 +152,8 @@ export class CodexCliProvider {
       model: String(provider.model || provider.codexModel || "").trim(),
       profile: String(provider.codexProfile || "").trim(),
       sandbox: String(provider.codexSandbox || "read-only").trim() || "read-only",
-      timeoutMs: Number(provider.timeoutMs || provider.codexTimeoutMs || 120_000),
+      timeoutMs: Math.max(5_000, Math.min(45_000, Number(provider.codexTimeoutMs || provider.timeoutMs || 45_000))),
+      liveEnabled: provider.codexLiveEnabled === true,
       cwd: process.cwd(),
     };
   }
@@ -132,7 +166,7 @@ export class CodexCliProvider {
     return {
       id: "codex-cli",
       mode: "account-bridge",
-      ready: detected.ok && usable.ok,
+      ready: detected.ok && usable.ok && options.liveEnabled,
       apiKeyConfigured: false,
       apiKeySource: "chatgpt-account",
       model: options.model || "codex default",
@@ -141,7 +175,9 @@ export class CodexCliProvider {
       commandVersion: usable.version,
       sandbox: options.sandbox,
       message: detected.ok && usable.ok
-        ? "Using OpenAI Codex CLI as the provider bridge. Sign in to Codex with ChatGPT for subscription access."
+        ? options.liveEnabled
+          ? "Using OpenAI Codex CLI as the provider bridge. Sign in to Codex with ChatGPT for subscription access."
+          : "Codex CLI is installed, but live account-bridge replies are disabled because the CLI can hang. Use BYOK OpenAI-compatible provider for reliable API replies, or set provider.codexLiveEnabled=true after verifying codex exec works."
         : detected.ok
           ? `Codex CLI was found but could not run: ${usable.error || "unknown error"}. Install @openai/codex from npm or fix the app execution alias, then run codex login.`
           : `Codex CLI command "${options.command}" was not found. Install @openai/codex, then run codex login.`,
@@ -290,6 +326,13 @@ export class CodexCliProvider {
 
   async respond(context) {
     const options = this.getOptions();
+    if (!options.liveEnabled) {
+      return [
+        "Codex CLI account bridge is installed, but live replies are disabled to prevent chat hangs.",
+        "For reliable model replies, use BYOK/OpenAI-compatible mode with a real API key, base URL, and model.",
+        "If you want to test the account bridge anyway, set provider.codexLiveEnabled=true after confirming codex exec returns from terminal.",
+      ].join(" ");
+    }
     const detected = commandExists(options.command);
     if (!detected.ok) {
       return [

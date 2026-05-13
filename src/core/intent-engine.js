@@ -191,9 +191,59 @@ export class IntentEngine {
       lowered.includes("model context protocol") ||
       lowered.includes("mcp server") ||
       lowered.includes("mcp tools") ||
-      lowered.includes("acp adapter")
+      lowered.includes("acp adapter") ||
+      lowered.includes("explicit server aliases") ||
+      lowered.includes("mcp serves")
     ) {
       intents.push("mcp-integration");
+    }
+
+    if (
+      lowered.includes("trajectory generation") ||
+      lowered.includes("rl training") ||
+      lowered.includes("research-grade data") ||
+      lowered.includes("trajectory compressor") ||
+      lowered.includes("batch runner") ||
+      lowered.includes("mini_swe") ||
+      lowered.includes("skip context files")
+    ) {
+      intents.push("trajectory-training");
+    }
+
+    if (
+      lowered.includes("closed learning loop") ||
+      lowered.includes("learning loop") ||
+      lowered.includes("memory nudge") ||
+      lowered.includes("skill auto") ||
+      lowered.includes("next interaction") ||
+      lowered.includes("honcho")
+    ) {
+      intents.push("closed-learning-loop");
+    }
+
+    if (
+      lowered.includes("what can hermes do") ||
+      lowered.includes("use cases") ||
+      lowered.includes("software engineering") ||
+      lowered.includes("devops") ||
+      lowered.includes("ml research") ||
+      lowered.includes("team workflows") ||
+      lowered.includes("personal assistant")
+    ) {
+      intents.push("hermes-use-cases");
+    }
+
+    if (
+      lowered.includes("design principles") ||
+      lowered.includes("key design principles") ||
+      lowered.includes("openai-compatible everywhere") ||
+      lowered.includes("stateless prompt") ||
+      lowered.includes("one external memory") ||
+      lowered.includes("idempotent tool") ||
+      lowered.includes("platform-aware formatting") ||
+      lowered.includes("ephemeral data")
+    ) {
+      intents.push("design-principles");
     }
 
     if (

@@ -501,6 +501,12 @@ export class ToolRegistry {
               "gateway",
               "cron",
               "nodes",
+              "mcp_integration_status",
+              "mcp_connect_all",
+              "trajectory_training_status",
+              "closed_learning_loop_status",
+              "hermes_use_cases_status",
+              "design_principles_status",
             ].includes(id)),
             skills: skills.map((skill) => ({
               id: skill.id,
@@ -1030,11 +1036,41 @@ export class ToolRegistry {
         group: "mcp",
         run: async (_, context) => this.getMcpIntegrationStatus(context),
       },
+      mcp_connect_all: {
+        description: "Connect all configured MCP servers and refresh their live tool registry.",
+        permission: "allowConfigWrite",
+        group: "mcp",
+        run: async () => this.connectAllMcpServers(),
+      },
       cron_scheduler_status: {
         description: "Hermes-style built-in cron scheduler status: schedules, background jobs, triggers, and delivery path.",
         permission: null,
         group: "cron",
         run: async (_, context) => this.getCronSchedulerStatus(context),
+      },
+      trajectory_training_status: {
+        description: "Hermes-style trajectory generation and RL training status for agent runs/tool traces.",
+        permission: null,
+        group: "research",
+        run: async (_, context) => this.getTrajectoryTrainingStatus(context),
+      },
+      closed_learning_loop_status: {
+        description: "Hermes-style closed learning loop status: session logging, memory nudges, skill promotion, and next interaction improvement.",
+        permission: null,
+        group: "learning",
+        run: async (_, context) => this.getClosedLearningLoopStatus(context),
+      },
+      hermes_use_cases_status: {
+        description: "Map Hermes use-case categories to OmniClaw's current real capabilities and gaps.",
+        permission: null,
+        group: "runtime",
+        run: async (_, context) => this.getHermesUseCasesStatus(context),
+      },
+      design_principles_status: {
+        description: "Report Hermes-style design principles and OmniClaw compliance/gaps.",
+        permission: null,
+        group: "runtime",
+        run: async (_, context) => this.getDesignPrinciplesStatus(context),
       },
       openclaw_skill_scan: {
         description: "Scan vendored OpenClaw SKILL.md files for possible OmniClaw imports.",
@@ -2492,6 +2528,29 @@ export class ToolRegistry {
     };
   }
 
+  async connectAllMcpServers() {
+    const mcp = this.agentRuntime?.mcp;
+    if (!mcp?.connectAll) {
+      return {
+        ok: false,
+        message: "MCP registry is not available in this runtime.",
+      };
+    }
+    const results = await mcp.connectAll();
+    const status = this.getMcpIntegrationStatus({ agentId: "main" });
+    this.agentRuntime?.gateway?.addEvent?.("mcp.connect_all", {
+      configuredServers: status.configuredServers.length,
+      connectedServers: status.connectedServers,
+      liveToolCount: status.liveToolCount,
+      results,
+    });
+    return {
+      ok: true,
+      results,
+      ...status,
+    };
+  }
+
   getCronSchedulerStatus(context = {}) {
     const overview = this.agentRuntime?.scheduler?.getOverview?.() || {};
     const schedules = this.agentRuntime?.schedules?.listSchedules?.(20) || [];
@@ -2518,6 +2577,191 @@ export class ToolRegistry {
       },
       cliReference: ["cron", "cronjob", "create_schedule", "delete_schedule", "run_schedule_now"],
       nextUpgrade: "Add natural-language schedule parsing and per-platform delivery selection from chat.",
+    };
+  }
+
+  getTrajectoryTrainingStatus(context = {}) {
+    const agentId = this.getAgentId(context);
+    const gateway = this.agentRuntime?.gateway;
+    const runs = gateway?.listRuns?.(50) || [];
+    const events = gateway?.listEvents?.(200) || [];
+    const shellAudit = this.agentRuntime?.shellAudit?.list?.({ limit: 50 }) || [];
+    const jobs = this.agentRuntime?.jobs?.listJobs?.(50) || [];
+    const toolEvents = events.filter((event) =>
+      /tool|shell|browser|computer|provider|schedule|mcp|connector/i.test(`${event.event || ""}`)
+    );
+    const trajectorySample = runs.slice(0, 5).map((run) => ({
+      id: run.id,
+      status: run.status,
+      agentId: run.agentId || agentId,
+      sessionId: run.sessionId || "",
+      providerStatus: run.providerStatus || "",
+      toolOutputs: Array.isArray(run.toolOutputs) ? run.toolOutputs.length : 0,
+      createdAt: run.createdAt,
+      updatedAt: run.updatedAt,
+    }));
+    return {
+      agentId,
+      pipeline: {
+        status: runs.length > 0 ? "partial" : "seeded",
+        mode: "gateway run log + tool outputs + shell/browser/audit events",
+        skipContextFiles: true,
+        rule: "training exports must exclude SOUL.md/USER.md/PROFILE.md and ephemeral system prompt data",
+      },
+      components: [
+        { id: "trajectory", status: "partial", current: "gateway runs store structured run/session/provider/tool metadata" },
+        { id: "batch_runner", status: "planned", current: "no large-scale trajectory generation runner yet" },
+        { id: "trajectory_compressor", status: "partial", current: "session summaries/context compression exist; training-specific compression is next" },
+        { id: "mini_swe_runner", status: "planned", current: "software engineering benchmark runner not wired yet" },
+        { id: "rl_training_tool", status: "planned", current: "approved action -> reward sample pipeline not wired yet" },
+      ],
+      counts: {
+        runs: runs.length,
+        toolEvents: toolEvents.length,
+        shellAudit: shellAudit.length,
+        jobs: jobs.length,
+      },
+      sample: trajectorySample,
+      rlTraining: {
+        status: "planned",
+        gap: "No reward model/environment feedback loop yet; traces are useful for later supervised/RL data export.",
+      },
+      nextUpgrade: "Add trajectory_export_jsonl with redaction, skip_context_files=true, and one approved run as one training sample.",
+    };
+  }
+
+  getClosedLearningLoopStatus(context = {}) {
+    const agentId = this.getAgentId(context);
+    const memory = this.memoryStore.prefetchAll({ agentId, limit: 8 });
+    const sessions = this.agentRuntime?.sessions?.listSessions?.(30) || [];
+    const skills = this.agentRegistry
+      ? this.agentRegistry.filterSkills(this.customizationEngine?.skillRegistry?.getAll?.() || [], agentId)
+      : [];
+    const shellAuditOverview = this.agentRuntime?.shellAudit?.getOverview?.() || {};
+    return {
+      agentId,
+      loop: [
+        { step: "user_interaction", status: "ready", evidence: `${sessions.length} recent session(s)` },
+        { step: "agent_executes_task", status: "ready", evidence: `${shellAuditOverview.executed || 0} executed shell record(s), gateway/tool logs available` },
+        { step: "memory_nudge", status: "partial", evidence: `${memory.overview?.longTerm || 0} long-term memories, ${memory.overview?.dreams || 0} dreams` },
+        { step: "session_logged", status: "ready", evidence: "session transcripts and gateway runs persist locally" },
+        { step: "skill_auto_created", status: "partial", evidence: `${skills.length} local skill(s); automatic post-task skill refinement still guarded/manual` },
+        { step: "user_model_updated", status: "partial", evidence: "PROFILE.md and memory facts update; Honcho-style external user model is not wired" },
+        { step: "next_interaction_smarter", status: "partial", evidence: "prefetch_all injects memory/session context; FTS5 + skill_manage are next" },
+      ],
+      memoryLifecycle: memory.lifecycle || [],
+      closedLoopRule: "Every interaction should leave usable state: transcript, run trace, memory candidate, or skill candidate.",
+      nextUpgrade: "Add post-run learner that proposes MEMORY.md and SKILL.md diffs for review instead of silently rewriting identity.",
+    };
+  }
+
+  getHermesUseCasesStatus(context = {}) {
+    const agentId = this.getAgentId(context);
+    const toolIds = new Set(this.getAll({ agentId }).map((tool) => tool.id));
+    const has = (...ids) => ids.some((id) => toolIds.has(id));
+    const cases = [
+      {
+        id: "software_engineering",
+        label: "Software engineering",
+        status: has("read", "write", "edit", "apply_patch", "run_terminal_command", "code_execution") ? "partial" : "missing",
+        ready: ["read/patch codebases", "run governed commands/tests", "inspect files"],
+        gaps: ["full CI/GitHub PR automation depends on configured GitHub tooling and provider brain"],
+      },
+      {
+        id: "research_analysis",
+        label: "Research and analysis",
+        status: has("web_search", "web_fetch", "memory_search", "vision_analyze") ? "partial" : "missing",
+        ready: ["web search/fetch", "session/memory recall", "attachment/media analysis when provider configured"],
+        gaps: ["deep extraction pipeline and image-capable provider plugins need more adapters"],
+      },
+      {
+        id: "personal_assistant",
+        label: "Personal assistant",
+        status: has("cron", "send_message", "messaging_gateway_status") ? "partial" : "missing",
+        ready: ["webchat", "scheduler", "gateway logs", "adapter outbox"],
+        gaps: ["Telegram/WhatsApp/voice memo production pairing and TTS replies"],
+      },
+      {
+        id: "devops_automation",
+        label: "DevOps and automation",
+        status: has("run_terminal_command", "cron", "computer_access_status") ? "partial" : "missing",
+        ready: ["local terminal", "scheduled jobs", "file operations", "audits"],
+        gaps: ["SSH/Docker/cloud terminal backends and Home Assistant connector"],
+      },
+      {
+        id: "ml_research",
+        label: "ML research",
+        status: has("trajectory_training_status", "model_provider_status") ? "seeded" : "missing",
+        ready: ["trajectory diagnostics", "provider/model diagnostics"],
+        gaps: ["GPU backends, RL environments, benchmark runner, batch trajectory generation"],
+      },
+      {
+        id: "team_workflows",
+        label: "Team workflows",
+        status: has("subagent_delegation_status", "mcp_integration_status") ? "partial" : "missing",
+        ready: ["subagent routing status", "MCP consumer registry", "Discord adapter skeleton"],
+        gaps: ["Slack/Discord production bot workflows, shared skills hub, company MCP dashboards"],
+      },
+    ];
+    return {
+      agentId,
+      cases,
+      summary: cases.reduce((acc, item) => {
+        acc[item.status] = (acc[item.status] || 0) + 1;
+        return acc;
+      }, {}),
+      rule: "Use-case claims must map to real tools; partial means useful pieces exist but production-grade flow is incomplete.",
+      nextUpgrade: "Pick one use case and drive it from partial to ready with a real end-to-end smoke test.",
+    };
+  }
+
+  getDesignPrinciplesStatus(context = {}) {
+    const config = this.configStore.getConfig();
+    const provider = this.agentRuntime?.getProviderInfo?.() || {};
+    const workspaceContext = this.agentRuntime?.loadWorkspaceContext?.(this.getAgentId(context)) || { files: [] };
+    const shellAudit = this.agentRuntime?.shellAudit?.getOverview?.() || {};
+    return {
+      agentId: this.getAgentId(context),
+      principles: [
+        {
+          id: "openai_compatible_everywhere",
+          status: provider.mode === "openai-compatible" || provider.mode === "account-bridge" ? "partial" : "seeded",
+          evidence: `provider=${provider.id || "unknown"}, mode=${provider.mode || config.provider?.mode || "unknown"}`,
+          gap: "Provider-native schemas and all 200+ provider quirks are not fully normalized yet.",
+        },
+        {
+          id: "stateless_prompt_assembly",
+          status: "partial",
+          evidence: `${workspaceContext.files?.length || 0} context file(s), prompt assembly status tool, injection scans`,
+          gap: "Some runtime assembly still lives in Agent methods; extract smaller pure prompt-builder modules next.",
+        },
+        {
+          id: "one_external_memory_plugin",
+          status: "ready",
+          evidence: "built-in memory store is primary; no conflicting external memory provider enabled",
+          gap: "Optional Honcho-style external provider interface is not wired.",
+        },
+        {
+          id: "trajectories_skip_ephemeral_data",
+          status: "partial",
+          evidence: "trajectory_training_status marks skipContextFiles=true and excludes identity files by policy",
+          gap: "JSONL exporter/redactor still needs implementation.",
+        },
+        {
+          id: "idempotent_tool_calls",
+          status: "partial",
+          evidence: `${shellAudit.total || 0} shell audit record(s), gateway event/run ids, durable job records`,
+          gap: "Large tool outputs are not yet always persisted by content hash and replayed by id.",
+        },
+        {
+          id: "platform_aware_formatting",
+          status: "partial",
+          evidence: "gateway adapters have platform metadata and prompt assembly includes platform hints",
+          gap: "Per-platform formatter for Telegram/Discord/CLI output needs final routing.",
+        },
+      ],
+      rule: "Design principles are guardrails for implementation, not marketing claims.",
+      nextUpgrade: "Add trajectory exporter + idempotent artifact store, then wire platform-aware response formatting per adapter.",
     };
   }
 

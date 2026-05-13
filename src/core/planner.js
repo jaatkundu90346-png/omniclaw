@@ -167,6 +167,42 @@ export class Planner {
       });
     }
 
+    if (intents.includes("trajectory-training")) {
+      steps.push({
+        type: "tool",
+        tool: "trajectory_training_status",
+        input: {},
+        reason: "User shared Hermes trajectory generation and RL training architecture.",
+      });
+    }
+
+    if (intents.includes("closed-learning-loop")) {
+      steps.push({
+        type: "tool",
+        tool: "closed_learning_loop_status",
+        input: {},
+        reason: "User shared Hermes closed learning loop architecture.",
+      });
+    }
+
+    if (intents.includes("hermes-use-cases")) {
+      steps.push({
+        type: "tool",
+        tool: "hermes_use_cases_status",
+        input: {},
+        reason: "User shared Hermes use-case capability matrix.",
+      });
+    }
+
+    if (intents.includes("design-principles")) {
+      steps.push({
+        type: "tool",
+        tool: "design_principles_status",
+        input: {},
+        reason: "User shared Hermes design principles and wants OmniClaw aligned.",
+      });
+    }
+
     if (intents.includes("cron-scheduler")) {
       steps.push({
         type: "tool",

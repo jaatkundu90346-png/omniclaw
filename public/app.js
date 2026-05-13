@@ -171,6 +171,12 @@ const navProfile = document.querySelector("#nav-profile");
 const heroMetrics = document.querySelector("#hero-metrics");
 const heroFocus = document.querySelector("#hero-focus");
 const heroLastEvent = document.querySelector("#hero-last-event");
+const manusProviderStatus = document.querySelector("#manus-provider-status");
+const manusAgentStatus = document.querySelector("#manus-agent-status");
+const manusToolStatus = document.querySelector("#manus-tool-status");
+const computerModeStatus = document.querySelector("#computer-mode-status");
+const computerUrlStatus = document.querySelector("#computer-url-status");
+const computerProgressCount = document.querySelector("#computer-progress-count");
 const railHealth = document.querySelector("#rail-health");
 const sessionContext = document.querySelector("#session-context");
 const toolOutput = document.querySelector("#tool-output");
@@ -899,6 +905,15 @@ function renderLiveRunTimeline(fallback = "No active run.") {
     `<div class="live-run-header">${escapeHtml(header)}</div>`,
     `<div class="live-run-list">${items.length ? items.map((item) => `<div>${escapeHtml(item)}</div>`).join("") : `<div>${escapeHtml(fallback)}</div>`}</div>`,
   ].join("");
+  if (computerProgressCount) {
+    computerProgressCount.textContent = activeRunId ? `${items.length}/12` : "0/0";
+  }
+  if (computerModeStatus) {
+    computerModeStatus.textContent = activeRunId ? "Working with tools" : fallback;
+  }
+  if (computerUrlStatus) {
+    computerUrlStatus.textContent = activeRunId ? `local://omniclaw/runs/${activeRunId}` : "local://omniclaw/task";
+  }
 }
 
 function trackLiveRunEvent(record) {
@@ -1288,6 +1303,18 @@ function renderHero(state, gateway) {
 
   navProvider.textContent = `${provider.id || "unknown"} provider`;
   navProfile.textContent = `${runtimeProfile.id || "balanced"} profile`;
+  if (manusProviderStatus) {
+    manusProviderStatus.textContent = provider.ready === false ? "Check API" : (provider.id || "Brain");
+  }
+  if (manusAgentStatus) {
+    manusAgentStatus.textContent = selectedAgent?.name || selectedAgent?.id || selected?.agentId || "main";
+  }
+  if (manusToolStatus) {
+    manusToolStatus.textContent = `${selectedAgent?.stats?.toolCount || state.tools?.length || 0}`;
+  }
+  if (computerModeStatus && !activeRunId) {
+    computerModeStatus.textContent = provider.ready === false ? "Provider needs setup" : "Ready for a task";
+  }
 
   heroMetrics.innerHTML = [
     metricTile("Sessions", sessions.length, `${sessions.filter((item) => item.lifecycleState !== "archived").length} active`),
@@ -4015,6 +4042,17 @@ if (messageInput) {
    }
  });
 }
+
+document.querySelectorAll("[data-prompt]").forEach((button) => {
+  button.addEventListener("click", () => {
+    const prompt = button.getAttribute("data-prompt") || "";
+    if (!messageInput || !prompt) {
+      return;
+    }
+    messageInput.value = prompt;
+    messageInput.focus();
+  });
+});
 // Global shortcuts
 document.addEventListener("keydown", (e) => {
  // Ctrl+Enter to send
@@ -4885,9 +4923,9 @@ const routePanels = {
 
 const routeMeta = {
   "chat-panel": {
-    kicker: "OpenClaw style",
-    title: "Chat",
-    body: "Session, model lane, run output, and composer in a focused gateway chat surface.",
+    kicker: "Hands-on AI",
+    title: "Task Console",
+    body: "Start a concrete agent run, then watch tools, memory, files, browser, and provider traces as the work moves.",
   },
   "overview-panel": {
     kicker: "Gateway control",

@@ -278,10 +278,22 @@
           </section>
 
           <section id="chat-panel" class="surface surface-chat">
+            <div class="manus-command">
+              <div class="manus-command-copy">
+                <p class="section-kicker">Hands-on agent</p>
+                <h3>What should OmniClaw do?</h3>
+                <p>Give the agent a concrete task. It can use browser, files, terminal, memory, schedules, and connected tools with visible run traces.</p>
+              </div>
+              <div class="manus-status-grid" aria-label="Runtime capability status">
+                <span><strong id="manus-provider-status">Brain</strong><small>provider</small></span>
+                <span><strong id="manus-agent-status">main</strong><small>agent</small></span>
+                <span><strong id="manus-tool-status">tools</strong><small>hands</small></span>
+              </div>
+            </div>
             <div class="surface-header">
               <div>
-                <p class="section-kicker">Composer</p>
-                <h3>Chat into the gateway</h3>
+                <p class="section-kicker">Task lane</p>
+                <h3>Agent run</h3>
               </div>
               <span id="session-context" class="status-chip status-chip-muted">No session selected</span>
             </div>
@@ -311,7 +323,6 @@
                     </div>
                   </div>
                   <div id="chat-transcript" class="chat-transcript">No conversation loaded yet.</div>
-                  <div id="live-run-output" class="live-run-output">No active run.</div>
                   <pre id="chat-output" class="console-output chat-output">Waiting for input...</pre>
                 </div>
                 <div>
@@ -319,14 +330,51 @@
                   <textarea
                     id="message"
                     rows="6"
-                    placeholder="Try: remember buy milk&#10;Try: plugin echo hello from plugin&#10;Try: run shell &quot;dir&quot;"
+                    placeholder="Ask OmniClaw to research, build, inspect files, run a command, browse a page, or automate a workflow..."
                   ></textarea>
                 </div>
+                <div class="manus-prompt-row" aria-label="Quick task prompts">
+                  <button type="button" class="prompt-chip" data-prompt="create a short slide outline for OmniClaw v2 architecture">Create slides</button>
+                  <button type="button" class="prompt-chip" data-prompt="build and test the current OmniClaw project">Build website</button>
+                  <button type="button" class="prompt-chip" data-prompt="develop desktop app packaging plan for OmniClaw Windows exe">Develop desktop apps</button>
+                  <button type="button" class="prompt-chip" data-prompt="redesign OmniClaw UI like Manus with a task lane and computer panel">Design</button>
+                  <button type="button" class="prompt-chip" data-prompt="show all OmniClaw tools, skills, memory, browser, terminal, scheduler, and gateway status">More</button>
+                </div>
                 <div class="chat-actions">
-                  <button type="submit" class="button button-primary">Send run</button>
+                  <button type="submit" class="button button-primary">Start task</button>
                   <button type="button" class="button button-ghost" id="abort-run" disabled>Abort</button>
                 </div>
               </form>
+              <aside class="manus-computer-panel" aria-label="OmniClaw computer activity">
+                <div class="computer-panel-head">
+                  <div class="computer-thumb" aria-hidden="true">
+                    <span></span>
+                  </div>
+                  <div>
+                    <strong>OmniClaw's Computer</strong>
+                    <small id="computer-mode-status">Waiting for a task</small>
+                  </div>
+                  <button type="button" class="icon-button" id="computer-panel-toggle" aria-label="Focus computer panel">▣</button>
+                </div>
+                <div class="computer-screen">
+                  <div class="browser-bar">
+                    <span></span>
+                    <p id="computer-url-status">local://omniclaw/task</p>
+                  </div>
+                  <div class="computer-stage">
+                    <span class="stage-orb"></span>
+                    <strong>Ready to use browser, files, terminal, and memory.</strong>
+                    <p>Task previews and tool progress appear here while OmniClaw works.</p>
+                  </div>
+                </div>
+                <div class="computer-progress-card">
+                  <div class="progress-title">
+                    <strong>Task progress</strong>
+                    <span id="computer-progress-count">0/0</span>
+                  </div>
+                  <div id="live-run-output" class="live-run-output">No active run.</div>
+                </div>
+              </aside>
             </div>
           </section>
 
