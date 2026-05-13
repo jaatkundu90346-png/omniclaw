@@ -12,3 +12,12 @@ This project vendors or references the following third-party projects.
 
 The OpenClaw license text is available at `vendor/openclaw/LICENSE`.
 
+## Hermes Agent
+
+- Source: https://github.com/NousResearch/hermes-agent
+- Local path: `vendor/hermes-agent`
+- Import mode: Copied vendor reference with upstream `.git` metadata excluded.
+- License: MIT
+- Copyright: Copyright (c) 2025 Nous Research
+
+The Hermes Agent license text is available at `vendor/hermes-agent/LICENSE`.

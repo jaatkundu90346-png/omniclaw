@@ -836,13 +836,15 @@ export class ToolRegistry {
           const agentCount = this.agentRegistry?.getAll?.()?.length || 0;
           const tools = this.getAll({ agentId: "main" });
           const toolIds = tools.map((tool) => tool.id);
+          const vendor = this.getHermesVendorStatus();
           return {
             source: {
               name: "Hermes Agent",
               repo: "https://github.com/nousresearch/hermes-agent",
               license: "MIT",
-              status: "external reference, not vendored into OmniClaw",
+              status: vendor.available ? "vendored in vendor/hermes-agent" : "external reference, not vendored into OmniClaw",
             },
+            vendor,
             usefulPatterns: [
               "Slash command surface for /model, /skills, /usage, /doctor, and platform status.",
               "Self-improving skill library that grows from agent work.",
@@ -881,13 +883,27 @@ export class ToolRegistry {
               "Terminal/browser tools are governed, but hard sandbox isolation is still partial.",
             ],
             nextBuildActions: [
-              "Add Hermes-style slash commands that always execute runtime tools.",
+              vendor.available
+                ? "Scan vendored Hermes skills and import selected compatible skills into OmniClaw."
+                : "Vendor Hermes Agent with license preserved before importing selected patterns.",
               "Make /doctor the first debugging path for provider, gateway, memory, tools, and permissions.",
               "Grow skill promotion from successful workflows into editable SKILL.md files.",
               "Index sessions and memories for laptop-wide recall/search.",
             ],
           };
         },
+      },
+      hermes_vendor_status: {
+        description: "Inspect the vendored Hermes Agent reference copy and license metadata.",
+        permission: null,
+        group: "hermes",
+        run: async () => this.getHermesVendorStatus(),
+      },
+      hermes_skill_scan: {
+        description: "Scan vendored Hermes Agent SKILL.md files for possible OmniClaw imports.",
+        permission: null,
+        group: "hermes",
+        run: async (input = {}) => this.scanHermesSkills(input),
       },
       openclaw_skill_scan: {
         description: "Scan vendored OpenClaw SKILL.md files for possible OmniClaw imports.",
@@ -1605,6 +1621,10 @@ export class ToolRegistry {
     return path.join(this.getRootDir(), "vendor", "openclaw");
   }
 
+  getHermesRoot() {
+    return path.join(this.getRootDir(), "vendor", "hermes-agent");
+  }
+
   getOpenClawVendorStatus() {
     const root = this.getOpenClawRoot();
     const packagePath = path.join(root, "package.json");
@@ -1628,6 +1648,38 @@ export class ToolRegistry {
         "Use openclaw_skill_scan to find donor skills.",
         "Use openclaw_skill_import for selected skills only.",
         "Use docs/OPENCLAW_TO_OMNICLAW_TRANSPLANT_MAP.md for layer-by-layer runtime work.",
+      ],
+    };
+  }
+
+  getHermesVendorStatus() {
+    const root = this.getHermesRoot();
+    const packagePath = path.join(root, "pyproject.toml");
+    const licensePath = path.join(root, "LICENSE");
+    const readmePath = path.join(root, "README.md");
+    const packageText = fs.existsSync(packagePath) ? fs.readFileSync(packagePath, "utf8") : "";
+    const version = packageText.match(/^version\s*=\s*["']([^"']+)["']/m)?.[1] || "";
+    const name = packageText.match(/^name\s*=\s*["']([^"']+)["']/m)?.[1] || "hermes-agent";
+    const skillFiles = this.getHermesSkillFiles().length;
+    return {
+      available: fs.existsSync(root),
+      path: root,
+      gitLinked: fs.existsSync(path.join(root, ".git")),
+      packageName: name,
+      version,
+      license: fs.existsSync(licensePath) ? "MIT" : "",
+      licensePath: fs.existsSync(licensePath) ? path.relative(this.getRootDir(), licensePath).replace(/\\/g, "/") : "",
+      readmePresent: fs.existsSync(readmePath),
+      skillsPresent: fs.existsSync(path.join(root, "skills")),
+      gatewayPresent: fs.existsSync(path.join(root, "gateway")),
+      cliPresent: fs.existsSync(path.join(root, "hermes_cli")),
+      agentRuntimePresent: fs.existsSync(path.join(root, "agent")),
+      skillFileCount: skillFiles,
+      recommendedMode: "copied-reference-vendor",
+      nextActions: [
+        "Use hermes_skill_scan to find donor skills.",
+        "Import only compatible skills/patterns; do not run Hermes Python code inside OmniClaw without an adapter.",
+        "Use docs/HERMES_AGENT_REFERENCE.md for layer-by-layer runtime work.",
       ],
     };
   }
@@ -1661,6 +1713,39 @@ export class ToolRegistry {
       roots.push(path.join(root, "extensions"));
     }
     return roots.flatMap((item) => this.walkOpenClawSkillFiles(item));
+  }
+
+  getHermesSkillFiles() {
+    const root = this.getHermesRoot();
+    return this.walkOpenClawSkillFiles(path.join(root, "skills"));
+  }
+
+  scanHermesSkills({ query = "", limit = 40 } = {}) {
+    const rootDir = this.getRootDir();
+    const normalizedQuery = String(query || "").trim().toLowerCase();
+    const safeLimit = Math.max(1, Math.min(Number(limit) || 40, 200));
+    const skills = this.getHermesSkillFiles()
+      .map((filePath) => parseOpenClawSkill(fs.readFileSync(filePath, "utf8"), filePath, rootDir))
+      .filter((skill) => {
+        if (!normalizedQuery) {
+          return true;
+        }
+        return [skill.name, skill.description, skill.path].join(" ").toLowerCase().includes(normalizedQuery);
+      })
+      .sort((left, right) => left.name.localeCompare(right.name))
+      .slice(0, safeLimit)
+      .map(({ absolutePath, instructions, ...skill }) => ({
+        ...skill,
+        source: "hermes-agent",
+        instructionChars: instructions.length,
+      }));
+    return {
+      source: "hermes-agent",
+      query,
+      count: skills.length,
+      totalAvailable: this.getHermesSkillFiles().length,
+      skills,
+    };
   }
 
   scanOpenClawSkills({ query = "", source = "skills", limit = 40 } = {}) {

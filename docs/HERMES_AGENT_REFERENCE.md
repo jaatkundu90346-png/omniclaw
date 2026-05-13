@@ -4,7 +4,7 @@ Hermes Agent reference source: https://github.com/nousresearch/hermes-agent
 
 License: MIT.
 
-This document tracks the parts of Hermes Agent that are useful for OmniClaw V2. Hermes Agent should be treated as a reference architecture, not a direct replacement for OmniClaw. OmniClaw's goal is still the same: provide agents with real hands and eyes through tools, skills, memory, sessions, gateway routing, and local computer access.
+This document tracks the parts of Hermes Agent that are useful for OmniClaw V2. Hermes Agent is now vendored locally at `vendor/hermes-agent` with the upstream MIT license preserved at `vendor/hermes-agent/LICENSE`. It should be treated as a reference architecture, not a direct replacement for OmniClaw. OmniClaw's goal is still the same: provide agents with real hands and eyes through tools, skills, memory, sessions, gateway routing, and local computer access.
 
 ## Useful Patterns
 
@@ -36,6 +36,25 @@ Added in this pass:
 - `/usage` maps to runtime profile, session id, run id, and memory counts.
 - `/platforms` maps to computer roots, terminal, browser, nodes, cron, and gateway.
 - `/hermes` maps Hermes reference ideas to OmniClaw's live runtime.
+- `hermes_vendor_status` reports the local vendor copy, license, major folders, and skill count.
+- `hermes_skill_scan` scans vendored Hermes `SKILL.md` files for selective import planning.
+
+## Vendored Source Layout
+
+- `vendor/hermes-agent/agent`: model adapters, context, memory, prompt, tool, and runtime helpers.
+- `vendor/hermes-agent/gateway`: gateway process, platform registry, slash access, status, sessions, stream consumers.
+- `vendor/hermes-agent/gateway/platforms`: Telegram, Discord, Slack, WhatsApp, Signal, Matrix, email, webhooks, and more.
+- `vendor/hermes-agent/hermes_cli`: CLI, auth, doctor, model commands, config, dashboard, onboarding, and TUI helpers.
+- `vendor/hermes-agent/skills`: bundled skills in `SKILL.md` format.
+- `vendor/hermes-agent/cron`: scheduler and jobs.
+- `vendor/hermes-agent/environments`: agent loop and benchmark environments.
+
+## Copy Rules
+
+- Keep `vendor/hermes-agent/LICENSE` and `THIRD_PARTY_NOTICES.md` with any distribution that includes Hermes-derived code.
+- Import selected modules/patterns deliberately; do not wire Hermes Python runtime directly into OmniClaw's Node runtime without a wrapper.
+- Prefer copying ideas and compatible skill files first, then build adapters for gateway/platform/model features.
+- If a Hermes file is transplanted into OmniClaw source, preserve attribution in the receiving file or nearby docs.
 
 ## Remaining Gaps
 
