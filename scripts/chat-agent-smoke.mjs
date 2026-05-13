@@ -146,6 +146,18 @@ async function run() {
     assert(hermes.reply.includes("Hermes reference mapping"), "Hermes reference reply should be grounded.");
     assertToolSummaries(hermes.toolOutputs, "hermes reference request");
 
+    const hermesTools = await postChat("hermes tools copy status", `chat-smoke-hermes-tools-${suffix}`);
+    assert(
+      hermesTools.toolOutputs.some((item) => item.tool === "hermes_tool_catalog"),
+      "Hermes tools request should call hermes_tool_catalog.",
+    );
+    assert(
+      hermesTools.toolOutputs.some((item) => item.tool === "hermes_skill_scan"),
+      "Hermes tools request should scan Hermes skills.",
+    );
+    assert(hermesTools.reply.includes("Hermes tool import status"), "Hermes tools reply should be grounded.");
+    assertToolSummaries(hermesTools.toolOutputs, "hermes tools request");
+
     console.log("Chat agent smoke test passed");
   } finally {
     child.kill("SIGTERM");

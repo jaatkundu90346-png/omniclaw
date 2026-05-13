@@ -97,6 +97,59 @@ const OPENCLAW_COMPAT_SKILL_PACKS = {
   ],
 };
 
+const HERMES_COMPAT_TOOLS = [
+  { id: "web_search", toolset: "web", status: "native", omniclawTool: "web_search" },
+  { id: "web_extract", toolset: "web", status: "alias", omniclawTool: "web_fetch" },
+  { id: "terminal", toolset: "terminal", status: "alias", omniclawTool: "run_terminal_command" },
+  { id: "process", toolset: "terminal", status: "native", omniclawTool: "process" },
+  { id: "read_file", toolset: "file", status: "native", omniclawTool: "read_file" },
+  { id: "write_file", toolset: "file", status: "native", omniclawTool: "write_file" },
+  { id: "patch", toolset: "file", status: "alias", omniclawTool: "apply_patch" },
+  { id: "search_files", toolset: "file", status: "alias", omniclawTool: "memory_search/search_computer_files" },
+  { id: "vision_analyze", toolset: "vision", status: "alias", omniclawTool: "image/analyze_pending_media_attachments" },
+  { id: "video_analyze", toolset: "video", status: "alias", omniclawTool: "video_analyze" },
+  { id: "image_generate", toolset: "image_gen", status: "native", omniclawTool: "image_generate" },
+  { id: "skills_list", toolset: "skills", status: "alias", omniclawTool: "hermes_skill_scan/capability_demo" },
+  { id: "skill_view", toolset: "skills", status: "alias", omniclawTool: "read_computer_file" },
+  { id: "skill_manage", toolset: "skills", status: "partial", omniclawTool: "create_skill/openclaw_skill_import" },
+  { id: "browser_navigate", toolset: "browser", status: "alias", omniclawTool: "browser" },
+  { id: "browser_snapshot", toolset: "browser", status: "native", omniclawTool: "browser_snapshot" },
+  { id: "browser_click", toolset: "browser", status: "alias", omniclawTool: "browser" },
+  { id: "browser_type", toolset: "browser", status: "alias", omniclawTool: "browser" },
+  { id: "browser_scroll", toolset: "browser", status: "alias", omniclawTool: "browser" },
+  { id: "browser_back", toolset: "browser", status: "alias", omniclawTool: "browser" },
+  { id: "browser_press", toolset: "browser", status: "alias", omniclawTool: "browser" },
+  { id: "browser_get_images", toolset: "browser", status: "alias", omniclawTool: "browser_links/browser_screenshot" },
+  { id: "browser_vision", toolset: "browser", status: "partial", omniclawTool: "browser_screenshot + image" },
+  { id: "browser_console", toolset: "browser", status: "partial", omniclawTool: "browser" },
+  { id: "browser_cdp", toolset: "browser", status: "partial", omniclawTool: "browser" },
+  { id: "browser_dialog", toolset: "browser", status: "partial", omniclawTool: "browser" },
+  { id: "text_to_speech", toolset: "tts", status: "placeholder", omniclawTool: "media plugin needed" },
+  { id: "todo", toolset: "todo", status: "alias", omniclawTool: "create_task/list_tasks" },
+  { id: "memory", toolset: "memory", status: "alias", omniclawTool: "memory_search/list_long_term_memory/promote_memory" },
+  { id: "session_search", toolset: "session_search", status: "alias", omniclawTool: "sessions_history/memory_search" },
+  { id: "clarify", toolset: "clarify", status: "placeholder", omniclawTool: "assistant follow-up" },
+  { id: "execute_code", toolset: "code_execution", status: "alias", omniclawTool: "code_execution" },
+  { id: "delegate_task", toolset: "delegation", status: "native", omniclawTool: "delegate_task" },
+  { id: "cronjob", toolset: "cronjob", status: "alias", omniclawTool: "cron" },
+  { id: "send_message", toolset: "messaging", status: "alias", omniclawTool: "message" },
+  { id: "ha_list_entities", toolset: "homeassistant", status: "placeholder", omniclawTool: "connector plugin needed" },
+  { id: "ha_get_state", toolset: "homeassistant", status: "placeholder", omniclawTool: "connector plugin needed" },
+  { id: "ha_list_services", toolset: "homeassistant", status: "placeholder", omniclawTool: "connector plugin needed" },
+  { id: "ha_call_service", toolset: "homeassistant", status: "placeholder", omniclawTool: "connector plugin needed" },
+  { id: "kanban_show", toolset: "kanban", status: "placeholder", omniclawTool: "task/agent orchestration needed" },
+  { id: "kanban_list", toolset: "kanban", status: "placeholder", omniclawTool: "task/agent orchestration needed" },
+  { id: "kanban_complete", toolset: "kanban", status: "placeholder", omniclawTool: "task/agent orchestration needed" },
+  { id: "kanban_block", toolset: "kanban", status: "placeholder", omniclawTool: "task/agent orchestration needed" },
+  { id: "kanban_heartbeat", toolset: "kanban", status: "placeholder", omniclawTool: "task/agent orchestration needed" },
+  { id: "kanban_comment", toolset: "kanban", status: "placeholder", omniclawTool: "task/agent orchestration needed" },
+  { id: "kanban_create", toolset: "kanban", status: "placeholder", omniclawTool: "task/agent orchestration needed" },
+  { id: "kanban_link", toolset: "kanban", status: "placeholder", omniclawTool: "task/agent orchestration needed" },
+  { id: "kanban_unblock", toolset: "kanban", status: "placeholder", omniclawTool: "task/agent orchestration needed" },
+  { id: "computer_use", toolset: "computer_use", status: "partial", omniclawTool: "computer_access_status/browser/terminal" },
+  { id: "mixture_of_agents", toolset: "moa", status: "partial", omniclawTool: "subagents/delegate_task" },
+];
+
 export class ToolRegistry {
   constructor({
     memoryStore,
@@ -257,6 +310,18 @@ export class ToolRegistry {
         run: async (_, context) => ({
           tasks: this.taskStore.listTasks(this.getAgentId(context)),
         }),
+      },
+      todo: {
+        description: "Hermes-compatible todo/task tool.",
+        permission: "allowTaskWrite",
+        group: "hermes-planning",
+        run: async ({ action, title } = {}, context) => {
+          const normalized = String(action || (title ? "create" : "list")).toLowerCase();
+          if (["create", "add", "new"].includes(normalized)) {
+            return this.tools.create_task.run({ title }, context);
+          }
+          return this.tools.list_tasks.run({}, context);
+        },
       },
       runtime_summary: {
         description: "Summarize current runtime profile and provider mode.",
@@ -905,6 +970,12 @@ export class ToolRegistry {
         group: "hermes",
         run: async (input = {}) => this.scanHermesSkills(input),
       },
+      hermes_tool_catalog: {
+        description: "List Hermes Agent core tools and their OmniClaw compatibility/adaptation status.",
+        permission: null,
+        group: "hermes",
+        run: async ({ status, toolset } = {}) => this.getHermesToolCatalog({ status, toolset }),
+      },
       openclaw_skill_scan: {
         description: "Scan vendored OpenClaw SKILL.md files for possible OmniClaw imports.",
         permission: null,
@@ -986,6 +1057,12 @@ export class ToolRegistry {
         group: "runtime",
         run: async ({ command, cwd }, context) => this.tools.run_terminal_command.run({ command, cwd }, context),
       },
+      terminal: {
+        description: "Hermes-compatible governed terminal command execution.",
+        permission: "allowShellExecution",
+        group: "hermes-terminal",
+        run: async ({ command, cwd }, context) => this.tools.run_terminal_command.run({ command, cwd }, context),
+      },
       process: {
         description: "OpenClaw-compatible process inspection tool.",
         permission: "allowShellExecution",
@@ -1005,6 +1082,12 @@ export class ToolRegistry {
           const command = `python -c "import base64; exec(base64.b64decode('${encoded}').decode('utf-8'))"`;
           return this.tools.run_terminal_command.run({ command }, context);
         },
+      },
+      execute_code: {
+        description: "Hermes-compatible Python code execution alias.",
+        permission: "allowShellExecution",
+        group: "hermes-code",
+        run: async ({ code }, context) => this.tools.code_execution.run({ code }, context),
       },
       browser: {
         description: "OpenClaw-compatible browser helper for URL open/fetch and DevTools automation actions.",
@@ -1075,11 +1158,97 @@ export class ToolRegistry {
         run: async (input = {}, context) =>
           this.runBrowserOperation("text", () => this.browserOperator.automate({ ...input, action: "text" }), context),
       },
+      browser_navigate: {
+        description: "Hermes-compatible browser navigation tool.",
+        permission: "allowBrowserControl",
+        group: "hermes-browser",
+        run: async ({ url } = {}, context) =>
+          this.tools.browser.run({ action: "navigate", url }, context),
+      },
+      browser_click: {
+        description: "Hermes-compatible browser click tool.",
+        permission: "allowBrowserControl",
+        group: "hermes-browser",
+        run: async (input = {}, context) =>
+          this.tools.browser.run({ ...input, action: "click" }, context),
+      },
+      browser_type: {
+        description: "Hermes-compatible browser type/fill tool.",
+        permission: "allowBrowserControl",
+        group: "hermes-browser",
+        run: async (input = {}, context) =>
+          this.tools.browser.run({ ...input, action: "type" }, context),
+      },
+      browser_scroll: {
+        description: "Hermes-compatible browser scroll tool.",
+        permission: "allowBrowserControl",
+        group: "hermes-browser",
+        run: async (input = {}, context) =>
+          this.tools.browser.run({ ...input, action: "scroll" }, context),
+      },
+      browser_back: {
+        description: "Hermes-compatible browser back tool.",
+        permission: "allowBrowserControl",
+        group: "hermes-browser",
+        run: async (input = {}, context) =>
+          this.tools.browser.run({ ...input, action: "back" }, context),
+      },
+      browser_press: {
+        description: "Hermes-compatible browser key press tool.",
+        permission: "allowBrowserControl",
+        group: "hermes-browser",
+        run: async (input = {}, context) =>
+          this.tools.browser.run({ ...input, action: "press" }, context),
+      },
+      browser_get_images: {
+        description: "Hermes-compatible browser image discovery tool.",
+        permission: "allowBrowserControl",
+        group: "hermes-browser",
+        run: async (input = {}, context) =>
+          this.tools.browser.run({ ...input, action: "links" }, context),
+      },
+      browser_vision: {
+        description: "Hermes-compatible browser vision placeholder backed by screenshot capture.",
+        permission: "allowBrowserControl",
+        group: "hermes-browser",
+        run: async (input = {}, context) => {
+          const screenshot = await this.tools.browser_screenshot.run(input, context);
+          return {
+            ready: false,
+            screenshot,
+            message: "Browser screenshot captured. Vision analysis needs an image-capable provider/plugin to interpret it.",
+          };
+        },
+      },
+      browser_console: {
+        description: "Hermes-compatible browser console placeholder.",
+        permission: "allowBrowserControl",
+        group: "hermes-browser",
+        run: async () => this.hermesToolNotReady("browser_console", "Console log extraction needs a Playwright/CDP adapter wired into OmniClaw."),
+      },
+      browser_cdp: {
+        description: "Hermes-compatible Chrome DevTools Protocol placeholder.",
+        permission: "allowBrowserControl",
+        group: "hermes-browser",
+        run: async () => this.hermesToolNotReady("browser_cdp", "Raw CDP command execution needs a hardened browser adapter."),
+      },
+      browser_dialog: {
+        description: "Hermes-compatible browser dialog placeholder.",
+        permission: "allowBrowserControl",
+        group: "hermes-browser",
+        run: async () => this.hermesToolNotReady("browser_dialog", "Dialog accept/dismiss support needs browser adapter wiring."),
+      },
       web_search: {
         description: "OpenClaw-compatible web search alias.",
         permission: "allowWebResearch",
         group: "web",
         run: async ({ query }) => this.webResearch.search(String(query || "").trim()),
+      },
+      web_extract: {
+        description: "Hermes-compatible URL extraction/fetch alias.",
+        permission: "allowWebResearch",
+        group: "hermes-web",
+        run: async ({ url }, context) => this.tools.web_fetch.run({ url }, context),
       },
       x_search: {
         description: "Search public web results scoped toward X/Twitter posts.",
@@ -1157,6 +1326,41 @@ export class ToolRegistry {
           };
         },
       },
+      patch: {
+        description: "Hermes-compatible patch alias.",
+        permission: "allowFileWrite",
+        group: "hermes-file",
+        run: async (input = {}, context) => this.tools.apply_patch.run(input, context),
+      },
+      search_files: {
+        description: "Hermes-compatible search across memory and configured computer roots.",
+        permission: "allowComputerAccess",
+        group: "hermes-file",
+        run: async ({ pattern, query, path, target, limit } = {}, context) => {
+          const q = String(query || pattern || "").trim();
+          if (!q) {
+            throw new Error("pattern or query is required.");
+          }
+          const memory = await this.tools.memory_search.run({ query: q }, context);
+          let files = null;
+          try {
+            files = await this.tools.search_computer_files.run({
+              query: q,
+              root: path,
+              target,
+              maxResults: Number(limit || 80),
+              maxDepth: 4,
+              maxScanMs: 7000,
+            }, context);
+          } catch (error) {
+            files = {
+              ok: false,
+              error: error.message,
+            };
+          }
+          return { query: q, memory, files };
+        },
+      },
       message: {
         description: "Send a message into an OmniClaw agent session/channel.",
         permission: "allowConnectorWrite",
@@ -1171,6 +1375,12 @@ export class ToolRegistry {
             channel: String(channel || "webchat").trim(),
           });
         },
+      },
+      send_message: {
+        description: "Hermes-compatible cross-platform message send alias.",
+        permission: "allowConnectorWrite",
+        group: "hermes-messaging",
+        run: async (input = {}) => this.tools.message.run(input),
       },
       sessions_list: {
         description: "List OmniClaw sessions.",
@@ -1276,6 +1486,69 @@ export class ToolRegistry {
           agents: this.agentRegistry?.getAll?.() || [],
         }),
       },
+      skills_list: {
+        description: "Hermes-compatible skill listing across OmniClaw and vendored Hermes skills.",
+        permission: null,
+        group: "hermes-skills",
+        run: async (input = {}, context) => {
+          const agentId = this.getAgentId(context);
+          const omniSkills = this.agentRegistry
+            ? this.agentRegistry.filterSkills(this.customizationEngine?.skillRegistry?.getAll?.() || [], agentId)
+            : [];
+          const hermes = this.scanHermesSkills({
+            query: input.query || "",
+            limit: Number(input.limit || 40),
+          });
+          return {
+            agentId,
+            omniSkillCount: omniSkills.length,
+            hermesSkillCount: hermes.totalAvailable,
+            omniSkills,
+            hermesSkills: hermes.skills,
+          };
+        },
+      },
+      skill_view: {
+        description: "Hermes-compatible skill read/view tool.",
+        permission: null,
+        group: "hermes-skills",
+        run: async ({ id, name, path: skillPath } = {}) => {
+          const target = String(skillPath || id || name || "").trim();
+          if (!target) {
+            throw new Error("skill id/name/path is required.");
+          }
+          const root = this.getRootDir();
+          const candidates = this.getHermesSkillFiles();
+          const match = candidates.find((filePath) => {
+            const relative = path.relative(root, filePath).replace(/\\/g, "/");
+            return relative.toLowerCase().includes(target.toLowerCase()) ||
+              path.basename(path.dirname(filePath)).toLowerCase() === target.toLowerCase();
+          });
+          if (!match) {
+            return {
+              found: false,
+              query: target,
+              message: "Skill not found in vendored Hermes skills.",
+            };
+          }
+          return {
+            found: true,
+            path: path.relative(root, match).replace(/\\/g, "/"),
+            content: fs.readFileSync(match, "utf8"),
+          };
+        },
+      },
+      skill_manage: {
+        description: "Hermes-compatible skill management placeholder for reviewable imports.",
+        permission: "allowSkillWrite",
+        group: "hermes-skills",
+        run: async (input = {}) => ({
+          ok: false,
+          action: input.action || "review",
+          message: "Hermes skill management is cataloged. Use hermes_skill_scan plus a dedicated import step so incompatible Python-only instructions are not blindly installed.",
+          nextUpgrade: "Add hermes_skill_import with compatibility rewrite into OmniClaw skill format.",
+        }),
+      },
       memory_search: {
         description: "Search notes and promoted memory by text.",
         permission: null,
@@ -1296,6 +1569,91 @@ export class ToolRegistry {
         permission: null,
         group: "memory",
         run: async (_, context) => this.tools.list_long_term_memory.run(_, context),
+      },
+      memory: {
+        description: "Hermes-compatible memory read/search/save/promote tool.",
+        permission: null,
+        group: "hermes-memory",
+        run: async ({ action, query, text } = {}, context) => {
+          const normalized = String(action || (text ? "remember" : query ? "search" : "list")).toLowerCase();
+          if (["search", "find"].includes(normalized)) {
+            return this.tools.memory_search.run({ query }, context);
+          }
+          if (["remember", "save", "note"].includes(normalized)) {
+            return this.tools.remember_note.run({ text }, context);
+          }
+          if (["promote"].includes(normalized)) {
+            return this.tools.promote_memory.run({ text, sourceType: "manual" }, context);
+          }
+          return this.tools.list_long_term_memory.run({}, context);
+        },
+      },
+      session_search: {
+        description: "Hermes-compatible session and memory search.",
+        permission: null,
+        group: "hermes-memory",
+        run: async ({ query, limit } = {}, context) => {
+          const sessions = await this.tools.sessions_list.run({ limit: Number(limit || 20) }, context);
+          const memory = query ? await this.tools.memory_search.run({ query }, context) : null;
+          return {
+            query: query || "",
+            sessions,
+            memory,
+            message: "Full transcript FTS is a next upgrade; this returns session list plus memory search now.",
+          };
+        },
+      },
+      clarify: {
+        description: "Hermes-compatible clarify placeholder. The assistant should ask the user directly.",
+        permission: null,
+        group: "hermes-planning",
+        run: async ({ question, options } = {}) => ({
+          needsUserInput: true,
+          question: question || "Please clarify the request.",
+          options: Array.isArray(options) ? options : [],
+          message: "Clarify is represented as a tool result; the chat layer can ask this question directly.",
+        }),
+      },
+      mixture_of_agents: {
+        description: "Hermes-compatible multi-agent reasoning placeholder backed by OmniClaw subagents.",
+        permission: "allowShellPlanning",
+        group: "hermes-planning",
+        run: async ({ task } = {}, context) => ({
+          ok: false,
+          availableSubagents: await this.tools.subagents.run({}, context),
+          task: task || "",
+          message: "Mixture-of-agents is cataloged. Use delegate_task/subagents for concrete routed work until full MoA orchestration is built.",
+        }),
+      },
+      computer_use: {
+        description: "Hermes-compatible computer-use status backed by OmniClaw laptop access, browser, and terminal tools.",
+        permission: null,
+        group: "hermes-computer",
+        run: async () => this.tools.computer_access_status.run(),
+      },
+      ha_list_entities: {
+        description: "Hermes-compatible Home Assistant placeholder.",
+        permission: "allowConnectorWrite",
+        group: "hermes-homeassistant",
+        run: async () => this.hermesToolNotReady("ha_list_entities", "Home Assistant connector is not configured in OmniClaw yet."),
+      },
+      ha_get_state: {
+        description: "Hermes-compatible Home Assistant placeholder.",
+        permission: "allowConnectorWrite",
+        group: "hermes-homeassistant",
+        run: async () => this.hermesToolNotReady("ha_get_state", "Home Assistant connector is not configured in OmniClaw yet."),
+      },
+      ha_list_services: {
+        description: "Hermes-compatible Home Assistant placeholder.",
+        permission: "allowConnectorWrite",
+        group: "hermes-homeassistant",
+        run: async () => this.hermesToolNotReady("ha_list_services", "Home Assistant connector is not configured in OmniClaw yet."),
+      },
+      ha_call_service: {
+        description: "Hermes-compatible Home Assistant placeholder.",
+        permission: "allowConnectorWrite",
+        group: "hermes-homeassistant",
+        run: async () => this.hermesToolNotReady("ha_call_service", "Home Assistant connector is not configured in OmniClaw yet."),
       },
       nodes: {
         description: "Discover paired/trusted nodes and local host bindings.",
@@ -1329,6 +1687,66 @@ export class ToolRegistry {
           jobs: this.agentRuntime?.jobs?.listJobs?.(Number(limit || 50)) || [],
         }),
       },
+      cronjob: {
+        description: "Hermes-compatible cron job listing/status alias.",
+        permission: null,
+        group: "hermes-runtime",
+        run: async (input = {}) => this.tools.cron.run(input),
+      },
+      kanban_show: {
+        description: "Hermes-compatible kanban placeholder.",
+        permission: null,
+        group: "hermes-kanban",
+        run: async () => this.hermesToolNotReady("kanban_show", "Kanban orchestration board is not wired into OmniClaw yet."),
+      },
+      kanban_list: {
+        description: "Hermes-compatible kanban placeholder.",
+        permission: null,
+        group: "hermes-kanban",
+        run: async () => this.hermesToolNotReady("kanban_list", "Kanban orchestration board is not wired into OmniClaw yet."),
+      },
+      kanban_complete: {
+        description: "Hermes-compatible kanban placeholder.",
+        permission: "allowTaskWrite",
+        group: "hermes-kanban",
+        run: async () => this.hermesToolNotReady("kanban_complete", "Kanban orchestration board is not wired into OmniClaw yet."),
+      },
+      kanban_block: {
+        description: "Hermes-compatible kanban placeholder.",
+        permission: "allowTaskWrite",
+        group: "hermes-kanban",
+        run: async () => this.hermesToolNotReady("kanban_block", "Kanban orchestration board is not wired into OmniClaw yet."),
+      },
+      kanban_heartbeat: {
+        description: "Hermes-compatible kanban placeholder.",
+        permission: null,
+        group: "hermes-kanban",
+        run: async () => this.hermesToolNotReady("kanban_heartbeat", "Kanban orchestration board is not wired into OmniClaw yet."),
+      },
+      kanban_comment: {
+        description: "Hermes-compatible kanban placeholder.",
+        permission: "allowTaskWrite",
+        group: "hermes-kanban",
+        run: async () => this.hermesToolNotReady("kanban_comment", "Kanban orchestration board is not wired into OmniClaw yet."),
+      },
+      kanban_create: {
+        description: "Hermes-compatible kanban placeholder.",
+        permission: "allowTaskWrite",
+        group: "hermes-kanban",
+        run: async () => this.hermesToolNotReady("kanban_create", "Kanban orchestration board is not wired into OmniClaw yet."),
+      },
+      kanban_link: {
+        description: "Hermes-compatible kanban placeholder.",
+        permission: "allowTaskWrite",
+        group: "hermes-kanban",
+        run: async () => this.hermesToolNotReady("kanban_link", "Kanban orchestration board is not wired into OmniClaw yet."),
+      },
+      kanban_unblock: {
+        description: "Hermes-compatible kanban placeholder.",
+        permission: "allowTaskWrite",
+        group: "hermes-kanban",
+        run: async () => this.hermesToolNotReady("kanban_unblock", "Kanban orchestration board is not wired into OmniClaw yet."),
+      },
       gateway: {
         description: "Inspect OmniClaw gateway overview, events, runs, approvals, and provider status.",
         permission: null,
@@ -1355,6 +1773,33 @@ export class ToolRegistry {
         permission: "allowConnectorWrite",
         group: "media",
         run: async ({ prompt }) => this.mediaNotConfigured("image_generate", prompt),
+      },
+      vision_analyze: {
+        description: "Hermes-compatible image analysis alias.",
+        permission: "allowConnectorWrite",
+        group: "hermes-media",
+        run: async (input = {}) =>
+          input.extractId || input.cacheId
+            ? this.tools.image.run(input)
+            : this.tools.analyze_pending_media_attachments.run({ limit: input.limit || 5, force: input.force }),
+      },
+      video_analyze: {
+        description: "Hermes-compatible video analysis alias.",
+        permission: "allowConnectorWrite",
+        group: "hermes-media",
+        run: async (input = {}) => this.tools.analyze_pending_media_attachments.run({ ...input, limit: input.limit || 5 }),
+      },
+      text_to_speech: {
+        description: "Hermes-compatible text-to-speech placeholder.",
+        permission: "allowConnectorWrite",
+        group: "hermes-media",
+        run: async ({ text, voice } = {}) => ({
+          ok: false,
+          configured: false,
+          textPreview: String(text || "").slice(0, 180),
+          voice: voice || "",
+          message: "Text-to-speech tool is cataloged from Hermes, but OmniClaw needs a TTS provider plugin before audio can be generated.",
+        }),
       },
       music_generate: {
         description: "Music generation compatibility placeholder. Requires adding a music provider plugin.",
@@ -1610,6 +2055,45 @@ export class ToolRegistry {
       promptPreview: String(prompt || "").slice(0, 180),
       message: `${tool} is registered for OpenClaw compatibility, but no media provider plugin is configured yet.`,
       nextUpgrade: "Add provider-backed image/music/video/TTS plugins and route these tools to them.",
+    };
+  }
+
+  hermesToolNotReady(tool, message = "") {
+    const item = HERMES_COMPAT_TOOLS.find((entry) => entry.id === tool) || {};
+    return {
+      ok: false,
+      ready: false,
+      tool,
+      toolset: item.toolset || "",
+      status: item.status || "placeholder",
+      omniclawTool: item.omniclawTool || "",
+      message: message || "This Hermes-compatible tool is cataloged, but its backend is not wired into OmniClaw yet.",
+      source: "vendor/hermes-agent",
+    };
+  }
+
+  getHermesToolCatalog({ status = "", toolset = "" } = {}) {
+    const normalizedStatus = String(status || "").trim().toLowerCase();
+    const normalizedToolset = String(toolset || "").trim().toLowerCase();
+    const visibleTools = new Set(this.getAll({ agentId: "main" }).map((tool) => tool.id));
+    const tools = HERMES_COMPAT_TOOLS
+      .filter((tool) => !normalizedStatus || tool.status === normalizedStatus)
+      .filter((tool) => !normalizedToolset || tool.toolset === normalizedToolset)
+      .map((tool) => ({
+        ...tool,
+        exposed: visibleTools.has(tool.id),
+      }));
+    const counts = tools.reduce((acc, tool) => {
+      acc[tool.status] = (acc[tool.status] || 0) + 1;
+      return acc;
+    }, {});
+    return {
+      source: "vendor/hermes-agent/toolsets.py",
+      total: tools.length,
+      counts,
+      toolsets: [...new Set(HERMES_COMPAT_TOOLS.map((tool) => tool.toolset))].sort(),
+      tools,
+      rule: "OmniClaw keeps its working tools and exposes Hermes-compatible aliases/adapters. Python-only Hermes backends stay placeholders until safely ported.",
     };
   }
 

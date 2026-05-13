@@ -80,6 +80,21 @@ export class Planner {
       });
     }
 
+    if (intents.includes("hermes-tools")) {
+      steps.push({
+        type: "tool",
+        tool: "hermes_tool_catalog",
+        input: {},
+        reason: "User asked to copy/compare Hermes tools and wants tool coverage status.",
+      });
+      steps.push({
+        type: "tool",
+        tool: "hermes_skill_scan",
+        input: { limit: 12 },
+        reason: "User asked to add Hermes skills; scan the vendored skill catalog first.",
+      });
+    }
+
     if (intents.includes("hermes-doctor")) {
       steps.push({
         type: "tool",

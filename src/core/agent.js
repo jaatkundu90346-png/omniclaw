@@ -3504,6 +3504,22 @@ export class OmniClawAgent {
       ].filter(Boolean).join(" ");
     }
 
+    if (intents.includes("hermes-tools") && byTool.has("hermes_tool_catalog")) {
+      const catalog = byTool.get("hermes_tool_catalog");
+      const skills = byTool.get("hermes_skill_scan") || {};
+      const counts = catalog.counts || {};
+      const samples = Array.isArray(catalog.tools)
+        ? catalog.tools.slice(0, 10).map((tool) => `${tool.id}:${tool.status}`).join(", ")
+        : "";
+      return [
+        "Hermes tool import status ready hai.",
+        `Total mapped tools: ${catalog.total || 0}. Native ${counts.native || 0}, alias ${counts.alias || 0}, partial ${counts.partial || 0}, placeholder ${counts.placeholder || 0}.`,
+        `Sample: ${samples || "none"}.`,
+        `Hermes skills available: ${skills.totalAvailable || skills.count || 0}; scanned sample ${skills.count || 0}.`,
+        "Decision: OmniClaw ke working tools delete nahi karne. Hermes names ko aliases/adapters ke through add karna sahi hai, warna Node app me Python runtime direct paste se breakage hoga.",
+      ].join(" ");
+    }
+
     if (intents.includes("hermes-doctor")) {
       const provider = byTool.get("provider_status") || {};
       const access = byTool.get("computer_access_status") || {};

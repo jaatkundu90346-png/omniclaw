@@ -87,6 +87,17 @@ export class IntentEngine {
     }
 
     if (
+      lowered.includes("hermes tools") ||
+      lowered.includes("hermes ke tools") ||
+      lowered.includes("hermes ka tools") ||
+      lowered.includes("copy hermes tools") ||
+      lowered.includes("40+ tools") ||
+      lowered.includes("40 tools")
+    ) {
+      intents.push("hermes-tools");
+    }
+
+    if (
       lowered.includes("v2") ||
       lowered.includes("weak") ||
       lowered.includes("kami") ||

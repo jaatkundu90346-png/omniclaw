@@ -38,6 +38,18 @@ Added in this pass:
 - `/hermes` maps Hermes reference ideas to OmniClaw's live runtime.
 - `hermes_vendor_status` reports the local vendor copy, license, major folders, and skill count.
 - `hermes_skill_scan` scans vendored Hermes `SKILL.md` files for selective import planning.
+- `hermes_tool_catalog` reports Hermes core tool names and their OmniClaw compatibility status.
+- Hermes-compatible aliases now expose many Hermes names directly: `terminal`, `web_extract`, `patch`, `search_files`, `browser_navigate`, `browser_click`, `browser_type`, `browser_scroll`, `browser_back`, `browser_press`, `browser_get_images`, `skills_list`, `skill_view`, `todo`, `memory`, `session_search`, `execute_code`, `cronjob`, `send_message`, `vision_analyze`, `video_analyze`, and more.
+
+## Tool Import Decision
+
+Do not delete OmniClaw's existing tool registry and replace it with Hermes Python tools. OmniClaw runs as a Node/Windows desktop app, while Hermes tools are Python modules with their own runtime, dependency, auth, and sandbox assumptions. The safe V2 path is:
+
+1. Keep OmniClaw's working Node tools.
+2. Expose Hermes tool names as aliases where OmniClaw already has an equivalent backend.
+3. Mark Python-only or service-specific tools as partial/placeholders until an adapter is built.
+4. Import skills selectively after compatibility review.
+5. Port one backend at a time, with tests, instead of a full destructive replacement.
 
 ## Vendored Source Layout
 
