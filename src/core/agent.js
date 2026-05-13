@@ -3207,24 +3207,65 @@ export class OmniClawAgent {
     const sharedWorkspace = this.workspace.workspaceDir;
     const agentWorkspace = agent.workspacePath;
     const fileNames = ["AGENTS.md", "IDENTITY.md", "SOUL.md", "USER.md", "PROFILE.md", "TOOLS.md", "HEARTBEAT.md", "BOOTSTRAP.md"];
+    const projectContextNames = [".hermes.md", "HERMES.md", "AGENTS.md", ".cursorrules"];
     const files = [];
+    const seenPaths = new Set();
+
+    const pushFile = ({ name, scope, filePath }) => {
+      const resolved = path.resolve(filePath);
+      if (seenPaths.has(resolved) || !fs.existsSync(resolved)) {
+        return;
+      }
+      seenPaths.add(resolved);
+      files.push({
+        name,
+        scope,
+        path: resolved,
+        content: fs.readFileSync(resolved, "utf8"),
+      });
+    };
 
     const readScopedFiles = (scope, workspaceDir) => {
       for (const name of fileNames) {
         const filePath = path.join(workspaceDir, name);
-        if (!fs.existsSync(filePath)) {
-          continue;
-        }
-        files.push({
+        pushFile({
           name,
           scope,
-          path: filePath,
-          content: fs.readFileSync(filePath, "utf8"),
+          filePath,
         });
       }
     };
 
+    const discoverProjectContextFiles = () => {
+      const roots = [
+        this.rootDir,
+        process.cwd(),
+        path.join(this.rootDir, "workspace"),
+      ];
+      for (const root of roots) {
+        let current = path.resolve(root);
+        for (let depth = 0; depth < 8; depth += 1) {
+          for (const name of projectContextNames) {
+            pushFile({
+              name,
+              scope: "project",
+              filePath: path.join(current, name),
+            });
+          }
+          const parent = path.dirname(current);
+          if (parent === current) {
+            break;
+          }
+          if (fs.existsSync(path.join(current, ".git"))) {
+            break;
+          }
+          current = parent;
+        }
+      }
+    };
+
     try {
+      discoverProjectContextFiles();
       readScopedFiles("shared", sharedWorkspace);
       readScopedFiles("agent", agentWorkspace);
 
@@ -3489,6 +3530,22 @@ export class OmniClawAgent {
 
   buildRuntimeToolReply({ intents = [], toolOutputs = [] } = {}) {
     const byTool = new Map(toolOutputs.map((item) => [item.tool, item.output || {}]));
+    if (intents.includes("prompt-assembly") && byTool.has("prompt_assembly_status")) {
+      const status = byTool.get("prompt_assembly_status");
+      const scopes = {};
+      for (const file of status.files || []) {
+        scopes[file.scope || "unknown"] = (scopes[file.scope || "unknown"] || 0) + 1;
+      }
+      return [
+        "Hermes-style prompt assembly status ready.",
+        `Agent ${status.agentId || "main"} profile ${status.profile || "balanced"} budget ${status.maxContextChars || 0} chars.`,
+        `Context files: ${(status.files || []).length} loaded (${Object.entries(scopes).map(([k, v]) => `${k}:${v}`).join(", ") || "none"}).`,
+        `Defenses: prompt injection scan ${status.defenses?.promptInjectionScan ? "on" : "off"}, invisible unicode scan ${status.defenses?.invisibleUnicodeScan ? "on" : "off"}, hidden HTML scan ${status.defenses?.hiddenHtmlScan ? "on" : "off"}.`,
+        `Suspicious files: ${status.suspiciousCount || 0}.`,
+        status.rule || "",
+      ].filter(Boolean).join(" ");
+    }
+
     if (intents.includes("hermes-reference") && byTool.has("hermes_reference_status")) {
       const hermes = byTool.get("hermes_reference_status");
       const now = hermes.omniClawNow || {};
@@ -3652,6 +3709,22 @@ export class OmniClawAgent {
         `Status: ${summary.readyLayers || 0} ready, ${summary.partialLayers || 0} partial, ${summary.missingLayers || 0} missing.`,
         `Provider: ${summary.provider || "unknown"} (${summary.providerReady ? "ready" : "not ready"}), tools: ${summary.tools || 0}, skills: ${summary.skills || 0}, sessions: ${summary.sessions || 0}.`,
         next.length ? `Next upgrades: ${next.join(" | ")}` : "",
+      ].filter(Boolean).join(" ");
+    }
+
+    if (intents.includes("prompt-assembly") && byTool.has("prompt_assembly_status")) {
+      const status = byTool.get("prompt_assembly_status");
+      const scopes = {};
+      for (const file of status.files || []) {
+        scopes[file.scope || "unknown"] = (scopes[file.scope || "unknown"] || 0) + 1;
+      }
+      return [
+        "Hermes-style prompt assembly status ready.",
+        `Agent ${status.agentId || "main"} profile ${status.profile || "balanced"} budget ${status.maxContextChars || 0} chars.`,
+        `Context files: ${(status.files || []).length} loaded (${Object.entries(scopes).map(([k, v]) => `${k}:${v}`).join(", ") || "none"}).`,
+        `Defenses: prompt injection scan ${status.defenses?.promptInjectionScan ? "on" : "off"}, invisible unicode scan ${status.defenses?.invisibleUnicodeScan ? "on" : "off"}, hidden HTML scan ${status.defenses?.hiddenHtmlScan ? "on" : "off"}.`,
+        `Suspicious files: ${status.suspiciousCount || 0}.`,
+        status.rule || "",
       ].filter(Boolean).join(" ");
     }
 

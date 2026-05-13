@@ -158,6 +158,20 @@ async function run() {
     assert(hermesTools.reply.includes("Hermes tool import status"), "Hermes tools reply should be grounded.");
     assertToolSummaries(hermesTools.toolOutputs, "hermes tools request");
 
+    const promptAssembly = await postChat(
+      "Hermes architecture system prompt assembly status",
+      `chat-smoke-prompt-assembly-${suffix}`,
+    );
+    assert(
+      promptAssembly.toolOutputs.some((item) => item.tool === "prompt_assembly_status"),
+      "Prompt assembly requests should call prompt_assembly_status.",
+    );
+    assert(
+      promptAssembly.reply.includes("prompt assembly status"),
+      "Prompt assembly reply should be grounded.",
+    );
+    assertToolSummaries(promptAssembly.toolOutputs, "prompt assembly request");
+
     console.log("Chat agent smoke test passed");
   } finally {
     child.kill("SIGTERM");

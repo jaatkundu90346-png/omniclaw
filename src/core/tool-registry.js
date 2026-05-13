@@ -406,6 +406,12 @@ export class ToolRegistry {
           };
         },
       },
+      prompt_assembly_status: {
+        description: "Hermes-style prompt assembly report: identity files, project context discovery, injection defense, and context budget.",
+        permission: null,
+        group: "runtime",
+        run: async (_, context) => this.getPromptAssemblyStatus(context),
+      },
       tool_trace: {
         description: "Inspect the per-run tool execution ledger with inputs, outputs, status, and timing.",
         permission: null,
@@ -2094,6 +2100,64 @@ export class ToolRegistry {
       toolsets: [...new Set(HERMES_COMPAT_TOOLS.map((tool) => tool.toolset))].sort(),
       tools,
       rule: "OmniClaw keeps its working tools and exposes Hermes-compatible aliases/adapters. Python-only Hermes backends stay placeholders until safely ported.",
+    };
+  }
+
+  scanPromptContextText(value = "") {
+    const text = String(value || "");
+    const findings = [];
+    const checks = [
+      { id: "ignore-previous-instructions", pattern: /ignore (all )?(previous|prior|above) (instructions|rules|messages)/i },
+      { id: "disregard-previous-instructions", pattern: /disregard (all )?(previous|prior|above) (instructions|rules|messages)/i },
+      { id: "system-prompt-exfiltration", pattern: /reveal (your )?(instructions|prompt|system)|system prompt/i },
+      { id: "role-rewrite", pattern: /you are now|act as|do not obey/i },
+      { id: "hidden-html", pattern: /<script[\s>]|<iframe[\s>]|display\s*:\s*none|visibility\s*:\s*hidden|opacity\s*:\s*0/i },
+      { id: "invisible-unicode", pattern: /[\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFEFF]/u },
+    ];
+    for (const check of checks) {
+      if (check.pattern.test(text)) {
+        findings.push(check.id);
+      }
+    }
+    return findings;
+  }
+
+  getPromptAssemblyStatus(context = {}) {
+    const agentId = this.getAgentId(context);
+    const agent = this.agentRegistry?.resolveAgent?.(agentId) || null;
+    const profile = agent ? this.configStore.getProfile(agent.profileId) : this.configStore.getActiveProfile();
+    const workspaceContext = this.agentRuntime?.loadWorkspaceContext?.(agentId) || { files: [] };
+    const files = Array.isArray(workspaceContext.files) ? workspaceContext.files : [];
+    const scanned = files.map((file) => ({
+      name: file.name || "",
+      scope: file.scope || "",
+      path: file.path || "",
+      chars: String(file.content || "").length,
+      findings: this.scanPromptContextText(file.content || ""),
+    }));
+    const suspicious = scanned.filter((file) => file.findings.length > 0);
+    return {
+      agentId,
+      profile: profile?.id || "balanced",
+      maxContextChars: this.agentRuntime?.contextEngine?.getMaxChars?.(profile || {}) || 0,
+      assembly: [
+        "DEFAULT_AGENT_IDENTITY / runtime identity",
+        "SOUL.md / USER.md / PROFILE.md",
+        "Project context discovery: .hermes.md, HERMES.md, AGENTS.md, .cursorrules",
+        "Skills index and tool schema",
+        "Memory context and session summary",
+        "Platform hints and heartbeat behavior",
+      ],
+      defenses: {
+        promptInjectionScan: true,
+        invisibleUnicodeScan: true,
+        hiddenHtmlScan: true,
+        untrustedContextTags: true,
+      },
+      files: scanned,
+      suspiciousCount: suspicious.length,
+      suspicious: suspicious.slice(0, 12),
+      rule: "Workspace/project context is injected as untrusted data. Suspicious phrases are blocked in the final system prompt instead of treated as instructions.",
     };
   }
 

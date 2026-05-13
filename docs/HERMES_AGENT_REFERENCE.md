@@ -51,6 +51,16 @@ Do not delete OmniClaw's existing tool registry and replace it with Hermes Pytho
 4. Import skills selectively after compatibility review.
 5. Port one backend at a time, with tests, instead of a full destructive replacement.
 
+## Prompt Assembly Upgrade
+
+The screenshots show Hermes building the system prompt from identity, SOUL, context files, skills, memory, platform hints, and ephemeral runtime state. OmniClaw now mirrors that pattern more closely:
+
+- `loadWorkspaceContext()` discovers project context files named `.hermes.md`, `HERMES.md`, `AGENTS.md`, and `.cursorrules` from the workspace toward the nearest git root.
+- Workspace, agent, and project files are injected into the system prompt as `untrusted="true"` context blocks.
+- Suspicious prompt-injection phrases, hidden HTML, scripts, iframes, and invisible unicode are scanned before injection.
+- `prompt_assembly_status` reports loaded context files, scopes, context budget, and suspicious findings.
+- The agent reply layer has a grounded response for architecture/prompt-assembly questions instead of generic chat.
+
 ## Vendored Source Layout
 
 - `vendor/hermes-agent/agent`: model adapters, context, memory, prompt, tool, and runtime helpers.

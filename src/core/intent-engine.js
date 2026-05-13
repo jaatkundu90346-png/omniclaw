@@ -113,6 +113,7 @@ export class IntentEngine {
       lowered.includes("layer") ||
       lowered.includes("architecture status") ||
       lowered.includes("openclaw architecture") ||
+      lowered.includes("hermes architecture") ||
       lowered.includes("runtime status") ||
       lowered.includes("gateway status") ||
       lowered.includes("tools aur skills") ||
@@ -120,6 +121,19 @@ export class IntentEngine {
       lowered.includes("demo do")
     ) {
       intents.push("layer-status");
+    }
+
+    if (
+      lowered.includes("system prompt") ||
+      lowered.includes("prompt assembly") ||
+      lowered.includes("agent loop") ||
+      lowered.includes("core agent loop") ||
+      lowered.includes("context file") ||
+      lowered.includes("prompt injection") ||
+      lowered.includes("architecture ko samjho") ||
+      lowered.includes("architacture ko samjho")
+    ) {
+      intents.push("prompt-assembly");
     }
 
     if (

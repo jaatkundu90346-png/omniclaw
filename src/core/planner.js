@@ -244,6 +244,15 @@ export class Planner {
       });
     }
 
+    if (intents.includes("prompt-assembly")) {
+      steps.push({
+        type: "tool",
+        tool: "prompt_assembly_status",
+        input: {},
+        reason: "User shared Hermes architecture screenshots about prompt assembly and wants OmniClaw improved.",
+      });
+    }
+
     if (intents.includes("computer-access")) {
       steps.push({
         type: "tool",
