@@ -4,6 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>OmniClaw Gateway Control</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300..800&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet" />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
@@ -124,7 +128,7 @@
     <div class="shell">
       <aside class="rail" aria-label="Primary navigation">
         <div class="rail-header">
-          <div class="brand-mark">OC</div>
+          <div class="brand-mark"><span class="material-symbols-rounded" style="font-size:22px">auto_awesome</span></div>
           <div>
             <p class="eyebrow">Gateway control</p>
             <h1>OmniClaw</h1>
@@ -141,50 +145,54 @@
 
         <div id="rail-health" class="rail-health">Loading gateway status...</div>
 
+        <div class="nav-scroll">
         <div class="nav-group">
           <p class="nav-group-title">WORK</p>
           <a href="#chat-panel" class="nav-link active">
-            <span class="nav-icon">💬</span> Chat
+            <span class="material-symbols-rounded nav-icon">chat_bubble</span> Chat
           </a>
         </div>
 
         <div class="nav-group">
           <p class="nav-group-title">CONTROL CENTER</p>
-          <a href="#overview-panel" class="nav-link">Dashboard</a>
-          <a href="#sessions-panel" class="nav-link">Task history</a>
-          <a href="#execution-panel" class="nav-link">Terminal</a>
-          <a href="#scheduler-panel" class="nav-link">Scheduled</a>
-          <a href="#connectors-panel" class="nav-link">Channels</a>
+          <a href="#overview-panel" class="nav-link"><span class="material-symbols-rounded nav-icon">dashboard</span> Dashboard</a>
+          <a href="#sessions-panel" class="nav-link"><span class="material-symbols-rounded nav-icon">history</span> Task history</a>
+          <a href="#execution-panel" class="nav-link"><span class="material-symbols-rounded nav-icon">terminal</span> Terminal</a>
+          <a href="#scheduler-panel" class="nav-link"><span class="material-symbols-rounded nav-icon">schedule</span> Scheduled</a>
+          <a href="#connectors-panel" class="nav-link"><span class="material-symbols-rounded nav-icon">cable</span> Channels</a>
         </div>
 
         <div class="nav-group">
           <p class="nav-group-title">AGENT</p>
           <a href="#agents-panel" class="nav-link">
-            <span class="nav-icon">📁</span> Agents
+            <span class="material-symbols-rounded nav-icon">smart_toy</span> Agents
           </a>
           <a href="#skill-panel" class="nav-link">
-            <span class="nav-icon">⚡</span> Skills
+            <span class="material-symbols-rounded nav-icon">bolt</span> Skills
           </a>
-          <a href="#trust-panel" class="nav-link">Devices</a>
-          <a href="#memory-panel" class="nav-link">Memory</a>
-          <a href="#research-panel" class="nav-link">Research</a>
+          <a href="#trust-panel" class="nav-link"><span class="material-symbols-rounded nav-icon">devices</span> Devices</a>
+          <a href="#memory-panel" class="nav-link"><span class="material-symbols-rounded nav-icon">psychology</span> Memory</a>
+          <a href="#research-panel" class="nav-link"><span class="material-symbols-rounded nav-icon">travel_explore</span> Research</a>
         </div>
 
         <div class="nav-group">
           <p class="nav-group-title">SETTINGS</p>
-          <a href="#runtime-panel" class="nav-link">Permissions</a>
-          <a href="#provider-panel" class="nav-link">Brain setup</a>
-          <a href="#design-panel" class="nav-link">Design system</a>
-          <a href="#plugin-panel" class="nav-link">Plugins</a>
+          <a href="#runtime-panel" class="nav-link"><span class="material-symbols-rounded nav-icon">admin_panel_settings</span> Permissions</a>
+          <a href="#provider-panel" class="nav-link"><span class="material-symbols-rounded nav-icon">neurology</span> Brain setup</a>
+          <a href="#design-panel" class="nav-link"><span class="material-symbols-rounded nav-icon">palette</span> Design system</a>
+          <a href="#plugin-panel" class="nav-link"><span class="material-symbols-rounded nav-icon">extension</span> Plugins</a>
         </div>
-
-        <div class="nav-group" style="margin-top: auto;">
-          <a href="#" class="nav-link">Docs</a>
         </div>
 
         <div class="rail-footer">
-          <p>Local-first runtime for gateway, sessions, approvals, tools, and plugins.</p>
-          <span>Control shell tuned for the existing OmniClaw backend.</span>
+          <div class="rail-footer-user">
+            <div class="user-avatar"><span class="material-symbols-rounded">person</span></div>
+            <div>
+              <strong>Operator</strong>
+              <span>Local session</span>
+            </div>
+          </div>
+          <a href="#" class="nav-link nav-link-docs"><span class="material-symbols-rounded nav-icon">menu_book</span> Docs</a>
         </div>
       </aside>
 
@@ -281,9 +289,9 @@
           <section id="chat-panel" class="surface surface-chat">
             <div class="manus-command">
               <div class="manus-command-copy">
-                <p class="section-kicker">Hands-on agent</p>
-                <h3>What should OmniClaw do?</h3>
-                <p>Give the agent a concrete task. It can use browser, files, terminal, memory, schedules, and connected tools with visible run traces.</p>
+                <p class="section-kicker">Agent workspace</p>
+                <h3>OmniClaw</h3>
+                <p>One task thread with chat, tools, terminal, browser, memory, and progress in the same place.</p>
               </div>
               <div class="manus-status-grid" aria-label="Runtime capability status">
                 <span><strong id="manus-provider-status">Brain</strong><small>provider</small></span>
