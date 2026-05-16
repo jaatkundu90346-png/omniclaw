@@ -8,6 +8,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300..800&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet" />
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23151617'/%3E%3Ctext x='32' y='41' text-anchor='middle' font-family='Arial' font-size='24' font-weight='700' fill='%23f6f0e8'%3EOC%3C/text%3E%3C/svg%3E" />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
@@ -133,6 +134,9 @@
             <p class="eyebrow">Gateway control</p>
             <h1>OmniClaw</h1>
           </div>
+          <button id="rail-toggle" type="button" class="icon-button rail-toggle" aria-label="Collapse sidebar" aria-pressed="false">
+            <span class="material-symbols-rounded">dock_to_right</span>
+          </button>
         </div>
 
         <div class="rail-status">
@@ -204,13 +208,16 @@
             <strong id="route-crumb">Chat</strong>
           </div>
           <div class="topbar-actions">
+            <button id="topbar-rail-toggle" type="button" class="icon-button" aria-label="Toggle sidebar">
+              <span class="material-symbols-rounded">menu_open</span>
+            </button>
             <label class="topbar-search" for="global-search">
               <input id="global-search" type="search" placeholder="Search" />
-              <span>⌘K</span>
+              <span>Ctrl K</span>
             </label>
-            <button id="topbar-overview" type="button" class="icon-button is-active" aria-label="Gateway screen">▣</button>
-            <button id="topbar-density" type="button" class="icon-button" aria-label="Compact density">☼</button>
-            <button id="topbar-theme" type="button" class="icon-button" aria-label="Dark mode">☾</button>
+            <button id="topbar-overview" type="button" class="icon-button is-active" aria-label="Gateway screen"><span class="material-symbols-rounded">dashboard</span></button>
+            <button id="topbar-density" type="button" class="icon-button" aria-label="Compact density"><span class="material-symbols-rounded">density_medium</span></button>
+            <button id="topbar-theme" type="button" class="icon-button" aria-label="Dark mode"><span class="material-symbols-rounded">dark_mode</span></button>
           </div>
         </div>
         <div class="main-content" id="main-content">
@@ -929,6 +936,28 @@
               </div>
             </div>
             <div class="surface-body">
+              <div class="settings-hub-grid" aria-label="Permissions summary">
+                <div class="settings-hub-card">
+                  <span class="material-symbols-rounded">folder_managed</span>
+                  <strong>File roots</strong>
+                  <small>Laptop search/edit roots stay visible and reversible.</small>
+                </div>
+                <div class="settings-hub-card">
+                  <span class="material-symbols-rounded">terminal</span>
+                  <strong>Terminal policy</strong>
+                  <small>Commands are grouped into allow, ask, and deny.</small>
+                </div>
+                <div class="settings-hub-card">
+                  <span class="material-symbols-rounded">screen_share</span>
+                  <strong>Browser control</strong>
+                  <small>Browser actions, screenshots, and automation status.</small>
+                </div>
+                <div class="settings-hub-card">
+                  <span class="material-symbols-rounded">shield_lock</span>
+                  <strong>Danger gates</strong>
+                  <small>Write/delete remains understandable before it runs.</small>
+                </div>
+              </div>
               <form id="runtime-form" class="stack-form">
                 <label for="profile">Profile</label>
                 <select id="profile">
@@ -969,8 +998,52 @@
                   <span><strong>Models</strong><small id="provider-models-endpoint">/models</small></span>
                 </div>
               </div>
-              <div id="provider-status-output" class="stack-list">
-                <div class="empty-state">Loading provider readiness...</div>
+              <div class="provider-stepper" aria-label="Brain setup steps">
+                <span class="is-done"><strong>1</strong> Provider</span>
+                <span class="is-done"><strong>2</strong> Key</span>
+                <span><strong>3</strong> Models</span>
+                <span><strong>4</strong> Test</span>
+                <span><strong>5</strong> Save</span>
+              </div>
+              <div class="provider-preset-row" aria-label="Provider presets">
+                <button type="button" class="provider-preset-button" data-provider-preset="openrouter">
+                  <strong>OpenRouter</strong>
+                  <small>200+ models</small>
+                </button>
+                <button type="button" class="provider-preset-button" data-provider-preset="openai">
+                  <strong>OpenAI</strong>
+                  <small>native compatible</small>
+                </button>
+                <button type="button" class="provider-preset-button" data-provider-preset="nvidia">
+                  <strong>NVIDIA NIM</strong>
+                  <small>GLM + hosted models</small>
+                </button>
+                <button type="button" class="provider-preset-button" data-provider-preset="minimax">
+                  <strong>MiniMax</strong>
+                  <small>fallback ready</small>
+                </button>
+                <button type="button" class="provider-preset-button" data-provider-preset="codex-cli">
+                  <strong>Codex CLI</strong>
+                  <small>OpenAI account</small>
+                </button>
+              </div>
+              <div class="provider-command-panel" aria-label="Quick provider setup">
+                <div class="provider-command-copy">
+                  <strong id="provider-selected-label">OpenAI</strong>
+                  <span id="provider-selected-meta">Choose a provider preset, paste key, choose model, then save.</span>
+                </div>
+                <label class="provider-model-picker-wrap" for="provider-model-picker">
+                  <span>Model <small id="provider-model-count">starter list</small></span>
+                  <select id="provider-model-picker">
+                    <option value="">Choose provider first</option>
+                  </select>
+                </label>
+                <div class="provider-command-actions">
+                  <button id="provider-fetch-models-quick" type="button" class="button button-ghost">Fetch models</button>
+                  <button id="provider-test-quick" type="button" class="button button-ghost">Test</button>
+                  <button id="provider-save-quick" type="submit" form="provider-form" class="button button-primary">Save brain</button>
+                </div>
+                <small id="provider-quick-status" class="provider-quick-status">No provider changes saved yet.</small>
               </div>
               <form id="provider-form" class="stack-form">
                 <div class="provider-grid">
@@ -1025,6 +1098,9 @@
                   <button id="open-codex-login" type="button" class="button button-ghost">Open Codex setup</button>
                 </div>
               </form>
+              <div id="provider-status-output" class="stack-list">
+                <div class="empty-state">Loading provider readiness...</div>
+              </div>
               <pre id="provider-output" class="console-output console-output-compact">No provider changes yet.</pre>
             </div>
           </section>

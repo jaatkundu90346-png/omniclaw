@@ -95,6 +95,21 @@ export class Planner {
       });
     }
 
+    if (intents.includes("real-task-hardening")) {
+      steps.push({
+        type: "tool",
+        tool: "real_task_health",
+        input: { live: true },
+        reason: "User wants OmniClaw to behave like a product-grade real-task agent, not a demo chatbot.",
+      });
+      steps.push({
+        type: "tool",
+        tool: "capability_demo",
+        input: {},
+        reason: "Show the real tool and skill surface after the live health probe.",
+      });
+    }
+
     if (intents.includes("context-compression")) {
       steps.push({
         type: "tool",
@@ -394,6 +409,14 @@ export class Planner {
         reason: "User asked OmniClaw to inspect the current automated browser page.",
       });
     }
+    if (intents.includes("browser-navigate")) {
+      steps.push({
+        type: "tool",
+        tool: "browser_navigate",
+        input: { url: this.extractBrowserUrl(message) },
+        reason: "User asked OmniClaw to open or navigate a browser page.",
+      });
+    }
 
     if (intents.includes("provider-status") && !intents.includes("hermes-doctor") && !intents.includes("hermes-model")) {
       steps.push({
@@ -552,12 +575,30 @@ export class Planner {
       });
     }
 
+    if (intents.includes("computer-file-read")) {
+      steps.push({
+        type: "tool",
+        tool: "read_computer_file",
+        input: { path: this.extractComputerPath(message) },
+        reason: "The user asked to read a laptop/computer file through governed computer access.",
+      });
+    }
+
     if (intents.includes("file-list")) {
       steps.push({
         type: "tool",
         tool: "list_files",
         input: { path: this.extractPath(message, ".") },
         reason: "The user asked to inspect workspace contents.",
+      });
+    }
+
+    if (intents.includes("computer-directory-list")) {
+      steps.push({
+        type: "tool",
+        tool: "list_computer_directory",
+        input: { path: this.extractComputerPath(message, "~") },
+        reason: "The user asked to list a laptop/computer folder through governed computer access.",
       });
     }
 
@@ -577,6 +618,15 @@ export class Planner {
         tool: writeRequest.append ? "append_file" : "write_file",
         input: writeRequest,
         reason: "The user asked to create or update a workspace file.",
+      });
+    }
+
+    if (intents.includes("computer-delete")) {
+      steps.push({
+        type: "tool",
+        tool: "delete_computer_path",
+        input: { path: this.extractComputerPath(message, ""), permanent: /permanent|forever|hamesha|hard delete/i.test(message) },
+        reason: "The user explicitly asked to delete a laptop/computer file or folder through governed computer access.",
       });
     }
 
@@ -631,6 +681,15 @@ export class Planner {
         tool: "update_runtime_settings",
         input: this.extractRuntimeRequest(message),
         reason: "The user asked OmniClaw to customize its runtime settings.",
+      });
+    }
+
+    if (intents.includes("provider-model-list") && !intents.includes("hermes-model")) {
+      steps.push({
+        type: "tool",
+        tool: "list_provider_models",
+        input: this.extractProviderModelsRequest(message),
+        reason: "The user asked to fetch/select available provider models from the configured endpoint.",
       });
     }
 
@@ -776,6 +835,73 @@ JSON:`;
     return fallback;
   }
 
+  extractComputerPath(message, fallback = "~") {
+    const text = String(message || "").trim();
+    const quoted = text.match(/["']([^"']+)["']/);
+    if (quoted) {
+      return quoted[1].trim();
+    }
+
+    const drivePath = text.match(/[a-zA-Z]:[\\/][^\r\n"']+/);
+    if (drivePath) {
+      return drivePath[0].trim().replace(/[.。]+$/, "");
+    }
+
+    if (/\bdownloads?\b/i.test(text)) {
+      return "~/Downloads";
+    }
+    if (/\bdesktop\b/i.test(text)) {
+      return "~/Desktop";
+    }
+    if (/\bdocuments?\b/i.test(text)) {
+      return "~/Documents";
+    }
+    if (/\bhome\b/i.test(text)) {
+      return "~";
+    }
+
+    const afterPhrase = text.match(/(?:path|file|folder|directory)\s+(.+)$/i);
+    if (afterPhrase?.[1]) {
+      return afterPhrase[1].trim().replace(/[.。]+$/, "");
+    }
+
+    return fallback;
+  }
+
+  extractBrowserUrl(message) {
+    const text = String(message || "").trim();
+    const quoted = text.match(/["']([^"']+)["']/);
+    if (quoted) {
+      return this.normalizeBrowserUrl(quoted[1]);
+    }
+    const url = text.match(/https?:\/\/[^\s"'<>]+/i);
+    if (url) {
+      return this.normalizeBrowserUrl(url[0]);
+    }
+    const domain = text.match(/\b([a-z0-9-]+(?:\.[a-z0-9-]+)+)(?:\/[^\s"'<>]*)?/i);
+    if (domain) {
+      return this.normalizeBrowserUrl(domain[0]);
+    }
+    if (/\bgoogle\b/i.test(text)) {
+      return "https://www.google.com";
+    }
+    if (/\bgithub\b/i.test(text)) {
+      return "https://github.com";
+    }
+    if (/\byoutube\b/i.test(text)) {
+      return "https://www.youtube.com";
+    }
+    return "http://localhost:3147/";
+  }
+
+  normalizeBrowserUrl(value) {
+    const text = String(value || "").trim().replace(/[.。]+$/, "");
+    if (!text) {
+      return "http://localhost:3147/";
+    }
+    return /^https?:\/\//i.test(text) ? text : `https://${text}`;
+  }
+
   extractWriteRequest(message) {
     const quoted = [...message.matchAll(/["']([^"']+)["']/g)].map((match) => match[1]);
     const append = message.toLowerCase().includes("append file");
@@ -811,9 +937,21 @@ JSON:`;
       return quoted[1];
     }
 
-    return message
-      .replace(/research|search web|look up|find on web/gi, "")
-      .trim() || message;
+    const cleaned = String(message || "")
+      .replace(/research|reasearch|search web|look up|find on web/gi, "")
+      .replace(/\b(karo|kar|ke baare mein|ke bare mein|ka bara ma|ke bara ma|about)\b/gi, "")
+      .replace(/[^\p{L}\p{N}\s._-]/gu, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    const normalized = cleaned.toLowerCase();
+    const tokens = normalized.split(/\s+/).filter(Boolean);
+    const mostlyAiNoise =
+      /\bai\b/i.test(cleaned) &&
+      tokens.every((token) => ["ai", "ki", "i", "kisi", "koi", "ek", "ik"].includes(token));
+    if (mostlyAiNoise) {
+      return "artificial intelligence";
+    }
+    return cleaned || message;
   }
 
   extractComputerSearchQuery(message) {
@@ -822,9 +960,17 @@ JSON:`;
       return quoted[1].trim();
     }
 
-    return String(message || "")
+    const raw = String(message || "");
+    const targetFileMatch =
+      raw.match(/\bkoi\s+([a-zA-Z0-9._ -]{2,80}?)\s+(?:ki\s+)?(?:file|folder)\b/i) ||
+      raw.match(/\b([a-zA-Z0-9._-]{2,80})\s+(?:ki\s+)?(?:file|folder)\b/i);
+    if (targetFileMatch?.[1]) {
+      return targetFileMatch[1].trim();
+    }
+
+    return raw
       .replace(/search file|find file|search laptop|search computer|laptop ki files|puri laptop ki files|pura laptop|puri laptop/gi, "")
-      .replace(/\b(file|folder|naam|name|dhund|dhoond|search|find|kar|karo|me|mein|ma)\b/gi, "")
+      .replace(/\b(file|folder|naam|name|dhund|dhoond|search|find|check|cheack|dekh|dakh|kar|karo|mara|mera|mere|meri|par|ha|hai|koi|ki|ka|ke|laptop|computer|pc|me|mein|ma)\b/gi, "")
       .replace(/\s+/g, " ")
       .trim() || "omniclaw";
   }
@@ -930,6 +1076,28 @@ JSON:`;
       providerMode,
       model: modelMatch ? modelMatch[1] : "",
     };
+  }
+
+  extractProviderModelsRequest(message) {
+    const lowered = String(message || "").toLowerCase();
+    const profiles = [
+      "openai",
+      "openrouter",
+      "nvidia",
+      "minimax",
+      "anthropic",
+      "gemini",
+      "groq",
+      "mistral",
+      "deepseek",
+      "together",
+      "fireworks",
+      "ollama",
+      "local-compatible",
+      "codex-cli",
+    ];
+    const profileId = profiles.find((profile) => lowered.includes(profile));
+    return profileId ? { profileId } : {};
   }
 
   extractShellCommand(message) {

@@ -150,6 +150,139 @@ const HERMES_COMPAT_TOOLS = [
   { id: "mixture_of_agents", toolset: "moa", status: "partial", omniclawTool: "subagents/delegate_task" },
 ];
 
+const LIMITED_PRODUCT_TOOLS = {
+  browser_vision: {
+    status: "partial",
+    replacement: "browser_screenshot",
+    reason: "Captures screenshots, but image interpretation needs a vision provider.",
+  },
+  browser_console: {
+    status: "partial",
+    replacement: "browser_snapshot",
+    reason: "Console extraction needs a hardened Playwright/CDP adapter.",
+  },
+  browser_cdp: {
+    status: "partial",
+    replacement: "browser",
+    reason: "Raw CDP execution needs a hardened browser adapter.",
+  },
+  browser_dialog: {
+    status: "partial",
+    replacement: "browser",
+    reason: "Dialog accept/dismiss support is not wired yet.",
+  },
+  skill_manage: {
+    status: "partial",
+    replacement: "create_skill",
+    reason: "Hermes-style self-editing skill management needs diff/review before writes.",
+  },
+  clarify: {
+    status: "partial",
+    replacement: "assistant_followup",
+    reason: "Clarification should be a chat question, not a model-callable fake tool.",
+  },
+  mixture_of_agents: {
+    status: "partial",
+    replacement: "delegate_task",
+    reason: "Full MoA orchestration is not built; delegate_task is the concrete backend.",
+  },
+  computer_use: {
+    status: "partial",
+    replacement: "computer_access_status",
+    reason: "Computer-use is a status bundle; concrete actions use terminal/browser/file tools.",
+  },
+  text_to_speech: {
+    status: "placeholder",
+    replacement: "",
+    reason: "TTS provider plugin is not configured.",
+  },
+  image_generate: {
+    status: "placeholder",
+    replacement: "",
+    reason: "Image generation provider plugin is not configured.",
+  },
+  music_generate: {
+    status: "placeholder",
+    replacement: "",
+    reason: "Music generation provider plugin is not configured.",
+  },
+  video_generate: {
+    status: "placeholder",
+    replacement: "",
+    reason: "Video generation provider plugin is not configured.",
+  },
+  tts: {
+    status: "placeholder",
+    replacement: "",
+    reason: "TTS provider plugin is not configured.",
+  },
+  ha_list_entities: {
+    status: "placeholder",
+    replacement: "",
+    reason: "Home Assistant connector is not configured.",
+  },
+  ha_get_state: {
+    status: "placeholder",
+    replacement: "",
+    reason: "Home Assistant connector is not configured.",
+  },
+  ha_list_services: {
+    status: "placeholder",
+    replacement: "",
+    reason: "Home Assistant connector is not configured.",
+  },
+  ha_call_service: {
+    status: "placeholder",
+    replacement: "",
+    reason: "Home Assistant connector is not configured.",
+  },
+  kanban_show: {
+    status: "placeholder",
+    replacement: "list_tasks",
+    reason: "Kanban board orchestration is not wired yet.",
+  },
+  kanban_list: {
+    status: "placeholder",
+    replacement: "list_tasks",
+    reason: "Kanban board orchestration is not wired yet.",
+  },
+  kanban_complete: {
+    status: "placeholder",
+    replacement: "run_task",
+    reason: "Kanban board orchestration is not wired yet.",
+  },
+  kanban_block: {
+    status: "placeholder",
+    replacement: "create_task",
+    reason: "Kanban board orchestration is not wired yet.",
+  },
+  kanban_heartbeat: {
+    status: "placeholder",
+    replacement: "cron",
+    reason: "Kanban board orchestration is not wired yet.",
+  },
+  kanban_comment: {
+    status: "placeholder",
+    replacement: "create_task",
+    reason: "Kanban board orchestration is not wired yet.",
+  },
+  kanban_create: {
+    status: "placeholder",
+    replacement: "create_task",
+    reason: "Kanban board orchestration is not wired yet.",
+  },
+  kanban_link: {
+    status: "placeholder",
+    replacement: "create_task",
+    reason: "Kanban board orchestration is not wired yet.",
+  },
+  kanban_unblock: {
+    status: "placeholder",
+    replacement: "run_task",
+    reason: "Kanban board orchestration is not wired yet.",
+  },
+};
+
 export class ToolRegistry {
   constructor({
     memoryStore,
@@ -472,13 +605,17 @@ export class ToolRegistry {
         run: async (_, context) => {
           const agentId = this.getAgentId(context);
           const tools = this.getAll({ agentId });
+          const productReadyTools = tools.filter((tool) => tool.productReady !== false);
+          const limitedTools = tools.filter((tool) => tool.productReady === false);
           const skills = this.agentRegistry
             ? this.agentRegistry.filterSkills(this.customizationEngine?.skillRegistry?.getAll?.() || [], agentId)
             : [];
-          const toolIds = tools.map((tool) => tool.id);
+          const toolIds = productReadyTools.map((tool) => tool.id);
           return {
             agentId,
             toolCount: tools.length,
+            productReadyToolCount: productReadyTools.length,
+            limitedToolCount: limitedTools.length,
             skillCount: skills.length,
             coreTools: toolIds.filter((id) => [
               "exec",
@@ -513,6 +650,12 @@ export class ToolRegistry {
               name: skill.name,
               triggers: skill.triggers,
             })),
+            limitedTools: limitedTools.slice(0, 24).map((tool) => ({
+              id: tool.id,
+              status: tool.runtimeStatus,
+              replacement: tool.replacement,
+              reason: tool.readinessReason,
+            })),
             demos: [
               "Ask: 'laptop status check karo' -> computer_system_status runs.",
               "Ask: 'list files' or 'read file README.md' -> filesystem tools run.",
@@ -522,6 +665,15 @@ export class ToolRegistry {
             ],
           };
         },
+      },
+      real_task_health: {
+        description: "Run a product-grade real-task health probe across tools, skills, provider, files, terminal, browser, memory, and model routing.",
+        permission: null,
+        group: "runtime",
+        run: async (input = {}, context) => this.getRealTaskHealth({
+          live: input.live !== false,
+          context,
+        }),
       },
       layer_status: {
         description: "Report OmniClaw's OpenClaw-style layer 1-5 architecture status, gaps, and next upgrades.",
@@ -2050,6 +2202,26 @@ export class ToolRegistry {
       }));
   }
 
+  getProductToolMetadata(id, tool = {}) {
+    const limited = LIMITED_PRODUCT_TOOLS[id];
+    if (!limited) {
+      return {
+        runtimeStatus: "ready",
+        productReady: true,
+        modelCallable: true,
+        replacement: "",
+        readinessReason: "Backend is wired.",
+      };
+    }
+    return {
+      runtimeStatus: limited.status,
+      productReady: false,
+      modelCallable: false,
+      replacement: limited.replacement || "",
+      readinessReason: limited.reason || "Backend is not production-ready yet.",
+    };
+  }
+
   getAll(context = {}) {
     const normalized = normalizeContext(context);
     const tools = [
@@ -2057,9 +2229,18 @@ export class ToolRegistry {
         id,
         description: tool.description,
         permission: tool.permission,
+        group: tool.group || "",
+        ...this.getProductToolMetadata(id, tool),
       })),
-      ...this.pluginRegistry.getToolDefinitions(),
-    ];
+      ...this.pluginRegistry.getToolDefinitions().map((tool) => ({
+        ...tool,
+        runtimeStatus: "plugin",
+        productReady: true,
+        modelCallable: true,
+        replacement: "",
+        readinessReason: "Plugin tool is registered.",
+      })),
+    ].filter((tool) => !(normalized.productMode || normalized.modelCallableOnly) || tool.modelCallable !== false);
 
     if (normalized.includeAllAgents || !this.agentRegistry) {
       return tools;
@@ -2198,6 +2379,179 @@ export class ToolRegistry {
         { id: "skills", tools: ["skills_list", "skill_view", "skill_manage"] },
       ],
       rule: "OmniClaw keeps its working tools and exposes Hermes-compatible aliases/adapters. Python-only Hermes backends stay placeholders until safely ported.",
+    };
+  }
+
+  async getRealTaskHealth({ live = true, context = {} } = {}) {
+    const agentId = this.getAgentId(context);
+    const config = this.configStore.getConfig();
+    const tools = this.getAll({ agentId });
+    const productReadyTools = tools.filter((tool) => tool.productReady !== false);
+    const limitedTools = tools.filter((tool) => tool.productReady === false);
+    const toolIds = new Set(tools.map((tool) => tool.id));
+    const skills = this.agentRegistry
+      ? this.agentRegistry.filterSkills(this.customizationEngine?.skillRegistry?.getAll?.() || [], agentId)
+      : [];
+    const provider = this.agentRuntime?.getProviderInfo?.() || {};
+    const permissions = config.tools?.permissions || {};
+    const hermesCatalog = this.getHermesToolCatalog({});
+    const requiredTools = {
+      files: ["list_files", "read_file", "write_file", "apply_patch"],
+      computer: ["list_computer_directory", "search_computer_files", "read_computer_file", "write_computer_file", "delete_computer_path"],
+      terminal: ["run_terminal_command", "exec", "process", "code_execution"],
+      browser: ["browser_navigate", "browser_snapshot", "browser_text", "browser_screenshot"],
+      web: ["web_research", "web_search", "read_url", "web_fetch"],
+      memory: ["remember_note", "memory_search", "list_long_term_memory", "promote_memory"],
+      skills: ["capability_demo", "create_skill", "hermes_skill_scan", "skill_system_status"],
+      sessions: ["sessions_list", "sessions_history", "sessions_send", "delegate_task"],
+      automation: ["cron", "list_tasks", "create_task", "run_task"],
+      provider: ["provider_status", "list_provider_models", "test_provider_profile", "apply_provider_profile"],
+    };
+    const groups = Object.entries(requiredTools).map(([group, ids]) => {
+      const present = ids.filter((id) => toolIds.has(id));
+      return {
+        group,
+        status: present.length === ids.length ? "ready" : present.length > 0 ? "partial" : "missing",
+        present,
+        missing: ids.filter((id) => !toolIds.has(id)),
+      };
+    });
+
+    const probes = [];
+    const addProbe = (name, status, detail = "", extra = {}) => {
+      probes.push({ name, status, detail, ...extra });
+    };
+
+    try {
+      const entries = this.fileStore.listDirectory(".");
+      addProbe("workspace_files", "ready", `${entries.length} workspace item(s) visible.`);
+    } catch (error) {
+      addProbe("workspace_files", "failed", error.message);
+    }
+
+    try {
+      const home = this.fileStore.listComputerDirectory("~", this.requireComputerAccessPolicy());
+      addProbe("computer_home", "ready", `${home.entries.length} home folder item(s) visible.`, {
+        path: home.path,
+        sample: home.entries.slice(0, 6).map((entry) => entry.name),
+      });
+    } catch (error) {
+      addProbe("computer_home", "failed", error.message);
+    }
+
+    try {
+      const system = await this.systemMonitor.getComputerStatus();
+      addProbe("system_status", "ready", `RAM ${system.memory?.freeGb || "?"}/${system.memory?.totalGb || "?"} GB free/total.`);
+    } catch (error) {
+      addProbe("system_status", "failed", error.message);
+    }
+
+    if (live && this.agentRuntime?.executeTerminalCommand && permissions.allowShellExecution) {
+      try {
+        const execution = await this.agentRuntime.executeTerminalCommand({
+          command: "Get-Date",
+          context: {
+            ...context,
+            agentId,
+            source: "real-task-health",
+          },
+        });
+        addProbe(
+          "terminal_execution",
+          execution.status === "completed" ? "ready" : execution.status || "failed",
+          execution.status === "completed"
+            ? String(execution.stdout || "").trim().slice(0, 160)
+            : String(execution.stderr || execution.reason || "").slice(0, 220),
+        );
+      } catch (error) {
+        addProbe("terminal_execution", "failed", error.message);
+      }
+    } else {
+      addProbe("terminal_execution", permissions.allowShellExecution ? "skipped" : "disabled", "Live terminal probe skipped.");
+    }
+
+    try {
+      const browser = this.browserOperator.getStatus?.() || {};
+      addProbe(browser.available === false ? "browser_control" : "browser_control", browser.available === false ? "partial" : "ready", browser.message || "Browser operator registered.", {
+        status: browser,
+      });
+    } catch (error) {
+      addProbe("browser_control", "failed", error.message);
+    }
+
+    addProbe(
+      "provider_brain",
+      provider.ready === false ? "needs-setup" : "ready",
+      provider.ready === false
+        ? (provider.message || "Provider brain needs API/account setup.")
+        : `${provider.id || "provider"} ${provider.model || ""}`.trim(),
+    );
+
+    const readyCount = groups.filter((group) => group.status === "ready").length;
+    const partialCount = groups.filter((group) => group.status === "partial").length;
+    const failedProbeCount = probes.filter((probe) => ["failed", "needs-setup"].includes(probe.status)).length;
+    const placeholderCount = limitedTools.filter((tool) => tool.runtimeStatus === "placeholder").length;
+    const partialToolCount = limitedTools.filter((tool) => tool.runtimeStatus === "partial").length;
+    const callableRatio = productReadyTools.length / Math.max(1, tools.length);
+    const score = Math.max(0, Math.min(100, Math.round(
+      (readyCount / groups.length) * 55 +
+      ((groups.length - partialCount) / groups.length) * 10 +
+      ((probes.length - failedProbeCount) / Math.max(1, probes.length)) * 20 +
+      callableRatio * 15 -
+      Math.min(12, placeholderCount * 0.6) -
+      Math.min(6, partialToolCount * 0.35),
+    )));
+
+    return {
+      agentId,
+      productMode: true,
+      score,
+      provider: {
+        id: provider.id || "unknown",
+        mode: provider.mode || "",
+        model: provider.model || "",
+        ready: provider.ready !== false,
+        apiKeySource: provider.apiKeySource || "",
+      },
+      tools: {
+        total: tools.length,
+        productReady: productReadyTools.length,
+        limited: limitedTools.length,
+        placeholders: placeholderCount,
+        partial: partialToolCount,
+        groups,
+        hermesCompatibility: hermesCatalog.counts || {},
+        hiddenFromPlanner: limitedTools.slice(0, 24).map((tool) => ({
+          id: tool.id,
+          status: tool.runtimeStatus,
+          replacement: tool.replacement,
+          reason: tool.readinessReason,
+        })),
+      },
+      skills: {
+        total: skills.length,
+        loaded: skills.slice(0, 12).map((skill) => ({
+          id: skill.id,
+          name: skill.name,
+          triggers: skill.triggers,
+        })),
+      },
+      probes,
+      recipes: [
+        { ask: "mara laptop par opencode file search karo", expectedTools: ["search_computer_files"] },
+        { ask: "list computer folder ~", expectedTools: ["list_computer_directory"] },
+        { ask: "read file docs/PRODUCT_VISION.md", expectedTools: ["read_file"] },
+        { ask: "run terminal command \"Get-Date\"", expectedTools: ["run_terminal_command"] },
+        { ask: "open browser https://github.com", expectedTools: ["browser_navigate"] },
+        { ask: "fetch models nvidia", expectedTools: ["list_provider_models"] },
+      ],
+      nextHardening: [
+        "Convert each placeholder Hermes tool into a working adapter or hide it from product UI until backend exists.",
+        "Add smoke tests for every high-value natural-language recipe, not just backend tool IDs.",
+        "Prefer grounded tool-output replies for filesystem, browser, terminal, and provider tasks.",
+        "Make provider model fetch/save/test one atomic flow in UI and chat.",
+      ],
+      rule: "Product mode means no fake success: every real task must show executed tool evidence, failure reason, or next fix.",
     };
   }
 

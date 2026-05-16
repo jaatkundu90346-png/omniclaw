@@ -56,8 +56,11 @@ process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const runtimeDir = process.pkg ? process.cwd() : __dirname;
-const publicDir = path.join(runtimeDir, "public");
+const sourceDir = __dirname;
+const runtimeDir = process.pkg
+  ? process.cwd()
+  : path.resolve(process.env.OMNICLAW_ROOT_DIR || sourceDir);
+const publicDir = path.join(process.pkg ? runtimeDir : sourceDir, "public");
 
 const agent = new OmniClawAgent({
   rootDir: runtimeDir,

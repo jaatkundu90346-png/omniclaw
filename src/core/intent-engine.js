@@ -58,23 +58,43 @@ export class IntentEngine {
       intents.push("provider-status");
     }
 
-    if (
+    const mentionsAgentProject =
       lowered.includes("codex") ||
       lowered.includes("openclaw") ||
       lowered.includes("hermes") ||
       lowered.includes("omniclaw") ||
-      lowered.includes("v2") ||
+      lowered.includes("v2");
+    const asksAgentBuild =
       lowered.includes("weak") ||
       lowered.includes("kami") ||
       lowered.includes("improve") ||
       lowered.includes("upgrade") ||
+      lowered.includes("build karo") ||
       lowered.includes("khud ko build") ||
       lowered.includes("self build") ||
       lowered.includes("scratch build") ||
       lowered.includes("hands aur eyes") ||
-      lowered.includes("brain")
-    ) {
+      lowered.includes("frontend rebuild");
+    if ((mentionsAgentProject && asksAgentBuild) || lowered.includes("self build") || lowered.includes("scratch build")) {
       intents.push("self-build");
+    }
+
+    if (
+      lowered.includes("real task") ||
+      lowered.includes("real-task") ||
+      lowered.includes("product bna") ||
+      lowered.includes("product bana") ||
+      lowered.includes("product ready") ||
+      lowered.includes("tools skills") ||
+      lowered.includes("tools aur skills") ||
+      lowered.includes("skills tools") ||
+      lowered.includes("strong bna") ||
+      lowered.includes("strong bana") ||
+      lowered.includes("fake reply") ||
+      lowered.includes("actual kaam") ||
+      lowered.includes("sach me kaam")
+    ) {
+      intents.push("real-task-hardening");
     }
 
     if (
@@ -373,7 +393,10 @@ export class IntentEngine {
       lowered.includes("laptop ki files") ||
       lowered.includes("puri laptop ki files") ||
       lowered.includes("pura laptop") ||
-      lowered.includes("puri laptop")
+      lowered.includes("puri laptop") ||
+      /\b(?:check|cheack|dekh|dakh|dhund|dhoond|find|search)\b[\s\S]{0,80}\b(?:file|folder)\b[\s\S]{0,80}\b(?:laptop|computer|pc)\b/i.test(lowered) ||
+      /\b(?:laptop|computer|pc)\b[\s\S]{0,80}\b(?:file|folder)\b[\s\S]{0,80}\b(?:check|cheack|dekh|dakh|dhund|dhoond|find|search)\b/i.test(lowered) ||
+      /\bkoi\b[\s\S]{0,60}\b(?:file|folder)\b[\s\S]{0,80}\b(?:laptop|computer|pc)\b/i.test(lowered)
     ) {
       intents.push("computer-search");
     }
@@ -387,6 +410,20 @@ export class IntentEngine {
       lowered.includes("screenshot browser")
     ) {
       intents.push("browser-observe");
+    }
+
+    if (
+      lowered.includes("open browser") ||
+      lowered.includes("browser open") ||
+      lowered.includes("browser ma open") ||
+      lowered.includes("browser me open") ||
+      lowered.includes("website kholo") ||
+      lowered.includes("site kholo") ||
+      lowered.includes("url kholo") ||
+      lowered.includes("navigate browser") ||
+      /\bopen\s+https?:\/\//i.test(lowered)
+    ) {
+      intents.push("browser-navigate");
     }
 
     if (
@@ -406,6 +443,17 @@ export class IntentEngine {
       lowered.includes("file move")
     ) {
       intents.push("computer-move");
+    }
+
+    if (
+      lowered.includes("delete computer") ||
+      lowered.includes("delete laptop") ||
+      lowered.includes("delete file") ||
+      lowered.includes("remove file") ||
+      lowered.includes("file delete") ||
+      lowered.includes("folder delete")
+    ) {
+      intents.push("computer-delete");
     }
 
     if (
@@ -490,10 +538,11 @@ export class IntentEngine {
       intents.push("planning");
     }
 
-    if (
+    const mentionsPackageJson = /\bpackage\.json\b/i.test(lowered);
+    if (!mentionsPackageJson && (
       /\b(build|rebuild|package|portable build|exe|release zip)\b/i.test(lowered) ||
       /\b(build|banao|bnao|package|exe)\s*(karo|kar|bana|bna)\b/i.test(lowered)
-    ) {
+    )) {
       intents.push("project-build");
     }
 
@@ -515,16 +564,26 @@ export class IntentEngine {
       lowered.includes("show file") ||
       lowered.startsWith("read ")
     ) {
-      intents.push("file-read");
+      if (/\b(?:laptop|computer|pc|desktop|downloads|documents)\b/i.test(lowered) || /[a-z]:[\\/]/i.test(message)) {
+        intents.push("computer-file-read");
+      } else {
+        intents.push("file-read");
+      }
     }
 
     if (
       lowered.includes("list files") ||
       lowered.includes("show files") ||
       lowered.includes("list folder") ||
-      lowered.includes("list directory")
+      lowered.includes("list directory") ||
+      /\blist\b[\s\S]{0,40}\bfiles\b/.test(lowered) ||
+      /\blist\b[\s\S]{0,60}\b(?:folder|directory)\b/.test(lowered)
     ) {
-      intents.push("file-list");
+      if (/\b(?:laptop|computer|pc|desktop|downloads|documents|home folder)\b/i.test(lowered) || /[a-z]:[\\/]/i.test(message)) {
+        intents.push("computer-directory-list");
+      } else {
+        intents.push("file-list");
+      }
     }
 
     if (
@@ -538,6 +597,7 @@ export class IntentEngine {
 
     if (
       lowered.includes("research") ||
+      lowered.includes("reasearch") ||
       lowered.includes("search web") ||
       lowered.includes("look up") ||
       lowered.includes("find on web")
@@ -568,6 +628,19 @@ export class IntentEngine {
       lowered.includes("change runtime")
     ) {
       intents.push("config-update");
+    }
+
+    if (
+      lowered.includes("fetch model") ||
+      lowered.includes("fetch models") ||
+      lowered.includes("list model") ||
+      lowered.includes("list models") ||
+      lowered.includes("available model") ||
+      lowered.includes("model choose") ||
+      lowered.includes("model chose") ||
+      lowered.includes("model select")
+    ) {
+      intents.push("provider-model-list");
     }
 
     if (lowered.includes("plugin echo")) {

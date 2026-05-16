@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -7,7 +8,27 @@ const port = Number(process.env.CHAT_SMOKE_PORT || 3267 + Math.floor(Math.random
 const timeoutMs = 45_000;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
-const profilePath = path.join(rootDir, "workspace", "agents", "main", "PROFILE.md");
+const smokeRootDir = fs.mkdtempSync(path.join(os.tmpdir(), "omniclaw-chat-smoke-"));
+const profilePath = path.join(smokeRootDir, "workspace", "agents", "main", "PROFILE.md");
+
+function copySmokeRuntime() {
+  for (const file of ["package.json", "package-lock.json", "server.js"]) {
+    const source = path.join(rootDir, file);
+    if (fs.existsSync(source)) {
+      fs.copyFileSync(source, path.join(smokeRootDir, file));
+    }
+  }
+  for (const dir of ["config", "public", "scripts", "src", "workspace", "plugins"]) {
+    const source = path.join(rootDir, dir);
+    if (fs.existsSync(source)) {
+      fs.cpSync(source, path.join(smokeRootDir, dir), {
+        recursive: true,
+        force: true,
+        filter: (sourcePath) => !sourcePath.includes(`${path.sep}node_modules${path.sep}`),
+      });
+    }
+  }
+}
 
 function waitForServerReady(child) {
   return new Promise((resolve, reject) => {
@@ -70,9 +91,14 @@ function assertToolSummaries(toolOutputs, label) {
 
 async function run() {
   const suffix = Date.now().toString(36);
-  const originalProfile = fs.existsSync(profilePath) ? fs.readFileSync(profilePath, "utf8") : null;
+  copySmokeRuntime();
   const child = spawn(process.execPath, ["server.js"], {
-    env: { ...process.env, PORT: String(port), OMNICLAW_DISABLE_USER_CONFIG: "1" },
+    env: {
+      ...process.env,
+      PORT: String(port),
+      OMNICLAW_DISABLE_USER_CONFIG: "1",
+      OMNICLAW_ROOT_DIR: smokeRootDir,
+    },
     stdio: ["ignore", "pipe", "pipe"],
   });
 
@@ -114,6 +140,55 @@ async function run() {
       "test karo build command should complete.",
     );
     assertToolSummaries(task.toolOutputs, "test request");
+
+    const terminalRun = await postChat('run terminal command "Get-Date"', `chat-smoke-terminal-run-${suffix}`);
+    assert(
+      terminalRun.toolOutputs.some((item) => item.tool === "run_terminal_command"),
+      "terminal command request should execute run_terminal_command.",
+    );
+    assert(
+      terminalRun.toolOutputs.some((item) => item.output?.execution?.status === "completed" || item.output?.status === "completed"),
+      "terminal command should complete through governed execution.",
+    );
+    assertToolSummaries(terminalRun.toolOutputs, "terminal command request");
+
+    const computerList = await postChat("list computer folder home", `chat-smoke-computer-list-${suffix}`);
+    assert(
+      computerList.toolOutputs.some((item) => item.tool === "list_computer_directory"),
+      "computer folder listing should execute list_computer_directory.",
+    );
+    assertToolSummaries(computerList.toolOutputs, "computer folder list request");
+
+    const modelList = await postChat("fetch models", `chat-smoke-model-list-${suffix}`);
+    assert(
+      modelList.toolOutputs.some((item) => item.tool === "list_provider_models"),
+      "model fetch request should execute list_provider_models.",
+    );
+    assertToolSummaries(modelList.toolOutputs, "provider model list request");
+
+    const realTask = await postChat("real task strong bna tools aur skills product ready karo", `chat-smoke-real-task-${suffix}`);
+    assert(
+      realTask.toolOutputs.some((item) => item.tool === "real_task_health"),
+      "real-task hardening request should execute real_task_health.",
+    );
+    assert(
+      realTask.reply.includes("Real-task health"),
+      "real-task hardening reply should summarize live tool health.",
+    );
+    const healthOutput = realTask.toolOutputs.find((item) => item.tool === "real_task_health")?.output || {};
+    assert(
+      healthOutput.tools?.limited > 0,
+      "real-task health should report limited/placeholder tools instead of hiding product debt.",
+    );
+    assert(
+      healthOutput.tools?.productReady < healthOutput.tools?.total,
+      "real-task health should distinguish product-ready tools from cataloged compatibility tools.",
+    );
+    assert(
+      healthOutput.score < 100,
+      "real-task health score should not be perfect while placeholders remain.",
+    );
+    assertToolSummaries(realTask.toolOutputs, "real-task hardening request");
 
     const selfBuild = await postChat(
       "Codex plus OpenClaw combine karke OmniClaw self build plan",
@@ -269,11 +344,7 @@ async function run() {
     console.log("Chat agent smoke test passed");
   } finally {
     child.kill("SIGTERM");
-    if (originalProfile == null) {
-      fs.rmSync(profilePath, { force: true });
-    } else {
-      fs.writeFileSync(profilePath, originalProfile, "utf8");
-    }
+    fs.rmSync(smokeRootDir, { recursive: true, force: true });
   }
 }
 

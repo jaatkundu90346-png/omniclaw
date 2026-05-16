@@ -88,9 +88,49 @@ function compactTool(tool) {
 }
 
 function compactToolOutput(item) {
+  const output = item.output || {};
+  if ((item.tool === "list_files" || item.tool === "list_computer_directory") && Array.isArray(output.entries)) {
+    const entries = output.entries.map((entry) => ({
+      name: entry.name || "",
+      type: entry.type || "",
+    }));
+    const names = entries.map((entry) => entry.name).filter(Boolean);
+    return {
+      tool: item.tool || "unknown",
+      output: {
+        path: output.path || ".",
+        entryCount: entries.length,
+        names,
+        entries: entries.slice(0, 120),
+        omittedEntries: Math.max(0, entries.length - 120),
+        containsPackageJson: names.includes("package.json"),
+      },
+    };
+  }
+
+  if (item.tool === "search_computer_files" && Array.isArray(output.results)) {
+    return {
+      tool: item.tool,
+      output: {
+        query: output.query || "",
+        roots: output.roots || [],
+        resultCount: output.results.length,
+        timedOut: Boolean(output.timedOut),
+        scannedDirectories: output.scannedDirectories || 0,
+        results: output.results.slice(0, 80).map((entry) => ({
+          name: entry.name || "",
+          path: entry.path || "",
+          type: entry.type || "",
+          size: entry.size || null,
+        })),
+        omittedResults: Math.max(0, output.results.length - 80),
+      },
+    };
+  }
+
   return {
     tool: item.tool || "unknown",
-    output: compactValue(item.output, {
+    output: compactValue(output, {
       maxString: 1200,
       maxArray: 10,
       maxDepth: 4,

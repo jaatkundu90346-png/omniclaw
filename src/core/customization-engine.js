@@ -200,6 +200,7 @@ export class CustomizationEngine {
       appTitle: String(input.appTitle || profile?.appTitle || config.provider.appTitle || config.app?.name || "").trim(),
       codexCommand: String(pick("codexCommand", "codex")).trim(),
       codexSandbox: String(pick("codexSandbox", "read-only")).trim(),
+      timeoutMs: Number(input.timeoutMs || profile?.timeoutMs || config.provider.timeoutMs || 45000),
     };
     this.validateProviderProfile(profileId || "ad-hoc", candidate);
     const keyStatus = this.secretStore.getProviderKeyStatus(candidate.apiKeyProviderId || "openai");
@@ -284,6 +285,7 @@ export class CustomizationEngine {
       apiKeyProviderId: String(input.apiKeyProviderId || profile?.apiKeyProviderId || config.provider.apiKeyProviderId || "").trim(),
       httpReferer: String(input.httpReferer || profile?.httpReferer || config.provider.httpReferer || "").trim(),
       appTitle: String(input.appTitle || profile?.appTitle || config.provider.appTitle || config.app?.name || "").trim(),
+      timeoutMs: Number(input.timeoutMs || profile?.timeoutMs || config.provider.timeoutMs || 45000),
     };
     if (candidate.mode === "mock") {
       return {

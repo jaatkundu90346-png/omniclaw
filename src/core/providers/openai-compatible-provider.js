@@ -25,6 +25,30 @@ function compactJson(value, maxChars = 4000) {
   return truncateText(JSON.stringify(value || null, null, 2), maxChars);
 }
 
+function normalizeModelList(data) {
+  const rawModels = Array.isArray(data)
+    ? data
+    : Array.isArray(data?.data)
+      ? data.data
+      : Array.isArray(data?.models)
+        ? data.models
+        : Array.isArray(data?.items)
+          ? data.items
+          : [];
+  return rawModels
+    .map((item) => {
+      if (typeof item === "string") {
+        return { id: item, ownedBy: "" };
+      }
+      return {
+        id: item?.id || item?.name || item?.model || "",
+        ownedBy: item?.owned_by || item?.ownedBy || item?.provider || "",
+        created: item?.created || item?.created_at || null,
+      };
+    })
+    .filter((item) => item.id);
+}
+
 function summarizeToolOutputs(toolOutputs = []) {
   if (!Array.isArray(toolOutputs) || toolOutputs.length === 0) {
     return "No runtime tools executed.";
@@ -146,6 +170,7 @@ export class OpenAICompatibleProvider {
         apiKeyProviderId: input.apiKeyProviderId || config.provider.apiKeyProviderId,
         httpReferer: input.httpReferer || config.provider.httpReferer,
         appTitle: input.appTitle || config.provider.appTitle,
+        timeoutMs: input.timeoutMs || config.provider.timeoutMs,
       },
     };
     const apiKey = this.getResolvedApiKey(providerConfig);
@@ -213,6 +238,7 @@ export class OpenAICompatibleProvider {
         ...config.provider,
         baseUrl: input.baseUrl || config.provider.baseUrl,
         apiKeyProviderId: input.apiKeyProviderId || config.provider.apiKeyProviderId,
+        timeoutMs: input.timeoutMs || config.provider.timeoutMs,
       },
     };
     const apiKey = String(input.apiKey || "").trim() || this.getResolvedApiKey(providerConfig);
@@ -250,18 +276,62 @@ export class OpenAICompatibleProvider {
     }
 
     const data = await response.json();
-    const models = Array.isArray(data.data)
-      ? data.data.map((item) => ({
-          id: item.id || item.name || "",
-          ownedBy: item.owned_by || item.ownedBy || "",
-          created: item.created || null,
-        })).filter((item) => item.id)
-      : [];
+    const models = normalizeModelList(data);
     return {
       ok: true,
       endpoint: this.getModelsUrl(providerConfig),
       models,
       count: models.length,
+    };
+  }
+
+  async complete(messages = [], input = {}) {
+    const config = this.configStore.getConfig();
+    const providerConfig = {
+      ...config,
+      provider: {
+        ...config.provider,
+        baseUrl: input.baseUrl || config.provider.baseUrl,
+        model: input.model || config.provider.model,
+        apiKeyProviderId: input.apiKeyProviderId || config.provider.apiKeyProviderId,
+        httpReferer: input.httpReferer || config.provider.httpReferer,
+        appTitle: input.appTitle || config.provider.appTitle,
+        timeoutMs: input.timeoutMs || config.provider.timeoutMs,
+      },
+    };
+    const apiKey = String(input.apiKey || "").trim() || this.getResolvedApiKey(providerConfig);
+    if (!apiKey) {
+      throw new Error(`API key missing for ${providerConfig.provider.apiKeyProviderId || providerConfig.provider.apiKeyEnv}.`);
+    }
+
+    let response;
+    try {
+      response = await fetchWithTimeout(this.getChatCompletionsUrl(providerConfig), {
+        method: "POST",
+        headers: this.getHeaders(providerConfig, apiKey),
+        body: JSON.stringify({
+          model: providerConfig.provider.model,
+          temperature: Number(input.temperature ?? 0),
+          max_tokens: Number(input.maxTokens || providerConfig.provider.plannerMaxTokens || 700),
+          stream: false,
+          messages: Array.isArray(messages) ? messages : [],
+        }),
+      }, Number(providerConfig.provider.timeoutMs || 45000));
+    } catch (error) {
+      throw new Error(`Provider planner request failed: ${error.message}`);
+    }
+
+    if (!response.ok) {
+      throw new Error(`Provider planner request failed with ${await this.parseProviderError(response)}`);
+    }
+
+    const data = await response.json();
+    const text = data.choices?.[0]?.message?.content || "";
+    return {
+      text,
+      model: data.model || providerConfig.provider.model,
+      usage: data.usage || null,
+      raw: data,
     };
   }
 
@@ -310,6 +380,8 @@ export class OpenAICompatibleProvider {
                   "",
                   "Tool observations:",
                   compactJson(context.contextBundle?.toolOutputs || context.toolOutputs || [], 5000),
+                  "Tool observations are ground truth. If a list_files/list_computer_directory observation includes names or containsPackageJson, answer from that evidence instead of guessing from a truncated preview.",
+                  "Never claim a tool ran unless its tool id appears in Tool observations. If a tool failed, say it failed. For laptop/local file questions, web_search/web_research cannot prove local files exist or do not exist.",
                   "",
                   "Memory/context summary:",
                   compactJson(

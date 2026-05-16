@@ -14,6 +14,9 @@ const globalSearchInput = document.querySelector("#global-search");
 const topbarOverviewButton = document.querySelector("#topbar-overview");
 const topbarDensityButton = document.querySelector("#topbar-density");
 const topbarThemeButton = document.querySelector("#topbar-theme");
+const railToggleButton = document.querySelector("#rail-toggle");
+const topbarRailToggleButton = document.querySelector("#topbar-rail-toggle");
+const computerPanelToggleButton = document.querySelector("#computer-panel-toggle");
 const stateOutput = document.querySelector("#state-output");
 const refreshStateButton = document.querySelector("#refresh-state");
 const refreshInspectorButton = document.querySelector("#refresh-inspector");
@@ -42,6 +45,13 @@ const providerBaseUrlInput = document.querySelector("#provider-base-url");
 const providerModelSetupInput = document.querySelector("#provider-model-setup");
 const providerModelList = document.querySelector("#provider-model-list");
 const providerFetchModelsButton = document.querySelector("#provider-fetch-models");
+const providerFetchModelsQuickButton = document.querySelector("#provider-fetch-models-quick");
+const providerTestQuickButton = document.querySelector("#provider-test-quick");
+const providerModelPicker = document.querySelector("#provider-model-picker");
+const providerModelCount = document.querySelector("#provider-model-count");
+const providerSelectedLabel = document.querySelector("#provider-selected-label");
+const providerSelectedMeta = document.querySelector("#provider-selected-meta");
+const providerQuickStatus = document.querySelector("#provider-quick-status");
 const providerChatEndpoint = document.querySelector("#provider-chat-endpoint");
 const providerModelsEndpoint = document.querySelector("#provider-models-endpoint");
 const designBridgeForm = document.querySelector("#design-bridge-form");
@@ -190,6 +200,23 @@ const railHealth = document.querySelector("#rail-health");
 const sessionContext = document.querySelector("#session-context");
 const toolOutput = document.querySelector("#tool-output");
 
+const PROVIDER_MODEL_SUGGESTIONS = {
+  openai: ["gpt-4o-mini", "gpt-4o", "gpt-4.1-mini", "gpt-4.1"],
+  openrouter: ["openai/gpt-4o-mini", "anthropic/claude-3.7-sonnet", "google/gemini-2.5-flash", "z-ai/glm-4.5"],
+  nvidia: ["z-ai/glm-5.1", "nvidia/llama-3.1-nemotron-70b-instruct", "meta/llama-3.1-405b-instruct"],
+  minimax: ["MiniMax-M2.7", "minimax/minimax-m2.7", "MiniMax-Text-01"],
+  anthropic: ["claude-3-7-sonnet-latest", "claude-3-5-sonnet-latest", "claude-3-5-haiku-latest"],
+  gemini: ["gemini-1.5-pro", "gemini-1.5-flash", "gemini-2.0-flash"],
+  groq: ["llama-3.1-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768"],
+  mistral: ["mistral-small-latest", "mistral-large-latest", "codestral-latest"],
+  deepseek: ["deepseek-chat", "deepseek-reasoner"],
+  together: ["meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo", "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo"],
+  fireworks: ["accounts/fireworks/models/llama-v3p1-8b-instruct", "accounts/fireworks/models/deepseek-v3"],
+  ollama: ["llama3.1", "llama3.2", "qwen2.5-coder"],
+  "local-compatible": ["llama3.2", "qwen2.5-coder", "local-model"],
+  "codex-cli": ["account-default"],
+};
+
 let latestState = null;
 let latestGateway = null;
 let eventStream = null;
@@ -211,6 +238,7 @@ let activeChatController = null;
 let activeRunId = "";
 let activeRunEvents = [];
 let activeRunStartedAt = 0;
+const providerFetchedModelCache = new Map();
 
 function readStoredValue(key, fallback = "") {
   try {
@@ -901,6 +929,23 @@ function renderLiveRunTimeline(fallback = "No active run.") {
   }
   const elapsed = activeRunStartedAt ? Math.max(0, Math.round((Date.now() - activeRunStartedAt) / 1000)) : 0;
   const header = activeRunId ? `Live run ${activeRunId} | ${elapsed}s` : fallback;
+  const lastEvent = activeRunEvents.at(-1);
+  const lastPayload = lastEvent?.payload || {};
+  const liveMode = (() => {
+    const name = String(lastEvent?.event || "");
+    if (!activeRunId) return fallback;
+    if (name === "provider.started") return `Brain running ${lastPayload.model || ""}`.trim();
+    if (name === "provider.completed") return "Brain reply complete";
+    if (name === "provider.failed") return `Brain failed: ${lastPayload.reason || "provider error"}`;
+    if (name === "model_tool_loop.round_started") return `Choosing tools round ${lastPayload.round || ""}`.trim();
+    if (name === "model_tool_loop.tool_started" || name === "tool.started") return `Running ${lastPayload.tool || "tool"}`;
+    if (name === "model_tool_loop.tool_completed" || name === "tool.completed") return `Tool done: ${lastPayload.tool || "tool"}`;
+    if (name === "tool.failed") return `Tool failed: ${lastPayload.tool || "tool"}`;
+    if (name === "context.compacted") return "Building context";
+    if (name === "agent.completed") return "Task completed";
+    if (name === "agent.failed") return "Task failed";
+    return "Working";
+  })();
   const items = activeRunEvents.slice(-12).map((record) => {
     const payload = record.payload || {};
     const tool = payload.tool ? ` | ${payload.tool}` : "";
@@ -918,7 +963,7 @@ function renderLiveRunTimeline(fallback = "No active run.") {
     computerProgressCount.textContent = activeRunId ? `${items.length}/12` : "0/0";
   }
   if (computerModeStatus) {
-    computerModeStatus.textContent = activeRunId ? "Working with tools" : fallback;
+    computerModeStatus.textContent = liveMode;
   }
   if (computerUrlStatus) {
     computerUrlStatus.textContent = activeRunId ? `local://omniclaw/runs/${activeRunId}` : "local://omniclaw/task";
@@ -1065,11 +1110,136 @@ function syncRuntimeControls(state) {
   updateProviderProfileControls();
 }
 
+function providerDisplayName(profileId = "openai") {
+  return {
+    openai: "OpenAI",
+    openrouter: "OpenRouter",
+    nvidia: "NVIDIA NIM",
+    minimax: "MiniMax",
+    anthropic: "Anthropic",
+    gemini: "Gemini",
+    groq: "Groq",
+    mistral: "Mistral",
+    deepseek: "DeepSeek",
+    together: "Together",
+    fireworks: "Fireworks",
+    ollama: "Ollama",
+    "codex-cli": "Codex CLI",
+    "local-compatible": "Local compatible",
+  }[profileId] || profileId;
+}
+
+function modelIdFromItem(item) {
+  return typeof item === "string" ? item : item?.id || item?.name || "";
+}
+
+function providerModelCacheKey(profileId = "", providerId = "", baseUrl = "") {
+  return [
+    String(profileId || "").trim() || "openai",
+    String(providerId || "").trim() || "openai",
+    String(baseUrl || "").trim().replace(/\/+$/, ""),
+  ].join("|");
+}
+
+function getCurrentProviderModelCacheKey() {
+  const profileId = providerProfileInput?.value || "openai";
+  const preset = PROVIDER_PRESETS[profileId] || PROVIDER_PRESETS.openai;
+  return providerModelCacheKey(
+    profileId,
+    providerKeyIdInput?.value.trim() || preset.providerId,
+    providerBaseUrlInput?.value.trim() || preset.baseUrl || "",
+  );
+}
+
+function getCachedProviderModels() {
+  return providerFetchedModelCache.get(getCurrentProviderModelCacheKey()) || [];
+}
+
+function setCachedProviderModels(models = []) {
+  providerFetchedModelCache.set(getCurrentProviderModelCacheKey(), models);
+}
+
+function renderProviderModelDatalist(models = []) {
+  if (!providerModelList) {
+    return;
+  }
+  providerModelList.innerHTML = (models || [])
+    .slice(0, 1000)
+    .map((model) => `<option value="${escapeHtml(modelIdFromItem(model))}"></option>`)
+    .join("");
+}
+
+function populateProviderModelPicker(models = null, { preserve = true, preferFetched = false } = {}) {
+  if (!providerModelPicker) {
+    return;
+  }
+  const profileId = providerProfileInput?.value || "openai";
+  const preset = PROVIDER_PRESETS[profileId] || PROVIDER_PRESETS.openai;
+  const current = providerModelSetupInput?.value.trim() || preset.model || "";
+  const fetchedModels = models === null ? getCachedProviderModels() : models;
+  const fetchedModelIds = (fetchedModels || []).map(modelIdFromItem).filter(Boolean);
+  const starterModelIds = [current, preset.model, ...(PROVIDER_MODEL_SUGGESTIONS[profileId] || [])].filter(Boolean);
+  const hasFetchedModels = fetchedModelIds.length > 0;
+  const preferredFetchedModel = current && fetchedModelIds.includes(current)
+    ? current
+    : preset.model && fetchedModelIds.includes(preset.model)
+      ? preset.model
+      : fetchedModelIds[0] || "";
+  const suggestions = hasFetchedModels
+    ? [
+      preferredFetchedModel,
+      ...(preferFetched ? fetchedModelIds : [current, ...fetchedModelIds]),
+      ...starterModelIds,
+    ]
+    : starterModelIds;
+  const unique = [...new Set(suggestions.filter(Boolean))];
+  providerModelPicker.innerHTML = unique
+    .map((model) => `<option value="${escapeHtml(model)}">${escapeHtml(model)}</option>`)
+    .join("");
+  if (providerModelCount) {
+    providerModelCount.textContent = fetchedModelIds.length
+      ? `${fetchedModelIds.length} fetched`
+      : `${unique.length} starter`;
+  }
+  renderProviderModelDatalist(fetchedModels);
+  if (preserve && current && unique.includes(current)) {
+    providerModelPicker.value = current;
+  } else if (!preserve && preferFetched && preferredFetchedModel) {
+    providerModelPicker.value = preferredFetchedModel;
+    if (providerModelSetupInput) {
+      providerModelSetupInput.value = preferredFetchedModel;
+    }
+  } else if (unique[0]) {
+    providerModelPicker.value = unique[0];
+    if (providerModelSetupInput) {
+      providerModelSetupInput.value = unique[0];
+    }
+  } else {
+    providerModelPicker.innerHTML = `<option value="">No models available</option>`;
+  }
+}
+
 function updateProviderProfileControls() {
   const removeKeyInput = document.querySelector("#provider-remove-key");
   const profileId = providerProfileInput?.value || "openai";
   const preset = PROVIDER_PRESETS[profileId] || PROVIDER_PRESETS.openai;
   const isCodexCli = profileId === "codex-cli";
+  const providerId = providerKeyIdInput?.value.trim() || preset.providerId;
+  const model = providerModelSetupInput?.value.trim() || preset.model || "";
+  document.querySelectorAll("[data-provider-preset]").forEach((button) => {
+    const active = button.dataset.providerPreset === profileId;
+    button.classList.toggle("is-active", active);
+    button.toggleAttribute("aria-pressed", active);
+  });
+  if (providerSelectedLabel) {
+    providerSelectedLabel.textContent = providerDisplayName(profileId);
+  }
+  if (providerSelectedMeta) {
+    providerSelectedMeta.textContent = isCodexCli
+      ? "Uses your Codex CLI / OpenAI account login. Save to activate this bridge."
+      : `${providerId} | ${model || "choose a model"} | paste key once, then Save brain.`;
+  }
+  populateProviderModelPicker(null, { preserve: true });
   if (providerCodexHelp) {
     providerCodexHelp.hidden = !isCodexCli;
   }
@@ -1089,6 +1259,7 @@ function updateProviderProfileControls() {
   if (providerBaseUrlInput) providerBaseUrlInput.disabled = isCodexCli;
   if (providerModelSetupInput) providerModelSetupInput.disabled = isCodexCli;
   if (providerFetchModelsButton) providerFetchModelsButton.disabled = isCodexCli;
+  if (providerFetchModelsQuickButton) providerFetchModelsQuickButton.disabled = isCodexCli;
   if (removeKeyInput) {
     removeKeyInput.disabled = isCodexCli;
     if (isCodexCli) {
@@ -3164,14 +3335,32 @@ function readAttachmentMediaPolicy({ forceEnabled = false } = {}) {
   };
 }
 
-async function postJson(url, payload) {
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(payload),
-  });
+async function postJson(url, payload, options = {}) {
+  const timeoutMs = Number(options.timeoutMs || 0);
+  const controller = timeoutMs > 0 ? new AbortController() : null;
+  const timer = controller
+    ? setTimeout(() => controller.abort(), timeoutMs)
+    : null;
+  let response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+      signal: controller?.signal,
+    });
+  } catch (error) {
+    if (error.name === "AbortError") {
+      return { ok: false, error: `Request timed out after ${Math.round(timeoutMs / 1000)}s.` };
+    }
+    throw error;
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
   return response.json();
 }
 
@@ -3729,6 +3918,9 @@ async function testProviderReadiness() {
     return;
   }
   providerOutput.textContent = "Checking provider readiness...";
+  if (providerQuickStatus) {
+    providerQuickStatus.textContent = "Testing provider...";
+  }
   const profileId = providerProfileInput?.value || "openai";
   const preset = PROVIDER_PRESETS[profileId] || PROVIDER_PRESETS.openai;
   const providerId = providerKeyIdInput?.value.trim() || preset.providerId;
@@ -3738,8 +3930,14 @@ async function testProviderReadiness() {
     baseUrl: providerBaseUrlInput?.value.trim() || preset.baseUrl || "",
     model: providerModelSetupInput?.value.trim() || preset.model || "",
     live: true,
-  });
+    timeoutMs: 20000,
+  }, { timeoutMs: 25000 });
   providerOutput.textContent = formatJson(data);
+  if (providerQuickStatus) {
+    providerQuickStatus.textContent = data?.ok || data?.ready
+      ? "Provider test passed. Save brain if you have changed settings."
+      : "Provider test finished. Check output below for details.";
+  }
   await loadState();
 }
 
@@ -4589,6 +4787,9 @@ runPluginJobButton.addEventListener("click", async () => {
 providerForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   providerOutput.textContent = "Saving provider settings...";
+  if (providerQuickStatus) {
+    providerQuickStatus.textContent = "Saving brain settings...";
+  }
 
   const profileId = providerProfileInput?.value || "openai";
   const preset = PROVIDER_PRESETS[profileId] || PROVIDER_PRESETS.openai;
@@ -4619,9 +4820,15 @@ providerForm.addEventListener("submit", async (event) => {
     baseUrl,
     model,
     live: true,
-  });
+    timeoutMs: 20000,
+  }, { timeoutMs: 25000 });
 
   providerOutput.textContent = formatJson({ test: testData, runtime: runtimeData, profile: profileData, key: keyData });
+  if (providerQuickStatus) {
+    providerQuickStatus.textContent = testData?.ok || testData?.ready
+      ? "Saved. Provider test passed."
+      : "Saved. Check provider test output below.";
+  }
   if (providerKeyInput) {
     providerKeyInput.value = "";
   }
@@ -4632,6 +4839,7 @@ providerForm.addEventListener("submit", async (event) => {
 });
 
 testProviderButton?.addEventListener("click", testProviderReadiness);
+providerTestQuickButton?.addEventListener("click", testProviderReadiness);
 async function fetchProviderModels() {
   if (!providerOutput) {
     return;
@@ -4645,17 +4853,17 @@ async function fetchProviderModels() {
     baseUrl: providerBaseUrlInput?.value.trim() || preset.baseUrl || "",
     apiKeyProviderId: providerId,
     apiKey: providerKeyInput?.value.trim() || "",
-  });
-  if (providerModelList) {
-    providerModelList.innerHTML = (data.models || [])
-      .slice(0, 300)
-      .map((model) => `<option value="${escapeHtml(model.id || model)}"></option>`)
-      .join("");
-  }
-  if (providerModelSetupInput && !providerModelSetupInput.value.trim() && data.models?.[0]?.id) {
-    providerModelSetupInput.value = data.models[0].id;
-  }
+    timeoutMs: 30000,
+  }, { timeoutMs: 35000 });
+  const fetchedModels = (data.models || []).slice(0, 1000);
+  setCachedProviderModels(fetchedModels);
+  populateProviderModelPicker(fetchedModels, { preserve: false, preferFetched: true });
   providerOutput.textContent = formatJson(data);
+  if (providerQuickStatus) {
+    providerQuickStatus.textContent = fetchedModels.length
+      ? `Fetched ${data.count || fetchedModels.length} real model(s). Selected ${providerModelSetupInput?.value || "first model"}; click Save brain.`
+      : "No models returned. Type a model id manually, then Save brain.";
+  }
   updateProviderProfileControls();
 }
 
@@ -4669,6 +4877,19 @@ providerFetchModelsButton?.addEventListener("click", async () => {
     updateProviderProfileControls();
   }
 });
+providerFetchModelsQuickButton?.addEventListener("click", async () => {
+  try {
+    providerFetchModelsQuickButton.disabled = true;
+    await fetchProviderModels();
+  } catch (error) {
+    providerOutput.textContent = error.message;
+    if (providerQuickStatus) {
+      providerQuickStatus.textContent = "Model fetch failed. Check output below or type model id manually.";
+    }
+  } finally {
+    updateProviderProfileControls();
+  }
+});
 providerProfileInput?.addEventListener("change", () => {
   const profileId = providerProfileInput.value;
   const preset = PROVIDER_PRESETS[profileId] || PROVIDER_PRESETS.openai;
@@ -4676,12 +4897,28 @@ providerProfileInput?.addEventListener("change", () => {
   if (providerBaseUrlInput) providerBaseUrlInput.value = preset.baseUrl || "";
   if (providerModelSetupInput) providerModelSetupInput.value = preset.model || "";
   if (providerModelList) providerModelList.innerHTML = "";
+  populateProviderModelPicker(null, { preserve: false });
+  if (providerQuickStatus) {
+    providerQuickStatus.textContent = `${providerDisplayName(profileId)} selected. Paste key if needed, choose model, then Save brain.`;
+  }
   updateProviderProfileControls();
 });
 providerBaseUrlInput?.addEventListener("input", updateProviderProfileControls);
-providerModelSetupInput?.addEventListener("input", updateProviderProfileControls);
+providerModelSetupInput?.addEventListener("input", () => {
+  populateProviderModelPicker(null, { preserve: true });
+  updateProviderProfileControls();
+});
 providerKeyIdInput?.addEventListener("input", updateProviderProfileControls);
 document.querySelector("#provider-profile")?.addEventListener("change", () => {
+  updateProviderProfileControls();
+});
+providerModelPicker?.addEventListener("change", () => {
+  if (providerModelSetupInput) {
+    providerModelSetupInput.value = providerModelPicker.value;
+  }
+  if (providerQuickStatus) {
+    providerQuickStatus.textContent = `${providerModelPicker.value || "Model"} selected. Click Save brain to apply.`;
+  }
   updateProviderProfileControls();
 });
 openCodexLoginButton?.addEventListener("click", async () => {
@@ -4832,7 +5069,8 @@ function initGatewayConnection() {
       baseUrl: firstProviderBaseUrl?.value.trim() || preset.baseUrl || "",
       apiKeyProviderId: preset.providerId,
       apiKey: usesCodexCli ? "" : firstProviderKey?.value.trim() || "",
-    });
+      timeoutMs: 30000,
+    }, { timeoutMs: 35000 });
     if (data.error || data.ok === false) {
       throw new Error(data.error || data.message || "Model fetch failed.");
     }
@@ -4893,9 +5131,14 @@ function initGatewayConnection() {
     const runtimeData = await postJson("/api/config", {
       profile,
       ownerMode: firstOwnerMode?.checked !== false,
-      ...(baseUrl ? { baseUrl } : {}),
-      ...(model ? { model } : {}),
-      ...(usesCodexCli ? {} : { apiKeyProviderId: preset.providerId }),
+      providerMode: usesCodexCli ? "codex-cli" : "openai-compatible",
+      apiKeyProviderId: preset.providerId,
+      ...(usesCodexCli
+        ? {}
+        : {
+          ...(baseUrl ? { baseUrl } : {}),
+          ...(model ? { model } : {}),
+        }),
     });
     if (runtimeData.error) {
       throw new Error(runtimeData.error);
@@ -5005,8 +5248,8 @@ const routePanels = {
 const routeMeta = {
   "chat-panel": {
     kicker: "Hands-on AI",
-    title: "Task Console",
-    body: "Start a concrete agent run, then watch tools, memory, files, browser, and provider traces as the work moves.",
+    title: "OmniClaw 2.0 Power",
+    body: "One task workspace with chat, tools, memory, files, browser, terminal, and live computer progress.",
   },
   "overview-panel": {
     kicker: "Gateway control",
@@ -5107,6 +5350,23 @@ function restoreShellPreference(key, className, button) {
 
 restoreShellPreference("omniclaw.compact", "is-compact", topbarDensityButton);
 restoreShellPreference("omniclaw.dark", "is-dark", topbarThemeButton);
+restoreShellPreference("omniclaw.railCollapsed", "is-rail-collapsed", railToggleButton);
+
+function setRailCollapsed(enabled) {
+  document.body.classList.toggle("is-rail-collapsed", enabled);
+  railToggleButton?.classList.toggle("is-active", enabled);
+  railToggleButton?.setAttribute("aria-pressed", enabled ? "true" : "false");
+  topbarRailToggleButton?.classList.toggle("is-active", enabled);
+  setStoredBoolean("omniclaw.railCollapsed", enabled);
+}
+
+railToggleButton?.addEventListener("click", () => {
+  setRailCollapsed(!document.body.classList.contains("is-rail-collapsed"));
+});
+
+topbarRailToggleButton?.addEventListener("click", () => {
+  setRailCollapsed(!document.body.classList.contains("is-rail-collapsed"));
+});
 
 topbarOverviewButton?.addEventListener("click", () => {
   window.location.hash = "#overview-panel";
@@ -5147,6 +5407,40 @@ globalSearchInput?.addEventListener("keydown", (event) => {
 document.querySelectorAll(".nav-link").forEach((link) => {
   link.addEventListener("click", () => {
     requestAnimationFrame(() => applyRoute(window.location.hash));
+  });
+});
+
+document.querySelectorAll("[data-prompt]").forEach((button) => {
+  button.addEventListener("click", () => {
+    const prompt = button.dataset.prompt || "";
+    if (!prompt || !messageInput) {
+      return;
+    }
+    messageInput.value = prompt;
+    messageInput.focus();
+    messageInput.setSelectionRange(messageInput.value.length, messageInput.value.length);
+  });
+});
+
+computerPanelToggleButton?.addEventListener("click", () => {
+  document.body.classList.toggle("is-computer-expanded");
+  computerPanelToggleButton.classList.toggle("is-active", document.body.classList.contains("is-computer-expanded"));
+});
+
+document.querySelectorAll("[data-provider-preset]").forEach((button) => {
+  button.addEventListener("click", () => {
+    const profileId = button.dataset.providerPreset || "openai";
+    const preset = PROVIDER_PRESETS[profileId] || PROVIDER_PRESETS.openai;
+    if (providerProfileInput) providerProfileInput.value = profileId;
+    if (providerKeyIdInput) providerKeyIdInput.value = preset.providerId;
+    if (providerBaseUrlInput) providerBaseUrlInput.value = preset.baseUrl || "";
+    if (providerModelSetupInput) providerModelSetupInput.value = preset.model || "";
+    if (providerModelList) providerModelList.innerHTML = "";
+    populateProviderModelPicker(null, { preserve: false });
+    if (providerQuickStatus) {
+      providerQuickStatus.textContent = `${providerDisplayName(profileId)} selected. Paste key if needed, choose model, then Save brain.`;
+    }
+    updateProviderProfileControls();
   });
 });
 

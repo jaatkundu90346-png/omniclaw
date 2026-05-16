@@ -9,7 +9,7 @@
       "enabled": true,
       "maxRounds": 3,
       "maxToolCallsPerRound": 3,
-      "runWhenHeuristicHasTools": false,
+      "runWhenHeuristicHasTools": true,
       "recoverMissingToolCalls": true,
       "maxRepeatedToolCalls": 1
     },

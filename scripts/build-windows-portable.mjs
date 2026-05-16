@@ -171,6 +171,20 @@ copyIfExists("plugins");
 copyIfExists("skills");
 copyIfExists("workspace");
 copyIfExists("DESIGN.md");
+writeText(
+  "workspace/agents/main/PROFILE.md",
+  [
+    "# PROFILE",
+    "",
+    "- Assistant name: Main Agent",
+    "- User name:",
+    "- User location:",
+    "- User preferences:",
+    "",
+    "Updated: fresh portable/profile template",
+    "",
+  ].join("\n"),
+);
 fs.mkdirSync(portableDataDir, { recursive: true });
 fs.mkdirSync(portableLogsDir, { recursive: true });
 writeJson("data/memory.json", {

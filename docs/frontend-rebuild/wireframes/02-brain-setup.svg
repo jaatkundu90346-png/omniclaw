@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900" role="img" aria-label="OmniClaw V2 BYOK brain setup wizard wireframe">
+  <rect width="1440" height="900" fill="#f5f3ef"/>
+  <rect x="60" y="44" width="1320" height="812" rx="28" fill="#ffffff" stroke="#e0dbd2"/>
+  <rect x="60" y="44" width="288" height="812" rx="28" fill="#191a1b"/>
+  <text x="96" y="96" fill="#f2eee7" font-family="Inter" font-size="26" font-weight="750">Settings</text>
+  <text x="96" y="130" fill="#8e8982" font-family="Inter" font-size="13">OmniClaw configuration</text>
+  <rect x="88" y="178" width="224" height="44" rx="12" fill="#2d2e30"/>
+  <text x="116" y="206" fill="#f3f0e8" font-family="Inter" font-size="15" font-weight="650">Brain and BYOK</text>
+  <text x="116" y="266" fill="#9d978f" font-family="Inter" font-size="15">Profile</text>
+  <text x="116" y="314" fill="#9d978f" font-family="Inter" font-size="15">Computer access</text>
+  <text x="116" y="362" fill="#9d978f" font-family="Inter" font-size="15">Permissions</text>
+  <text x="116" y="410" fill="#9d978f" font-family="Inter" font-size="15">Agents and skills</text>
+  <text x="116" y="458" fill="#9d978f" font-family="Inter" font-size="15">Tools and MCP</text>
+  <text x="116" y="506" fill="#9d978f" font-family="Inter" font-size="15">Memory</text>
+  <text x="116" y="554" fill="#9d978f" font-family="Inter" font-size="15">Connectors</text>
+
+  <text x="396" y="104" fill="#1e1e1e" font-family="Inter" font-size="30" font-weight="760">Brain setup</text>
+  <text x="396" y="138" fill="#777069" font-family="Inter" font-size="15">Provider keys, base URL, model discovery, health test, and failover.</text>
+
+  <rect x="396" y="178" width="900" height="74" rx="20" fill="#f6f4f0" stroke="#e2ddd4"/>
+  <circle cx="438" cy="215" r="14" fill="#111"/>
+  <text x="434" y="221" fill="#fff" font-family="Inter" font-size="13" font-weight="700">1</text>
+  <text x="464" y="221" fill="#1f1e1b" font-family="Inter" font-size="14" font-weight="700">Provider</text>
+  <circle cx="596" cy="215" r="14" fill="#eae5dc"/>
+  <text x="592" y="221" fill="#57504a" font-family="Inter" font-size="13" font-weight="700">2</text>
+  <text x="622" y="221" fill="#57504a" font-family="Inter" font-size="14">Key</text>
+  <circle cx="736" cy="215" r="14" fill="#eae5dc"/>
+  <text x="732" y="221" fill="#57504a" font-family="Inter" font-size="13" font-weight="700">3</text>
+  <text x="762" y="221" fill="#57504a" font-family="Inter" font-size="14">Models</text>
+  <circle cx="898" cy="215" r="14" fill="#eae5dc"/>
+  <text x="894" y="221" fill="#57504a" font-family="Inter" font-size="13" font-weight="700">4</text>
+  <text x="924" y="221" fill="#57504a" font-family="Inter" font-size="14">Test</text>
+  <circle cx="1030" cy="215" r="14" fill="#eae5dc"/>
+  <text x="1026" y="221" fill="#57504a" font-family="Inter" font-size="13" font-weight="700">5</text>
+  <text x="1056" y="221" fill="#57504a" font-family="Inter" font-size="14">Save</text>
+
+  <rect x="396" y="288" width="250" height="122" rx="18" fill="#111112"/>
+  <text x="424" y="326" fill="#fff" font-family="Inter" font-size="18" font-weight="750">OpenAI compatible</text>
+  <text x="424" y="356" fill="#b6afa5" font-family="Inter" font-size="13">OpenAI, OpenRouter, MiniMax, NVIDIA</text>
+  <rect x="424" y="374" width="86" height="24" rx="12" fill="#2d8cff"/>
+  <text x="444" y="391" fill="#fff" font-family="Inter" font-size="12">selected</text>
+  <rect x="676" y="288" width="250" height="122" rx="18" fill="#faf8f4" stroke="#e2ddd4"/>
+  <text x="704" y="326" fill="#1d1c1b" font-family="Inter" font-size="18" font-weight="750">Codex CLI</text>
+  <text x="704" y="356" fill="#777069" font-family="Inter" font-size="13">Use existing OpenAI account auth</text>
+  <rect x="956" y="288" width="250" height="122" rx="18" fill="#faf8f4" stroke="#e2ddd4"/>
+  <text x="984" y="326" fill="#1d1c1b" font-family="Inter" font-size="18" font-weight="750">Local model</text>
+  <text x="984" y="356" fill="#777069" font-family="Inter" font-size="13">Ollama or OpenAI-compatible server</text>
+
+  <rect x="396" y="452" width="520" height="270" rx="22" fill="#fbfaf7" stroke="#e0dbd2"/>
+  <text x="430" y="492" fill="#1f1e1b" font-family="Inter" font-size="18" font-weight="750">Provider details</text>
+  <text x="430" y="534" fill="#777069" font-family="Inter" font-size="13">Provider</text>
+  <rect x="430" y="548" width="420" height="42" rx="12" fill="#ffffff" stroke="#ded8cf"/>
+  <text x="452" y="575" fill="#24211f" font-family="Inter" font-size="14">NVIDIA NIM</text>
+  <text x="430" y="622" fill="#777069" font-family="Inter" font-size="13">Base URL</text>
+  <rect x="430" y="636" width="420" height="42" rx="12" fill="#ffffff" stroke="#ded8cf"/>
+  <text x="452" y="663" fill="#24211f" font-family="JetBrains Mono" font-size="13">https://integrate.api.nvidia.com/v1</text>
+  <text x="430" y="706" fill="#777069" font-family="Inter" font-size="13">API key</text>
+  <rect x="430" y="720" width="420" height="42" rx="12" fill="#ffffff" stroke="#ded8cf"/>
+  <text x="452" y="747" fill="#9c948a" font-family="Inter" font-size="14">paste key, stored locally</text>
+
+  <rect x="950" y="452" width="346" height="270" rx="22" fill="#fbfaf7" stroke="#e0dbd2"/>
+  <text x="982" y="492" fill="#1f1e1b" font-family="Inter" font-size="18" font-weight="750">Model discovery</text>
+  <rect x="982" y="524" width="128" height="40" rx="20" fill="#111112"/>
+  <text x="1012" y="550" fill="#fff" font-family="Inter" font-size="14">Fetch models</text>
+  <rect x="982" y="588" width="278" height="46" rx="12" fill="#ffffff" stroke="#ded8cf"/>
+  <circle cx="1006" cy="611" r="6" fill="#2d8cff"/>
+  <text x="1022" y="616" fill="#1f1e1b" font-family="Inter" font-size="14">glm-5.1</text>
+  <rect x="982" y="646" width="278" height="46" rx="12" fill="#ffffff" stroke="#ded8cf"/>
+  <circle cx="1006" cy="669" r="6" fill="#cfc7bd"/>
+  <text x="1022" y="674" fill="#777069" font-family="Inter" font-size="14">minimax-m2.7</text>
+  <rect x="396" y="760" width="900" height="54" rx="18" fill="#111112"/>
+  <text x="430" y="794" fill="#fff" font-family="Inter" font-size="15" font-weight="700">Test provider</text>
+  <text x="578" y="794" fill="#bdb5aa" font-family="Inter" font-size="14">Run chat completion + model list + tool loop readiness before Save.</text>
+  <rect x="1170" y="770" width="94" height="34" rx="17" fill="#ffffff"/>
+  <text x="1198" y="792" fill="#111112" font-family="Inter" font-size="13" font-weight="700">Save</text>
+</svg>

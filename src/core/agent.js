@@ -1885,7 +1885,7 @@ export class OmniClawAgent {
 
     const routedAgent = this.agents.resolveAgent(session.agentId);
     const profile = this.agents.getProfileForAgent(routedAgent.id);
-    const availableTools = this.tools.getAll({ agentId: routedAgent.id });
+    const availableTools = this.tools.getAll({ agentId: routedAgent.id, modelCallableOnly: true });
     const intents = this.intentEngine.detect(message);
     const matchedSkills = profile.enableSkillMatching
       ? intents.includes("capabilities")
@@ -1895,19 +1895,26 @@ export class OmniClawAgent {
           })
       : [];
     const profileUpdate = this.updateProfileFromMessage(routedAgent.id, message);
-    const forcedResponse = this.buildOnboardingReply({
-      agentId: routedAgent.id,
-      intents,
-      session,
-      profileUpdated: Boolean(profileUpdate?.updated),
-    }) || this.buildDirectRuntimeReply({
-      intents,
-      message,
-      agent: routedAgent,
-      profile,
-      tools: availableTools,
-      skills: matchedSkills,
-    });
+    const providerInfoForDecision = this.provider.getInfo?.() || {};
+    const realProviderReady = providerInfoForDecision.ready !== false && providerInfoForDecision.id !== "mock/local-rule-engine";
+    const forcedResponse = realProviderReady
+      ? ""
+      : (
+          (profileUpdate?.updated ? this.buildProfileUpdateReply({ profileUpdate }) : "") ||
+          this.buildOnboardingReply({
+            agentId: routedAgent.id,
+            intents,
+            session,
+            profileUpdated: Boolean(profileUpdate?.updated),
+          }) ||
+          this.buildDirectRuntimeReply({
+            intents,
+            message,
+            agent: routedAgent,
+            tools: availableTools,
+            skills: matchedSkills,
+          })
+        );
     let plan = forcedResponse
       ? {
           summary: "OpenClaw-style onboarding response.",
@@ -2314,7 +2321,10 @@ export class OmniClawAgent {
         omittedItems: contextBundle.report.omittedItems,
       });
       const runtimeToolReply = this.buildRuntimeToolReply({ intents, toolOutputs });
-      let response = forcedResponse || runtimeToolReply;
+      const providerInfoForReply = this.provider.getInfo?.() || {};
+      const realProviderReadyForReply = providerInfoForReply.ready !== false && providerInfoForReply.id !== "mock/local-rule-engine";
+      const preferRuntimeToolReply = this.shouldPreferRuntimeToolReply({ intents, runtimeToolReply, toolOutputs });
+      let response = forcedResponse || (runtimeToolReply && (preferRuntimeToolReply || !realProviderReadyForReply) ? runtimeToolReply : "");
       let providerDiagnostics = null;
       if (!response) {
         const providerStartedAt = new Date().toISOString();
@@ -2395,12 +2405,22 @@ export class OmniClawAgent {
           tools: availableTools,
           skills: matchedSkills,
           toolOutputs,
+        }) || this.buildToolEvidenceCorrection({
+          providerResponse,
+          message,
+          toolOutputs,
+        }) || this.buildProviderDriftCorrection({
+          providerResponse,
+          message,
+          toolOutputs,
         }) || this.buildUngroundedToolClaimFallback({
           providerResponse,
           intents,
           toolOutputs,
         }) || providerResponse;
       }
+
+      response = this.normalizeAssistantReplyStyle({ response, toolOutputs });
 
       const assistantAt = new Date().toISOString();
       this.sessions.appendMessage(session.id, {
@@ -2524,7 +2544,7 @@ export class OmniClawAgent {
       enabled: loop.enabled !== false,
       maxRounds: Math.max(0, Math.min(5, Number(loop.maxRounds || 2))),
       maxToolCallsPerRound: Math.max(1, Math.min(8, Number(loop.maxToolCallsPerRound || 3))),
-      runWhenHeuristicHasTools: Boolean(loop.runWhenHeuristicHasTools),
+      runWhenHeuristicHasTools: loop.runWhenHeuristicHasTools !== false,
       recoverMissingToolCalls: loop.recoverMissingToolCalls !== false,
       maxRepeatedToolCalls: Math.max(1, Math.min(4, Number(loop.maxRepeatedToolCalls || 1))),
     };
@@ -2549,19 +2569,76 @@ export class OmniClawAgent {
       "capabilities",
       "layer-status",
       "v2-audit",
-      "system-status",
-      "computer-access",
-      "project-test",
-      "project-build",
-      "project-release",
     ]);
     if (intents.every((intent) => directIntents.has(intent))) {
       return false;
     }
-    if (toolOutputs.length > 0 && !settings.runWhenHeuristicHasTools) {
+    return true;
+  }
+
+  shouldPreferRuntimeToolReply({ intents = [], runtimeToolReply = "", toolOutputs = [] } = {}) {
+    if (!runtimeToolReply || !Array.isArray(toolOutputs) || toolOutputs.length === 0) {
       return false;
     }
-    return true;
+    const deterministicIntents = new Set([
+      "real-task-hardening",
+      "capabilities",
+      "layer-status",
+      "v2-audit",
+      "prompt-assembly",
+      "context-compression",
+      "memory-lifecycle",
+      "skill-system",
+      "messaging-gateway",
+      "terminal-backends",
+      "model-provider",
+      "subagent-delegation",
+      "mcp-integration",
+      "cron-scheduler",
+      "trajectory-training",
+      "closed-learning-loop",
+      "hermes-use-cases",
+      "design-principles",
+      "hermes-reference",
+      "hermes-tools",
+      "hermes-doctor",
+      "hermes-model",
+      "hermes-skills",
+      "hermes-usage",
+      "hermes-platforms",
+      "provider-status",
+      "provider-model-list",
+      "system-status",
+      "computer-access",
+      "computer-search",
+      "computer-directory-list",
+      "computer-file-read",
+      "computer-delete",
+      "browser-navigate",
+      "browser-observe",
+      "project-test",
+      "project-build",
+      "project-release",
+    ]);
+    if ((intents || []).some((intent) => deterministicIntents.has(intent))) {
+      return true;
+    }
+    const deterministicTools = new Set([
+      "real_task_health",
+      "capability_demo",
+      "list_computer_directory",
+      "search_computer_files",
+      "read_computer_file",
+      "delete_computer_path",
+      "browser_navigate",
+      "browser_snapshot",
+      "provider_status",
+      "list_provider_models",
+      "computer_system_status",
+      "run_terminal_command",
+      "plan_shell_command",
+    ]);
+    return toolOutputs.some((item) => deterministicTools.has(item.tool));
   }
 
   buildModelToolLoopPrompt({ message, intents, tools, toolOutputs, round }) {
@@ -2677,6 +2754,18 @@ export class OmniClawAgent {
         tool: "list_files",
         input: { path: this.planner.extractPath(message, ".") },
         reason: "Recovered a missing workspace file listing tool call.",
+      });
+    }
+    if (intents.includes("computer-search")) {
+      candidates.push({
+        tool: "search_computer_files",
+        input: {
+          query: this.planner.extractComputerSearchQuery(message),
+          maxDepth: 5,
+          maxResults: 80,
+          maxScanMs: 10000,
+        },
+        reason: "Recovered a missing governed laptop file search tool call.",
       });
     }
     if (intents.includes("file-read")) {
@@ -3394,6 +3483,25 @@ export class OmniClawAgent {
     ].join("\n");
   }
 
+  buildProfileUpdateReply({ profileUpdate = {} } = {}) {
+    const facts = Array.isArray(profileUpdate.facts) ? profileUpdate.facts : [];
+    if (facts.length === 0) {
+      return "";
+    }
+    const readableFacts = facts.map((fact) => {
+      const text = String(fact || "").trim();
+      return text
+        .replace(/^Assistant name:\s*/i, "assistant name = ")
+        .replace(/^User name:\s*/i, "user name = ")
+        .replace(/^User location:\s*/i, "user location = ");
+    });
+    return [
+      "Profile saved in PROFILE.md and long-term memory.",
+      `Saved fact(s): ${readableFacts.join("; ")}.`,
+      "Main in facts ko next messages me recall kar sakta hoon.",
+    ].join(" ");
+  }
+
   buildDirectRuntimeReply({ intents = [], message = "", agent = {}, tools = [], skills = [] } = {}) {
     if (intents.includes("api-setup") && !intents.includes("provider-status")) {
       return [
@@ -3866,7 +3974,7 @@ export class OmniClawAgent {
       ].filter(Boolean).join(" ");
     }
 
-    if (intents.includes("v2-audit") && byTool.has("v2_status")) {
+    if (!intents.includes("real-task-hardening") && intents.includes("v2-audit") && byTool.has("v2_status")) {
       const report = byTool.get("v2_status");
       const repair = byTool.get("v2_repair_plan") || {};
       const weakest = Array.isArray(report.weakest) ? report.weakest.slice(0, 4) : [];
@@ -3884,19 +3992,48 @@ export class OmniClawAgent {
       ].filter(Boolean).join(" ");
     }
 
-    if (intents.includes("capabilities") && byTool.has("capability_demo")) {
+    if (!intents.includes("real-task-hardening") && intents.includes("capabilities") && byTool.has("capability_demo")) {
       const demo = byTool.get("capability_demo");
       const coreTools = Array.isArray(demo.coreTools) ? demo.coreTools : [];
       const demos = Array.isArray(demo.demos) ? demo.demos : [];
+      const limitedTools = Array.isArray(demo.limitedTools) ? demo.limitedTools : [];
       const skillNames = Array.isArray(demo.skills)
         ? demo.skills.map((skill) => skill.name || skill.id).filter(Boolean).slice(0, 10)
         : [];
       return [
-        `Capability demo ready: agent ${demo.agentId || "main"} ke paas ${demo.toolCount || 0} tools aur ${demo.skillCount || 0} skills visible hain.`,
+        `Capability demo ready: agent ${demo.agentId || "main"} ke paas ${demo.productReadyToolCount || 0}/${demo.toolCount || 0} product-ready tools aur ${demo.skillCount || 0} skills visible hain.`,
         `Core tools: ${coreTools.join(", ") || "none"}.`,
+        limitedTools.length ? `Limited tools hidden from planner: ${limitedTools.slice(0, 8).map((tool) => `${tool.id}:${tool.status}`).join(", ")}.` : "",
         `Loaded skills: ${skillNames.join(", ") || "none"}.`,
         `Try: ${demos.slice(0, 3).join(" | ")}`,
-      ].join(" ");
+      ].filter(Boolean).join(" ");
+    }
+
+    if (intents.includes("real-task-hardening") && byTool.has("real_task_health")) {
+      const health = byTool.get("real_task_health");
+      const groups = Array.isArray(health.tools?.groups) ? health.tools.groups : [];
+      const weakGroups = groups.filter((group) => group.status !== "ready").slice(0, 4);
+      const probes = Array.isArray(health.probes) ? health.probes : [];
+      const badProbes = probes.filter((probe) => ["failed", "needs-setup", "disabled"].includes(probe.status)).slice(0, 3);
+      const recipes = Array.isArray(health.recipes) ? health.recipes.slice(0, 4) : [];
+      const hidden = Array.isArray(health.tools?.hiddenFromPlanner) ? health.tools.hiddenFromPlanner : [];
+      return [
+        `Real-task health ready: product score ${health.score || 0}/100.`,
+        `Tools: ${health.tools?.productReady || 0}/${health.tools?.total || 0} product-ready; ${health.tools?.limited || 0} limited/placeholder hidden from planner; skills: ${health.skills?.total || 0}; provider ${health.provider?.id || "unknown"} ${health.provider?.ready ? "ready" : "needs setup"}.`,
+        weakGroups.length
+          ? `Weak tool groups: ${weakGroups.map((group) => `${group.group}(${group.status}, missing: ${(group.missing || []).slice(0, 4).join(", ") || "none"})`).join(" | ")}.`
+          : "Core tool groups ready hain.",
+        hidden.length
+          ? `Hidden weak tools: ${hidden.slice(0, 8).map((tool) => `${tool.id}:${tool.status}${tool.replacement ? ` -> ${tool.replacement}` : ""}`).join(", ")}.`
+          : "",
+        badProbes.length
+          ? `Probe issues: ${badProbes.map((probe) => `${probe.name}:${probe.status}`).join(", ")}.`
+          : "Live probes passed/usable hain.",
+        recipes.length
+          ? `Product recipes tested target: ${recipes.map((recipe) => `"${recipe.ask}" -> ${recipe.expectedTools.join("+")}`).join(" | ")}`
+          : "",
+        health.rule || "",
+      ].filter(Boolean).join("\n");
     }
 
     if (intents.includes("layer-status") && byTool.has("layer_status")) {
@@ -3957,6 +4094,58 @@ export class OmniClawAgent {
       ].join(" ");
     }
 
+    if (intents.includes("computer-directory-list") && byTool.has("list_computer_directory")) {
+      const listing = byTool.get("list_computer_directory");
+      const entries = Array.isArray(listing.entries) ? listing.entries : [];
+      return [
+        `Computer folder listed: ${listing.path || "~"}`,
+        `${entries.length} item(s) mile.`,
+        entries.length ? `Sample: ${entries.slice(0, 12).map((entry) => `${entry.name}${entry.type === "directory" ? "/" : ""}`).join(", ")}.` : "",
+      ].filter(Boolean).join("\n");
+    }
+
+    if (intents.includes("computer-file-read") && byTool.has("read_computer_file")) {
+      const file = byTool.get("read_computer_file");
+      return [
+        `Computer file read: ${file.path || "unknown"}`,
+        `${file.bytesRead || 0}/${file.totalBytes || 0} bytes read${file.truncated ? " (truncated)" : ""}.`,
+        file.content ? `Preview:\n${String(file.content).slice(0, 1200)}` : "",
+      ].filter(Boolean).join("\n");
+    }
+
+    if (intents.includes("computer-delete") && byTool.has("delete_computer_path")) {
+      const result = byTool.get("delete_computer_path");
+      return [
+        result.deleted || result.movedToTrash
+          ? "Computer delete action complete."
+          : "Computer delete action did not complete.",
+        `Path: ${result.path || "unknown"}.`,
+        result.trashPath ? `Recoverable trash path: ${result.trashPath}.` : "",
+        result.message || result.reason || "",
+      ].filter(Boolean).join("\n");
+    }
+
+    if (intents.includes("browser-navigate") && byTool.has("browser_navigate")) {
+      const result = byTool.get("browser_navigate");
+      return [
+        result.ok === false || result.error ? "Browser navigation needs attention." : "Browser navigation complete.",
+        `URL: ${result.url || result.snapshot?.url || "unknown"}.`,
+        result.title || result.snapshot?.title ? `Title: ${result.title || result.snapshot?.title}.` : "",
+        result.error ? `Error: ${result.error}` : "",
+      ].filter(Boolean).join("\n");
+    }
+
+    if (intents.includes("provider-model-list") && byTool.has("list_provider_models")) {
+      const models = byTool.get("list_provider_models");
+      const list = Array.isArray(models.models) ? models.models : [];
+      return [
+        `Provider models fetch ${models.ok === false ? "failed" : "complete"}: ${models.profileId || models.providerId || "active provider"}.`,
+        `${models.count || list.length || 0} model(s) returned.`,
+        list.length ? `Sample: ${list.slice(0, 12).map((model) => model.id || model).join(", ")}.` : "",
+        models.message || models.error ? `Detail: ${models.message || models.error}` : "",
+      ].filter(Boolean).join("\n");
+    }
+
     if (toolOutputs.length > 0) {
       return this.buildToolExecutionReply({ toolOutputs });
     }
@@ -3972,23 +4161,173 @@ export class OmniClawAgent {
 
     const toolSummary = toolOutputs.length > 0
       ? `Local tools ran: ${toolOutputs.map((item) => item.tool).join(", ")}.`
-      : "Is request me local tool ki zarurat nahi thi.";
+      : "No runtime tools completed before the provider failed.";
 
-    if (intents.includes("capabilities")) {
-      return this.buildDirectRuntimeReply({ intents: ["capabilities"], agent, tools, skills });
+    return [
+      "Provider brain failed, so OmniClaw did not generate a fake local answer.",
+      toolSummary,
+      `Active agent: ${agent.name || agent.id || "main"}.`,
+      `Fix the provider/model in Brain setup, then retry the task. Detail: ${text.slice(0, 420)}`,
+    ].join(" ");
+  }
+
+  normalizeAssistantReplyStyle({ response = "", toolOutputs = [] } = {}) {
+    let text = String(response || "").trim();
+    if (!text) {
+      return text;
+    }
+
+    const computerSearchOutput = (toolOutputs || []).find((item) => item.tool === "search_computer_files");
+    if (computerSearchOutput) {
+      return this.buildGroundedToolTraceReply({ toolOutputs });
+    }
+
+    const webResearchOutput = (toolOutputs || []).find((item) => item.tool === "web_research" || item.tool === "web_search");
+    const looksLikeCapabilityDrift =
+      /\bkya kar sakta ho\b/i.test(text) ||
+      /\bwhat would you like to do next\b/i.test(text) ||
+      /\bi can (?:use|help|suggest)\b[\s\S]{0,180}\b(tool|skill|task)\b/i.test(text) ||
+      /\btools? that can (?:assist|help)\b/i.test(text);
+    if (webResearchOutput && looksLikeCapabilityDrift) {
+      return this.buildGroundedResearchReply({ toolOutputs });
+    }
+
+    text = text
+      .replace(/^(?:Main\s+Agent|Agent\s+main)\s*:\s*/i, "")
+      .replace(/\bMain\s+Agent\s+ne\b/gi, "Maine")
+      .replace(/\bsearch_computer_files\s+tool\b/gi, "laptop file search")
+      .replace(/\bsearch_computer_files\b/gi, "laptop file search")
+      .replace(/\blist_computer_directory\s+tool\b/gi, "folder listing")
+      .replace(/\bread_computer_file\s+tool\b/gi, "file reader")
+      .replace(/\brun_terminal_command\s+tool\b/gi, "terminal command")
+      .replace(/\bweb_research\s+tool\b/gi, "web research")
+      .replace(/\bweb_search\s+tool\b/gi, "web search")
+      .replace(/\bTool evidence correction:\s*/gi, "")
+      .replace(/\bProvider drift correction:\s*/gi, "")
+      .replace(/\s+\n/g, "\n")
+      .replace(/[ \t]{2,}/g, " ")
+      .trim();
+
+    const hasComputerSearch = (toolOutputs || []).some((item) => item.tool === "search_computer_files");
+    if (hasComputerSearch && /^Billu Baba tumhein batana chahunga ki/i.test(text)) {
+      text = text.replace(/^Billu Baba tumhein batana chahunga ki\s*/i, "Billu Baba, ");
+    }
+    return text;
+  }
+
+  buildGroundedResearchReply({ toolOutputs = [] } = {}) {
+    const item = (toolOutputs || []).find((entry) => entry.tool === "web_research" || entry.tool === "web_search");
+    const output = item?.output || {};
+    const results = Array.isArray(output.results) ? output.results : [];
+    if (!item || results.length === 0) {
+      return this.buildGroundedToolTraceReply({ toolOutputs });
+    }
+
+    const usefulResults = results.filter((result) =>
+      !/failed|error|aborted|timeout/i.test(String(result.title || result.snippet || "")),
+    );
+    if (usefulResults.length === 0) {
+      const details = results
+        .slice(0, 3)
+        .map((result) => result.snippet || result.title)
+        .filter(Boolean)
+        .join("; ");
+      return [
+        `Web research "${output.query || "query"}" run hua, lekin source fetch fail/timeout ho gaya.`,
+        details ? `Detail: ${details}` : "",
+        "Result grounded nahi mila, isliye maine fake summary nahi banayi.",
+      ].filter(Boolean).join("\n");
+    }
+
+    const primary = usefulResults.find((result) => result.snippet || result.title) || usefulResults[0];
+    const snippet = String(primary.snippet || primary.title || "")
+      .replace(/\s+/g, " ")
+      .trim();
+    const short = snippet.length > 520 ? `${snippet.slice(0, 517)}...` : snippet;
+    const sources = usefulResults
+      .slice(0, 4)
+      .map((result) => `- ${result.title || "Result"}${result.url ? `: ${result.url}` : ""}`);
+
+    return [
+      `Research result: "${output.query || "query"}" par ${results.length} source(s) mile.`,
+      short ? `Short answer: ${short}` : "",
+      sources.length ? ["Sources:", ...sources].join("\n") : "",
+    ].filter(Boolean).join("\n");
+  }
+
+  buildToolEvidenceCorrection({ providerResponse = "", message = "", toolOutputs = [] } = {}) {
+    const text = String(providerResponse || "");
+    const userMessage = String(message || "");
+    if (!/package\.json/i.test(userMessage)) {
+      return "";
+    }
+    const fileList = toolOutputs.find((item) =>
+      (item.tool === "list_files" || item.tool === "list_computer_directory") &&
+      Array.isArray(item.output?.entries),
+    );
+    if (!fileList) {
+      return "";
+    }
+
+    const entries = fileList.output.entries || [];
+    const names = entries.map((entry) => entry.name).filter(Boolean);
+    const hasPackageJson = names.includes("package.json");
+    const saysMissing =
+      /package\.json/i.test(text) &&
+      /(do not see|don't see|does not exist|doesn't exist|not exist|not found|missing|nahi|nahin)/i.test(text);
+    const saysPresent =
+      /package\.json/i.test(text) &&
+      /(exists|present|found|available|hai\b)/i.test(text);
+
+    if ((hasPackageJson && !saysMissing) || (!hasPackageJson && !saysPresent)) {
+      return "";
+    }
+
+    const sample = names.slice(0, 24).join(", ");
+    return [
+      "Tool evidence correction:",
+      `I listed ${fileList.output.path || "."} with ${entries.length} item(s).`,
+      `package.json ${hasPackageJson ? "exists" : "does not exist"} in that directory.`,
+      sample ? `Visible entries include: ${sample}${names.length > 24 ? ", ..." : ""}.` : "",
+      "This answer is based on the list_files tool output, overriding the model's contradictory wording.",
+    ].filter(Boolean).join(" ");
+  }
+
+  buildProviderDriftCorrection({ providerResponse = "", message = "", toolOutputs = [] } = {}) {
+    const text = String(providerResponse || "");
+    if (!Array.isArray(toolOutputs) || toolOutputs.length === 0) {
+      return "";
+    }
+    const evidenceText = JSON.stringify(toolOutputs).toLowerCase();
+    const requestText = String(message || "").toLowerCase();
+    const mentionedOpencode = /\bopencode\b/i.test(text);
+    const opencodeUnsupported = mentionedOpencode && !requestText.includes("opencode") && !evidenceText.includes("opencode");
+    const saysCanUseAlreadyRanTool = toolOutputs.some((item) => {
+      const id = String(item.tool || "");
+      if (!id) {
+        return false;
+      }
+      const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      return new RegExp(`${escaped}[\\s\\S]{0,120}(?:can use|could use|kar sak|istemal kar sak|use kar sak)`, "i").test(text);
+    });
+    const ignoresToolResults = /tool ka istemal kar sak|tool use kar sak|can use .*tool/i.test(text) &&
+      !/mila|mile|result|found|trace|actual|output/i.test(text);
+    const mimicsInternalCorrection = /Tool evidence correction|Provider drift correction|Provider ne .*trace/i.test(text);
+
+    if (!opencodeUnsupported && !saysCanUseAlreadyRanTool && !ignoresToolResults && !mimicsInternalCorrection) {
+      return "";
     }
 
     return [
-      `Provider brain abhi auth/config issue de raha hai, isliye remote model reply nahi aaya.`,
-      toolSummary,
-      `Main ${agent.name || agent.id || "active agent"} as OmniClaw local runtime abhi bhi sessions, memory, tools, gateway aur safe computer access sambhal sakta hoon.`,
-      `Fix: BYOK panel se provider switch karo ya terminal me codex login chalao. Detail: ${text.slice(0, 420)}`,
-    ].join(" ");
+      this.buildGroundedToolTraceReply({ toolOutputs }) || this.buildToolExecutionReply({ toolOutputs }),
+    ].filter(Boolean).join(" ");
   }
 
   buildUngroundedToolClaimFallback({ providerResponse = "", intents = [], toolOutputs = [] } = {}) {
     const text = String(providerResponse || "").trim();
-    if (!this.looksLikeUnexecutedToolClaim(text) || toolOutputs.length > 0) {
+    const missingClaims = this.findMissingToolClaims(text, toolOutputs);
+    const unsupportedLaptopConclusion = this.hasUnsupportedLaptopFileConclusion(text, toolOutputs);
+    if (!this.looksLikeUnexecutedToolClaim(text) && missingClaims.length === 0 && !unsupportedLaptopConclusion) {
       return "";
     }
     const toolLikelyIntents = new Set([
@@ -3999,9 +4338,25 @@ export class OmniClawAgent {
       "shell-plan",
       "system-status",
       "computer-access",
+      "computer-search",
     ]);
-    if (!intents.some((intent) => toolLikelyIntents.has(intent))) {
+    if (!intents.some((intent) => toolLikelyIntents.has(intent)) && missingClaims.length === 0 && !unsupportedLaptopConclusion) {
       return "";
+    }
+    const actualTools = toolOutputs.map((item) => `${item.tool}${item.toolSummary?.status ? `:${item.toolSummary.status}` : ""}`);
+    if (actualTools.length > 0 && missingClaims.length === 0 && !unsupportedLaptopConclusion) {
+      return "";
+    }
+    if (missingClaims.length > 0 || unsupportedLaptopConclusion) {
+      const grounded = this.buildGroundedToolTraceReply({ toolOutputs });
+      return [
+        "Tool evidence correction:",
+        missingClaims.length > 0
+          ? "Provider ne extra tool-run claims kiye jo trace se match nahi karte."
+          : "Provider ne laptop/local-file conclusion diya, lekin trace me successful laptop file search nahi hua.",
+        actualTools.length ? `Actual trace: ${actualTools.join(", ")}.` : "Actual trace: no tool execution.",
+        grounded || "Isliye maine is answer ko grounded result ki tarah accept nahi kiya. Dobara request bhejo with explicit target.",
+      ].filter(Boolean).join(" ");
     }
     return [
       "Provider ne tool use ka claim kiya, lekin OmniClaw trace me koi tool execution record nahi mila.",
@@ -4010,8 +4365,86 @@ export class OmniClawAgent {
     ].join(" ");
   }
 
+  buildGroundedToolTraceReply({ toolOutputs = [] } = {}) {
+    if (!Array.isArray(toolOutputs) || toolOutputs.length === 0) {
+      return "";
+    }
+    const lines = ["Actual result:"];
+    for (const item of toolOutputs.slice(0, 4)) {
+      const output = item.output || {};
+      const status = item.toolSummary?.status || this.classifyToolOutput(item);
+      if (item.tool === "search_computer_files") {
+        const results = Array.isArray(output.results) ? output.results : [];
+        const samples = results.slice(0, 5).map((entry) =>
+          `${entry.name || "item"}${entry.path ? ` (${entry.path})` : ""}`,
+        );
+        lines.push(`- Laptop file search ${status}: query "${output.query || ""}" par ${results.length} result(s) mile${output.timedOut ? " (scan timeout hua, partial results)" : ""}.`);
+        if (samples.length > 0) {
+          lines.push(`  Sample: ${samples.join(" | ")}.`);
+        }
+        continue;
+      }
+      if (item.tool === "web_research" || item.tool === "web_search") {
+        const results = Array.isArray(output.results) ? output.results : [];
+        const useful = results.find((result) => !/failed|error/i.test(String(result.title || result.snippet || ""))) || results[0];
+        lines.push(`- ${item.tool === "web_search" ? "Web search" : "Web research"} ${status}: query "${output.query || ""}" par ${results.length} result(s) aaye.`);
+        if (useful?.title || useful?.url || useful?.snippet) {
+          lines.push(`  First useful result: ${[useful.title, useful.url, useful.snippet].filter(Boolean).join(" - ").slice(0, 420)}.`);
+        }
+        continue;
+      }
+      const summary = item.toolSummary?.summary || this.summarizeToolOutputForUser(item);
+      lines.push(`- ${item.tool || "tool"} [${status}]: ${summary}`);
+    }
+    return lines.join("\n");
+  }
+
   looksLikeProviderFailure(text = "") {
-    return /Codex CLI provider failed|Codex CLI bridge|codex command|Provider request failed|Provider connection failed|API key missing|authentication|auth|login/i.test(String(text || ""));
+    const value = String(text || "").trim();
+    return /^(Codex CLI provider failed|Codex CLI bridge failed|Provider request failed|Provider connection failed|OpenAI-compatible provider is configured, but no API key|Provider planner request failed|Provider request timed out)/i.test(value) ||
+      /\b(status\s+(401|403)|unauthorized|forbidden|invalid api key|api key missing for|authentication failed|login required)\b/i.test(value);
+  }
+
+  findMissingToolClaims(text = "", toolOutputs = []) {
+    const value = String(text || "");
+    const executed = new Set((toolOutputs || []).map((item) => item.tool));
+    const claimPatterns = [
+      { id: "list_files", patterns: [/\blist_files\b/i, /\blist files tool\b/i] },
+      { id: "read_file", patterns: [/\bread_file\b/i, /\bread file tool\b/i] },
+      { id: "search_computer_files", patterns: [/\bsearch_computer_files\b/i, /\bsearch computer files\b/i, /\bcomputer file search\b/i, /\blaptop file search\b/i] },
+      { id: "list_computer_directory", patterns: [/\blist_computer_directory\b/i, /\blist computer directory\b/i] },
+      { id: "read_computer_file", patterns: [/\bread_computer_file\b/i, /\bread computer file\b/i] },
+      { id: "run_terminal_command", patterns: [/\brun_terminal_command\b/i, /\bterminal command\b/i] },
+      { id: "web_research", patterns: [/\bweb_research\b/i, /\bweb research tool\b/i] },
+      { id: "web_search", patterns: [/\bweb_search\b/i, /\bweb search tool\b/i] },
+      { id: "read_url", patterns: [/\bread_url\b/i, /\bread url tool\b/i] },
+      { id: "browser_snapshot", patterns: [/\bbrowser_snapshot\b/i, /\bbrowser snapshot\b/i] },
+    ];
+    return claimPatterns
+      .filter((claim) => !executed.has(claim.id) && claim.patterns.some((pattern) => pattern.test(value)))
+      .map((claim) => claim.id);
+  }
+
+  hasUnsupportedLaptopFileConclusion(text = "", toolOutputs = []) {
+    const value = String(text || "");
+    if (!/\b(laptop|computer|pc)\b/i.test(value)) {
+      return false;
+    }
+    const concludesMissing =
+      /\b(no|not found|missing|does not exist|doesn't exist|nahi|nahin)\b[\s\S]{0,120}\b(file|folder|opencode)\b/i.test(value) ||
+      /\b(file|folder|opencode)\b[\s\S]{0,120}\b(no|not found|missing|does not exist|doesn't exist|nahi|nahin)\b/i.test(value);
+    if (!concludesMissing) {
+      return false;
+    }
+    const groundedLocalTools = new Set([
+      "search_computer_files",
+      "list_computer_directory",
+      "read_computer_file",
+      "run_terminal_command",
+    ]);
+    return !(toolOutputs || []).some((item) =>
+      groundedLocalTools.has(item.tool) && this.classifyToolOutput(item) === "completed",
+    );
   }
 
   buildProfileQuestionReply({ message = "", agent = {} } = {}) {

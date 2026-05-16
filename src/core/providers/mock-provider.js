@@ -8,21 +8,25 @@ export class MockProvider {
     return {
       id: "mock/local-rule-engine",
       mode: "offline",
-      ready: true,
-      apiKeyConfigured: true,
+      ready: false,
+      apiKeyConfigured: false,
       apiKeySource: "offline",
-      message: this.options.message || "Mock provider works offline and does not need a BYOK key.",
+      message: this.options.message || "Offline mock brain is disabled. Configure BYOK/API provider for real replies.",
       fallbackFrom: this.options.fallbackFrom || "",
     };
   }
 
   async respond(context) {
-    const config = this.configStore.getConfig();
-    const delayMs = Number(config.provider?.mockDelayMs || 0);
-    if (delayMs > 0) {
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
-    }
+    const provider = this.configStore.getConfig().provider || {};
+    const mode = provider.mode || "mock";
+    return [
+      "Real provider is not configured, so OmniClaw did not generate a fake local answer.",
+      `Current provider mode: ${mode}.`,
+      "Open Brain setup, choose a BYOK/OpenAI-compatible provider, add API key, fetch models, test, then save.",
+    ].join(" ");
+  }
 
+  async respondLegacy(context) {
     const skillNames = context.skills.map((skill) => skill.name);
     const recentCount = context.recentConversations.length;
     const intents = context.intents.join(", ");

@@ -1,0 +1,90 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900" role="img" aria-label="OmniClaw V2 desktop agent workbench wireframe">
+  <rect width="1440" height="900" fill="#101112"/>
+  <rect x="0" y="0" width="72" height="900" fill="#171819"/>
+  <rect x="72" y="0" width="268" height="900" fill="#1e1f20"/>
+  <rect x="340" y="0" width="700" height="900" fill="#f7f5f1"/>
+  <rect x="1040" y="0" width="400" height="900" fill="#f0eee9"/>
+
+  <text x="25" y="48" fill="#f5f1e8" font-family="Inter, Segoe UI" font-size="24" font-weight="700">O</text>
+  <circle cx="36" cy="115" r="22" fill="#2a2b2d"/>
+  <text x="28" y="122" fill="#d8d2c7" font-family="Inter" font-size="19">+</text>
+  <circle cx="36" cy="175" r="22" fill="#272829"/>
+  <text x="27" y="181" fill="#9b948b" font-family="Inter" font-size="15">T</text>
+  <circle cx="36" cy="235" r="22" fill="#272829"/>
+  <text x="26" y="241" fill="#9b948b" font-family="Inter" font-size="15">A</text>
+  <circle cx="36" cy="295" r="22" fill="#272829"/>
+  <text x="25" y="301" fill="#9b948b" font-family="Inter" font-size="15">S</text>
+  <circle cx="36" cy="808" r="22" fill="#272829"/>
+  <text x="25" y="814" fill="#9b948b" font-family="Inter" font-size="15">U</text>
+
+  <text x="96" y="52" fill="#f1eee6" font-family="Inter" font-size="25" font-weight="700">OmniClaw</text>
+  <rect x="96" y="86" width="216" height="46" rx="12" fill="#2a2b2d"/>
+  <text x="118" y="115" fill="#f1eee6" font-family="Inter" font-size="15" font-weight="650">New task</text>
+  <text x="96" y="176" fill="#8d877f" font-family="Inter" font-size="13" font-weight="700">PROJECTS</text>
+  <rect x="96" y="196" width="216" height="36" rx="9" fill="#292a2b"/>
+  <text x="116" y="219" fill="#ddd8d0" font-family="Inter" font-size="14">OmniClaw V2</text>
+  <text x="96" y="274" fill="#8d877f" font-family="Inter" font-size="13" font-weight="700">ALL TASKS</text>
+  <rect x="96" y="296" width="216" height="52" rx="12" fill="#303132"/>
+  <circle cx="116" cy="322" r="6" fill="#4aa3ff"/>
+  <text x="132" y="316" fill="#f1eee6" font-family="Inter" font-size="14">Frontend rebuild</text>
+  <text x="132" y="336" fill="#9b948b" font-family="Inter" font-size="12">Research and mockups</text>
+  <rect x="96" y="360" width="216" height="52" rx="12" fill="#242526"/>
+  <text x="116" y="382" fill="#d4cec5" font-family="Inter" font-size="14">NVIDIA provider test</text>
+  <text x="116" y="402" fill="#8d877f" font-family="Inter" font-size="12">Needs setup</text>
+  <rect x="96" y="770" width="216" height="76" rx="14" fill="#262728"/>
+  <circle cx="120" cy="808" r="15" fill="#ec7a2f"/>
+  <text x="146" y="804" fill="#eee8df" font-family="Inter" font-size="14" font-weight="650">Mankush</text>
+  <text x="146" y="824" fill="#8d877f" font-family="Inter" font-size="12">Power profile</text>
+
+  <text x="376" y="54" fill="#1a1a1a" font-family="Inter" font-size="22" font-weight="700">OmniClaw 2.0 Power</text>
+  <text x="376" y="83" fill="#777069" font-family="Inter" font-size="13">Task workspace with transcript, tools, memory, and computer in one place.</text>
+  <rect x="850" y="32" width="150" height="38" rx="19" fill="#ffffff" stroke="#ded8cf"/>
+  <text x="880" y="56" fill="#262626" font-family="Inter" font-size="13">gpt-5.5</text>
+
+  <rect x="376" y="122" width="610" height="76" rx="20" fill="#ffffff" stroke="#e5dfd6"/>
+  <text x="404" y="153" fill="#1e1e1e" font-family="Inter" font-size="15" font-weight="650">User</text>
+  <text x="404" y="176" fill="#34312e" font-family="Inter" font-size="15">Pura frontend rebuild karo, pehle reference images banao.</text>
+  <rect x="376" y="226" width="610" height="150" rx="22" fill="#fbfaf7" stroke="#e2ddd4"/>
+  <text x="404" y="260" fill="#1e1e1e" font-family="Inter" font-size="15" font-weight="700">OmniClaw</text>
+  <text x="404" y="288" fill="#3b3834" font-family="Inter" font-size="15">Research pack ban raha hai. Phir shell, task workspace, BYOK,</text>
+  <text x="404" y="312" fill="#3b3834" font-family="Inter" font-size="15">settings, agents aur mobile UI ek system mein rebuild honge.</text>
+  <rect x="404" y="334" width="170" height="26" rx="13" fill="#edf7ff"/>
+  <text x="420" y="352" fill="#2478b8" font-family="Inter" font-size="12">using design references</text>
+
+  <rect x="376" y="410" width="188" height="86" rx="18" fill="#ffffff" stroke="#e1dbd2"/>
+  <text x="398" y="440" fill="#1e1e1e" font-family="Inter" font-size="14" font-weight="700">Plan</text>
+  <text x="398" y="464" fill="#777069" font-family="Inter" font-size="12">5 screens mapped</text>
+  <rect x="586" y="410" width="188" height="86" rx="18" fill="#ffffff" stroke="#e1dbd2"/>
+  <text x="608" y="440" fill="#1e1e1e" font-family="Inter" font-size="14" font-weight="700">Tools</text>
+  <text x="608" y="464" fill="#777069" font-family="Inter" font-size="12">browser, terminal, files</text>
+  <rect x="798" y="410" width="188" height="86" rx="18" fill="#ffffff" stroke="#e1dbd2"/>
+  <text x="820" y="440" fill="#1e1e1e" font-family="Inter" font-size="14" font-weight="700">Memory</text>
+  <text x="820" y="464" fill="#777069" font-family="Inter" font-size="12">task recall visible</text>
+
+  <rect x="376" y="760" width="610" height="92" rx="24" fill="#ffffff" stroke="#ded8cf"/>
+  <text x="404" y="803" fill="#9a938a" font-family="Inter" font-size="16">Assign a task or ask anything</text>
+  <circle cx="421" cy="827" r="16" fill="#f1eee7"/>
+  <text x="416" y="833" fill="#55504a" font-family="Inter" font-size="17">+</text>
+  <circle cx="934" cy="806" r="24" fill="#111112"/>
+  <text x="926" y="813" fill="#ffffff" font-family="Inter" font-size="18">↑</text>
+
+  <text x="1072" y="54" fill="#1a1a1a" font-family="Inter" font-size="20" font-weight="700">Omni Computer</text>
+  <text x="1072" y="80" fill="#777069" font-family="Inter" font-size="12">Browser, terminal, files, tools, artifacts</text>
+  <rect x="1072" y="108" width="320" height="320" rx="22" fill="#252525"/>
+  <rect x="1096" y="138" width="272" height="160" rx="12" fill="#f7f7f7"/>
+  <text x="1118" y="170" fill="#777" font-family="Inter" font-size="13">https://docs / references</text>
+  <rect x="1096" y="320" width="272" height="72" rx="12" fill="#111"/>
+  <text x="1118" y="352" fill="#c8f7c8" font-family="JetBrains Mono" font-size="13">$ npm run build</text>
+  <rect x="1072" y="462" width="320" height="184" rx="22" fill="#ffffff" stroke="#ded8cf"/>
+  <text x="1100" y="496" fill="#1f1e1b" font-family="Inter" font-size="16" font-weight="700">Task progress</text>
+  <circle cx="1104" cy="532" r="5" fill="#4aa3ff"/>
+  <text x="1122" y="537" fill="#47423d" font-family="Inter" font-size="13">Collect references</text>
+  <circle cx="1104" cy="570" r="5" fill="#e2d9cd"/>
+  <text x="1122" y="575" fill="#777069" font-family="Inter" font-size="13">Create wireframes</text>
+  <circle cx="1104" cy="608" r="5" fill="#e2d9cd"/>
+  <text x="1122" y="613" fill="#777069" font-family="Inter" font-size="13">Rebuild frontend</text>
+  <rect x="1072" y="674" width="320" height="126" rx="22" fill="#ffffff" stroke="#ded8cf"/>
+  <text x="1100" y="708" fill="#1f1e1b" font-family="Inter" font-size="16" font-weight="700">Permission state</text>
+  <text x="1100" y="738" fill="#777069" font-family="Inter" font-size="13">Files: ask before delete</text>
+  <text x="1100" y="762" fill="#777069" font-family="Inter" font-size="13">Terminal: allowlisted commands</text>
+</svg>
