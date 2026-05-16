@@ -2327,76 +2327,97 @@ export class OmniClawAgent {
       let response = forcedResponse || (runtimeToolReply && (preferRuntimeToolReply || !realProviderReadyForReply) ? runtimeToolReply : "");
       let providerDiagnostics = null;
       if (!response) {
-        const providerStartedAt = new Date().toISOString();
-        const providerInfo = this.provider.getInfo?.() || {};
-        this.gateway.updateRun(run.id, {
-          providerStatus: "running",
-          provider: providerInfo,
-          providerStartedAt,
-        });
-        this.gateway.addEvent("provider.started", {
-          runId: run.id,
-          sessionId: session.id,
-          agentId: routedAgent.id,
-          providerId: providerInfo.id || "unknown",
-          model: providerInfo.model || "",
-          ready: providerInfo.ready !== false,
-        });
-        const providerPayload = {
-          message,
-          intents,
-          agent: contextBundle.agent,
-          profile,
-          skills: contextBundle.skills,
-          plan,
-          toolOutputs: contextBundle.toolOutputs,
-          workspaceContext: contextBundle.workspaceContext,
-          recentConversations: contextBundle.recentConversations,
-          notes: contextBundle.notes,
-          longTermMemory: contextBundle.longTermMemory,
-          research: contextBundle.research,
-          artifacts: contextBundle.artifacts,
-          tasks: contextBundle.tasks,
-          tools: contextBundle.tools,
-          contextBundle,
-        };
+        const fallbackChain = routedAgent.fallbackChain || [];
+        const candidates = [this.provider];
+        for (const candidateId of fallbackChain) {
+          const p = getProvider(this.config, this.secrets, candidateId);
+          if (p) candidates.push(p);
+        }
+
         const providerTimeoutMs = Math.max(
           5000,
           Math.min(45000, Number(this.config.getConfig().provider?.timeoutMs || 45000)),
         );
-        const providerResponse = await Promise.race([
-          this.provider.respond(providerPayload),
-          new Promise((resolve) => setTimeout(
-            () => resolve(`Provider request timed out after ${providerTimeoutMs}ms. OmniClaw local tools completed, but the model bridge did not return in time.`),
-            providerTimeoutMs,
-          )),
-        ]);
-        const outcome = classifyProviderOutcome(providerResponse);
-        providerDiagnostics = {
-          ok: outcome.ok,
-          status: outcome.ok ? "completed" : "failed",
-          reason: outcome.reason,
-          message: outcome.message,
-          providerId: providerInfo.id || "unknown",
-          model: providerInfo.model || "",
-          ready: providerInfo.ready !== false,
-          startedAt: providerStartedAt,
-          completedAt: new Date().toISOString(),
-          durationMs: Date.now() - Date.parse(providerStartedAt),
-        };
+
+        let providerResponse = null;
+        let outcome = null;
+        let finalProviderInfo = null;
+
+        for (let i = 0; i < candidates.length; i++) {
+          const candidateProvider = candidates[i];
+          const providerStartedAt = new Date().toISOString();
+          const providerInfo = candidateProvider.getInfo?.() || {};
+          finalProviderInfo = providerInfo;
+
+          this.gateway.updateRun(run.id, {
+            providerStatus: "running",
+            provider: providerInfo,
+            providerStartedAt,
+          });
+          this.gateway.addEvent("provider.started", {
+            runId: run.id,
+            sessionId: session.id,
+            agentId: routedAgent.id,
+            providerId: providerInfo.id || "unknown",
+            model: providerInfo.model || "",
+            ready: providerInfo.ready !== false,
+          });
+
+          providerResponse = await Promise.race([
+            candidateProvider.respond(providerPayload),
+            new Promise((resolve) => setTimeout(
+              () => resolve(`Provider request timed out after ${providerTimeoutMs}ms. OmniClaw local tools completed, but the model bridge did not return in time.`),
+              providerTimeoutMs,
+            )),
+          ]);
+
+          outcome = classifyProviderOutcome(providerResponse);
+          providerDiagnostics = {
+            ok: outcome.ok,
+            status: outcome.ok ? "completed" : "failed",
+            reason: outcome.reason,
+            message: outcome.message,
+            providerId: providerInfo.id || "unknown",
+            model: providerInfo.model || "",
+            ready: providerInfo.ready !== false,
+            startedAt: providerStartedAt,
+            completedAt: new Date().toISOString(),
+            durationMs: Date.now() - Date.parse(providerStartedAt),
+          };
+
+          if (outcome.ok) {
+            break;
+          } else {
+            this.gateway.addEvent("provider.failed", {
+              runId: run.id,
+              sessionId: session.id,
+              agentId: routedAgent.id,
+              providerId: providerDiagnostics.providerId,
+              model: providerDiagnostics.model,
+              reason: providerDiagnostics.reason,
+              durationMs: providerDiagnostics.durationMs,
+            });
+            console.error(`Provider ${providerInfo.id} failed: ${outcome.reason}`);
+          }
+        }
+
         this.gateway.updateRun(run.id, {
           providerStatus: providerDiagnostics.status,
           providerDiagnostics,
         });
-        this.gateway.addEvent(outcome.ok ? "provider.completed" : "provider.failed", {
-          runId: run.id,
-          sessionId: session.id,
-          agentId: routedAgent.id,
-          providerId: providerDiagnostics.providerId,
-          model: providerDiagnostics.model,
-          reason: providerDiagnostics.reason,
-          durationMs: providerDiagnostics.durationMs,
-        });
+
+        if (outcome.ok) {
+          this.gateway.addEvent("provider.completed", {
+            runId: run.id,
+            sessionId: session.id,
+            agentId: routedAgent.id,
+            providerId: providerDiagnostics.providerId,
+            model: providerDiagnostics.model,
+            reason: providerDiagnostics.reason,
+            durationMs: providerDiagnostics.durationMs,
+          });
+        }
+
         response = this.buildProviderFailureFallback({
           providerResponse,
           intents,
