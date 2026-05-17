@@ -39,6 +39,7 @@ import { SandboxRunner } from "./sandbox-runner.js";
 import { EventBus } from "./event-bus.js";
 import { Heartbeat } from "./heartbeat.js";
 import { McpRegistry } from "./mcp-client.js";
+import { SubAgentSpawner } from "./sub-agent-spawner.js";
 
 function truncateAttachmentImport(value, maxChars = 12000) {
   const text = String(value || "").trim();
@@ -181,7 +182,15 @@ export class OmniClawAgent {
       rootDir,
       configStore: this.config,
     });
-    this.webResearch = new WebResearch(this.config);
+    this.webResearch = new WebResearch(this.config, this.secrets);
+    this.subAgentSpawner = new SubAgentSpawner({
+      agentRuntime: this,
+      configStore: this.config,
+      toolRegistry: null,
+      agentRegistry: this.agents,
+      memoryStore: this.memory,
+      taskStore: this.tasks,
+    });
     this.taskRunner = new TaskRunner(this.tasks);
     this.customizationEngine = new CustomizationEngine({
       configStore: this.config,
@@ -213,7 +222,9 @@ export class OmniClawAgent {
       agentRegistry: this.agents,
       connectorStore: this.connectors,
       agentRuntime: this,
+      subAgentSpawner: this.subAgentSpawner,
     });
+    this.subAgentSpawner.toolRegistry = this.tools;
     this.worker = new BackgroundWorker({
       jobStore: this.jobs,
       gatewayStore: this.gateway,
@@ -1800,9 +1811,48 @@ export class OmniClawAgent {
         queue.activeRunId = job.run.id;
         this.syncSessionRunQueue(sessionId);
         try {
-          const result = await this.executeMessageRun(job);
+          // Hard timeout: entire run must complete within 90s
+          const hardTimeoutMs = 90000;
+          const result = await Promise.race([
+            this.executeMessageRun(job),
+            new Promise((_, reject) => setTimeout(
+              () => reject(new Error(`Run timed out after ${hardTimeoutMs}ms. The provider or tool execution took too long.`)),
+              hardTimeoutMs,
+            )),
+          ]);
           job.resolve(result);
         } catch (error) {
+          // Graceful error recovery: save error to run record
+          const failedAt = new Date().toISOString();
+          try {
+            this.gateway.updateRun(job.run.id, {
+              status: "failed",
+              completedAt: failedAt,
+              error: error.message,
+              providerStatus: "failed",
+              providerDiagnostics: {
+                ok: false,
+                status: "failed",
+                reason: "run_timeout",
+                message: error.message,
+                providerId: this.provider.getInfo?.()?.id || "unknown",
+                model: this.provider.getInfo?.()?.model || "",
+                completedAt: failedAt,
+              },
+            });
+            this.sessions.appendMessage(job.session.id, {
+              id: `message_${Date.now()}_error`,
+              at: failedAt,
+              role: "assistant",
+              text: `Request timed out: ${error.message}. The provider took too long to respond. Try a simpler question or check your API connection.`,
+              runId: job.run.id,
+            });
+            this.sessions.finishRun(job.session.id, job.run.id, {
+              status: "error",
+              at: failedAt,
+              error: error.message,
+            });
+          } catch {}
           job.reject(error);
         } finally {
           queue.activeRunId = null;
@@ -1894,10 +1944,21 @@ export class OmniClawAgent {
             agentId: routedAgent.id,
           })
       : [];
-    const profileUpdate = this.updateProfileFromMessage(routedAgent.id, message);
+    const bootstrapFilePresent = this.readBootstrapFile(routedAgent.id) !== null;
+    const profileUpdate = bootstrapFilePresent
+      ? { updated: false, facts: [] }
+      : this.updateProfileFromMessage(routedAgent.id, message);
     const providerInfoForDecision = this.provider.getInfo?.() || {};
     const realProviderReady = providerInfoForDecision.ready !== false && providerInfoForDecision.id !== "mock/local-rule-engine";
-    const forcedResponse = realProviderReady
+
+    // Bootstrap ritual takes priority: if BOOTSTRAP.md exists, the runtime handles the setup state.
+    const hasBootstrap = this.hasBootstrapRitual(routedAgent.id);
+
+    // Human greeting override: only when no bootstrap ritual is active
+    const isSimpleGreeting = intents.includes("greeting") && intents.length <= 2 && !intents.includes("capabilities");
+    const greetingReply = (isSimpleGreeting && !hasBootstrap) ? this.buildGreetingReply({ agent: routedAgent, message, intents }) : "";
+
+    const forcedResponse = greetingReply || (realProviderReady
       ? ""
       : (
           (profileUpdate?.updated ? this.buildProfileUpdateReply({ profileUpdate }) : "") ||
@@ -1906,6 +1967,7 @@ export class OmniClawAgent {
             intents,
             session,
             profileUpdated: Boolean(profileUpdate?.updated),
+            hasBootstrap,
           }) ||
           this.buildDirectRuntimeReply({
             intents,
@@ -1914,15 +1976,15 @@ export class OmniClawAgent {
             tools: availableTools,
             skills: matchedSkills,
           })
-        );
+        ));
     let plan = forcedResponse
       ? {
-          summary: "OpenClaw-style onboarding response.",
+          summary: hasBootstrap ? "Bootstrap ritual active — provider will guide first-run setup." : greetingReply ? "Human greeting response." : "OpenClaw-style onboarding response.",
           intents,
           profile,
           toolsAvailable: availableTools,
-          steps: [{ type: "respond", reason: "Fresh agent profile is incomplete; ask identity and user-profile questions." }],
-          source: "onboarding",
+          steps: [{ type: hasBootstrap ? "bootstrap" : "respond", reason: hasBootstrap ? "BOOTSTRAP.md present; agent will run first-run ritual." : greetingReply ? "Simple greeting; no tools needed." : "Fresh agent profile is incomplete; ask identity and user-profile questions." }],
+          source: hasBootstrap ? "bootstrap" : greetingReply ? "greeting" : "onboarding",
         }
       : await this.planner.buildPlanWithModel({
       message,
@@ -2266,7 +2328,7 @@ export class OmniClawAgent {
         });
       }
 
-      if (item.tool === "delegate_task" && item.output && !item.output.error) {
+      if (item.tool === "delegate_task" && item.output && item.output.delegated && !item.output.error) {
         const { targetAgentId, instruction } = item.output;
         this.queueDelegation({
           sourceAgentId: routedAgent.id,
@@ -2284,6 +2346,7 @@ export class OmniClawAgent {
       const sessionSummary = this.summarizer.readSummary(session.id);
       
       const workspaceContext = this.loadWorkspaceContext(routedAgent.id);
+      const bootstrapRitual = this.hasBootstrapRitual(routedAgent.id) ? this.readBootstrapFile(routedAgent.id) : null;
       
       const contextBundle = this.contextEngine.build({
         message,
@@ -2294,6 +2357,7 @@ export class OmniClawAgent {
         plan,
         toolOutputs,
         workspaceContext,
+        bootstrapRitual,
         recentConversations: agentContext.recentConversations,
         notes: agentContext.notes,
         longTermMemory: agentContext.longTermMemory,
@@ -2334,6 +2398,25 @@ export class OmniClawAgent {
           if (p) candidates.push(p);
         }
 
+        const providerPayload = {
+          message,
+          intents,
+          agent: contextBundle.agent,
+          profile,
+          skills: contextBundle.skills,
+          plan,
+          toolOutputs: contextBundle.toolOutputs,
+          workspaceContext: contextBundle.workspaceContext,
+          bootstrapRitual: contextBundle.bootstrapRitual,
+          recentConversations: contextBundle.recentConversations,
+          notes: contextBundle.notes,
+          longTermMemory: contextBundle.longTermMemory,
+          research: contextBundle.research,
+          artifacts: contextBundle.artifacts,
+          tasks: contextBundle.tasks,
+          tools: contextBundle.tools,
+          contextBundle,
+        };
         const providerTimeoutMs = Math.max(
           5000,
           Math.min(45000, Number(this.config.getConfig().provider?.timeoutMs || 45000)),
@@ -2442,6 +2525,29 @@ export class OmniClawAgent {
       }
 
       response = this.normalizeAssistantReplyStyle({ response, toolOutputs });
+
+      // Process bootstrap ritual: extract profile info from conversation and update files
+      if (this.hasBootstrapRitual(routedAgent.id)) {
+        const bootstrapResult = this.processBootstrapStep(routedAgent.id, message, response);
+        if (bootstrapResult.reply) {
+          response = bootstrapResult.reply;
+        }
+        if (bootstrapResult.updated && bootstrapResult.updates) {
+          this.gateway.addEvent("bootstrap.progress", {
+            runId: run.id,
+            sessionId: session.id,
+            agentId: routedAgent.id,
+            updates: bootstrapResult.updates,
+          });
+          if (bootstrapResult.updates.includes("bootstrap_completed")) {
+            this.gateway.addEvent("bootstrap.completed", {
+              runId: run.id,
+              sessionId: session.id,
+              agentId: routedAgent.id,
+            });
+          }
+        }
+      }
 
       const assistantAt = new Date().toISOString();
       this.sessions.appendMessage(session.id, {
@@ -2601,9 +2707,19 @@ export class OmniClawAgent {
     if (!runtimeToolReply || !Array.isArray(toolOutputs) || toolOutputs.length === 0) {
       return false;
     }
+    // Never dump tools on greetings or identity questions
+    const noToolIntents = new Set([
+      "greeting",
+      "profile-question",
+      "api-setup",
+      "capabilities",
+    ]);
+    if ((intents || []).some((intent) => noToolIntents.has(intent))) {
+      return false;
+    }
     const deterministicIntents = new Set([
       "real-task-hardening",
-      "capabilities",
+      "openclaw-code-study",
       "layer-status",
       "v2-audit",
       "prompt-assembly",
@@ -2611,6 +2727,7 @@ export class OmniClawAgent {
       "memory-lifecycle",
       "skill-system",
       "messaging-gateway",
+      "research",
       "terminal-backends",
       "model-provider",
       "subagent-delegation",
@@ -2646,7 +2763,6 @@ export class OmniClawAgent {
     }
     const deterministicTools = new Set([
       "real_task_health",
-      "capability_demo",
       "list_computer_directory",
       "search_computer_files",
       "read_computer_file",
@@ -2656,6 +2772,10 @@ export class OmniClawAgent {
       "provider_status",
       "list_provider_models",
       "computer_system_status",
+      "web_research",
+      "web_search",
+      "configure_telegram",
+      "openclaw_code_study",
       "run_terminal_command",
       "plan_shell_command",
     ]);
@@ -3453,6 +3573,270 @@ export class OmniClawAgent {
     return this.readAgentProfileText(agentId).replace(/^# PROFILE\s*/i, "").trim().length > 0;
   }
 
+  getBootstrapPath(agentId = "main") {
+    const agent = this.agents.resolveAgent(agentId);
+    return path.join(agent.workspacePath, "BOOTSTRAP.md");
+  }
+
+  readBootstrapFile(agentId = "main") {
+    const bootstrapPath = this.getBootstrapPath(agentId);
+    if (!fs.existsSync(bootstrapPath)) {
+      return null;
+    }
+    return fs.readFileSync(bootstrapPath, "utf8");
+  }
+
+  hasBootstrapRitual(agentId = "main") {
+    const bootstrapPath = this.getBootstrapPath(agentId);
+    if (!fs.existsSync(bootstrapPath)) {
+      return false;
+    }
+    const facts = this.readAgentProfileFacts(agentId);
+    const hasUserName = Boolean(String(facts.userName || "").trim());
+    const hasAssistantName = Boolean(
+      String(facts.assistantName || "").trim() &&
+      !["OmniClaw", "Main Agent"].includes(String(facts.assistantName || "").trim()),
+    );
+    if (hasUserName && hasAssistantName) {
+      fs.unlinkSync(bootstrapPath);
+      return false;
+    }
+    return true;
+  }
+
+  deleteBootstrapFile(agentId = "main") {
+    const bootstrapPath = this.getBootstrapPath(agentId);
+    if (fs.existsSync(bootstrapPath)) {
+      fs.unlinkSync(bootstrapPath);
+      return true;
+    }
+    return false;
+  }
+
+  getAgentWorkspaceFilePath(agentId = "main", fileName = "") {
+    const agent = this.agents.resolveAgent(agentId);
+    return path.join(agent.workspacePath, String(fileName || "").replace(/^[/\\]+/, ""));
+  }
+
+  writeAgentWorkspaceFile(agentId = "main", fileName = "", content = "") {
+    const filePath = this.getAgentWorkspaceFilePath(agentId, fileName);
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, String(content || ""), "utf8");
+    return filePath;
+  }
+
+  extractBootstrapFacts(message = "") {
+    const text = String(message || "").trim();
+    const clean = (value = "") =>
+      String(value || "").replace(/[.。]+$/g, "").replace(/\s+/g, " ").trim();
+    const facts = {
+      skip: /skip bootstrap|bootstrap skip|setup skip/i.test(text),
+    };
+
+    const userNameMatch =
+      text.match(/(?:mera|mara|my)\s+(?:naam|name)\s+([a-zA-Z0-9 _.-]{2,40}?)\s+(?:hai|ha|is)\b/i) ||
+      text.match(/(?:i am|i'm)\s+([a-zA-Z0-9 _.-]{2,40})/i);
+    if (userNameMatch) facts.userName = clean(userNameMatch[1]);
+
+    const locationMatch =
+      text.match(/\b(?:main|mai|i)\b\s+([a-zA-Z0-9 _.-]{2,60})\s+se\s+(?:hoon|hu|ho|hun|am)/i) ||
+      text.match(/(?:from|location is|location)\s+([a-zA-Z0-9 _.-]{2,60})/i);
+    if (locationMatch) {
+      facts.userLocation = clean(locationMatch[1]);
+    } else if (/\bjind\b/i.test(text) || /\bharyana\b/i.test(text)) {
+      facts.userLocation = [/\bjind\b/i.test(text) ? "Jind" : "", /\bharyana\b/i.test(text) ? "Haryana" : ""]
+        .filter(Boolean)
+        .join(", ");
+    }
+
+    const goalMatch =
+      text.match(/(?:build|banana|bna|banani|create|make)\s+([a-zA-Z0-9 _.,-]{3,120})/i) ||
+      text.match(/(?:goal|kaam|project)\s*(?:hai|is|:)?\s*([a-zA-Z0-9 _.,-]{3,120})/i);
+    if (goalMatch) facts.goal = clean(goalMatch[1]);
+
+    if (/vibe coding/i.test(text)) {
+      facts.preference = "User likes vibe coding and building with AI.";
+    } else if (/(practical ai|real work|kaam karke|ai se build|ai sa build)/i.test(text)) {
+      facts.preference = "User prefers practical AI that does real work and helps build things.";
+    }
+
+    const assistantNameMatch =
+      text.match(/(?:tumhara|tera|tara|your|assistant(?: ka)?|agent(?: ka)?)\s+(?:naam|name)\s+([a-zA-Z0-9 _.-]{2,40}?)\s+(?:hai|ha|is|hoga|rakh)\b/i) ||
+      text.match(/(?:call you|name you)\s+([a-zA-Z0-9 _.-]{2,40})/i);
+    if (assistantNameMatch) facts.assistantName = clean(assistantNameMatch[1]);
+
+    const behaviorMatch = text.match(/(?:vibe|personality|behave|tone|baat)\s*(?:hai|is|:)?\s*([a-zA-Z0-9 _.,-]{3,120})/i);
+    if (behaviorMatch) {
+      facts.behavior = clean(behaviorMatch[1]);
+    } else if (/(chill|funny|sharp|practical|direct|warm|hinglish|hindi)/i.test(text)) {
+      facts.behavior = clean(text.slice(0, 160));
+    }
+
+    return facts;
+  }
+
+  writeBootstrapWorkspaceState(agentId = "main", facts = {}) {
+    const current = this.readAgentProfileFacts(agentId);
+    const assistantName = facts.assistantName || current.assistantName || "";
+    const userName = facts.userName || current.userName || "";
+    const userLocation = facts.userLocation || current.userLocation || "";
+    const preferences = [...new Set([
+      ...(current.preferences || []),
+      facts.preference || "",
+      facts.goal ? `User goal: ${facts.goal}` : "",
+    ].filter(Boolean))];
+    const now = new Date().toISOString();
+
+    this.writeAgentWorkspaceFile(agentId, "PROFILE.md", [
+      "# PROFILE",
+      "",
+      `- Assistant name: ${assistantName}`,
+      `- User name: ${userName}`,
+      `- User location: ${userLocation}`,
+      ...preferences.map((item) => `- ${item}`),
+      "",
+      `Updated: ${now}`,
+      "",
+    ].join("\n"));
+
+    if (userName || userLocation || facts.goal || facts.preference) {
+      this.writeAgentWorkspaceFile(agentId, "USER.md", [
+        "# USER",
+        "",
+        `Name: ${userName || "unknown"}`,
+        `Location: ${userLocation || "unknown"}`,
+        `Goal: ${facts.goal || "not set yet"}`,
+        `Preference: ${facts.preference || preferences[0] || "fast, practical, transparent"}`,
+        "",
+      ].join("\n"));
+    }
+
+    if (assistantName || facts.behavior) {
+      this.writeAgentWorkspaceFile(agentId, "IDENTITY.md", [
+        "# IDENTITY",
+        "",
+        `Name: ${assistantName || "Main Agent"}`,
+        "Role: OmniClaw-hosted local agent with memory, skills, tools, sessions, and approvals.",
+        `Behavior: ${facts.behavior || "warm, practical, direct, Hinglish-friendly, and honest about real tool state."}`,
+        "",
+      ].join("\n"));
+    }
+
+    this.writeAgentWorkspaceFile(agentId, "HEARTBEAT.md", [
+      "# HEARTBEAT",
+      "",
+      "- Check pending approvals, jobs, schedules, connector state, and recent failed runs.",
+      "- If no action is needed, reply HEARTBEAT_OK.",
+      "- If user profile or identity is incomplete, ask one setup question.",
+      "",
+    ].join("\n"));
+  }
+
+  processBootstrapStep(agentId = "main", message = "", reply = "") {
+    if (!this.hasBootstrapRitual(agentId)) {
+      return { updated: false, step: "none" };
+    }
+    const facts = this.extractBootstrapFacts(message);
+    const updates = [];
+    const before = this.readAgentProfileFacts(agentId);
+
+    if (facts.skip) {
+      this.writeBootstrapWorkspaceState(agentId, {
+        assistantName: before.assistantName || "Main Agent",
+        userName: before.userName || "",
+        userLocation: before.userLocation || "",
+      });
+      this.deleteBootstrapFile(agentId);
+      return {
+        updated: true,
+        step: "bootstrap_skipped",
+        updates: ["bootstrap_skipped"],
+        reply: "Bootstrap skip kar diya. Main default identity ke saath normal mode me aa gaya hoon. Tum baad me Profile/Identity settings update kar sakte ho.",
+      };
+    }
+
+    if (facts.userName) updates.push(`user_name=${facts.userName}`);
+    if (facts.userLocation) updates.push(`user_location=${facts.userLocation}`);
+    if (facts.goal) updates.push("goal_saved");
+    if (facts.preference) updates.push("preference_saved");
+    if (facts.assistantName) updates.push(`assistant_name=${facts.assistantName}`);
+    if (facts.behavior) updates.push("behavior_saved");
+
+    this.writeBootstrapWorkspaceState(agentId, facts);
+    const currentFacts = this.readAgentProfileFacts(agentId);
+    const hasUserInfo = Boolean(
+      String(currentFacts.userName || "").trim() ||
+      String(currentFacts.userLocation || "").trim() ||
+      facts.goal ||
+      facts.preference,
+    );
+    const hasAssistantInfo = Boolean(
+      String(currentFacts.assistantName || "").trim() &&
+      currentFacts.assistantName !== "OmniClaw",
+    );
+
+    if (!hasUserInfo) {
+      return {
+        updated: updates.length > 0,
+        step: "ask_user",
+        updates,
+        reply: [
+          "Main abhi first-run setup me hoon.",
+          "Tum kaun ho? Apna naam, location, aur OmniClaw se kya build/automate karna chahte ho batao.",
+        ].join(" "),
+      };
+    }
+
+    if (!hasAssistantInfo) {
+      return {
+        updated: true,
+        step: "ask_identity",
+        updates,
+        reply: [
+          "User profile save ho gayi.",
+          "Ab mujhe identity do: mera naam kya rakhu, aur main kis vibe/tone me baat karun?",
+        ].join(" "),
+      };
+    }
+
+    this.writeAgentWorkspaceFile(agentId, "TOOLS.md", [
+      "# TOOLS",
+      "",
+      "OmniClaw runtime tools available through this agent:",
+      "- files: read/write/list/search in configured roots",
+      "- computer: laptop file access, directory search, safe writes/deletes by policy",
+      "- terminal: governed command planning/execution",
+      "- web: web_research and URL fetch",
+      "- memory: notes, long-term memory, session search",
+      "- agents: delegate_task and subagents status/history/cancel",
+      "- provider: BYOK key setup, model fetch, readiness test",
+      "",
+    ].join("\n"));
+    this.deleteBootstrapFile(agentId);
+    updates.push("bootstrap_completed");
+
+    return {
+      updated: true,
+      step: "bootstrap_completed",
+      updates,
+      reply: [
+        "Bootstrap complete.",
+        `Tumhari profile save ho gayi${currentFacts.userName ? `: ${currentFacts.userName}` : ""}${currentFacts.userLocation ? `, ${currentFacts.userLocation}` : ""}.`,
+        `Meri identity save ho gayi: ${currentFacts.assistantName || "Main Agent"}.`,
+        "BOOTSTRAP.md delete kar diya, ab normal agent mode start hai.",
+      ].join(" "),
+    };
+  }
+
+  updateAgentProfile(agentId = "main", fact = "") {
+    const profilePath = this.getAgentProfilePath(agentId);
+    const existing = fs.existsSync(profilePath) ? fs.readFileSync(profilePath, "utf8") : "# PROFILE\n\n";
+    if (!existing.includes(fact)) {
+      const updated = existing.replace(/(Updated:.*)/i, `${fact}\n\n$1`) || `${existing}\n- ${fact}\n`;
+      fs.writeFileSync(profilePath, updated, "utf8");
+    }
+  }
+
   compactPlanForStorage(plan = {}) {
     const tools = Array.isArray(plan.toolsAvailable)
       ? plan.toolsAvailable.map((tool) => ({
@@ -3477,7 +3861,34 @@ export class OmniClawAgent {
     };
   }
 
-  buildOnboardingReply({ agentId = "main", intents = [], session = {}, profileUpdated = false } = {}) {
+  buildGreetingReply({ agent = {}, message = "", intents = [] } = {}) {
+    const profileFacts = this.readAgentProfileFacts(agent.id || "main");
+    const assistantName = (profileFacts.assistantName && profileFacts.assistantName.length > 1) ? profileFacts.assistantName : "OmniClaw";
+    const userName = (profileFacts.userName && profileFacts.userName.length > 1 && !profileFacts.userName.includes(":")) ? profileFacts.userName : "";
+    const lowered = message.toLowerCase();
+    const isUrduHindi = /\b(hlo|helo|hi|hey|salam|namaste|kaise|kya|tum|tera|main|ho|hai)\b/i.test(lowered);
+
+    if (isUrduHindi) {
+      const greeting = userName ? `Haan ${userName}!` : "Haan!";
+      return [
+        `${greeting} Main ${assistantName} hoon, tumhara local AI assistant.`,
+        "Main files, terminal, web research, memory, tasks, aur bohot kuch handle kar sakta hoon.",
+        "Batao, aaj kya kaam hai?",
+      ].join(" ");
+    }
+
+    const greeting = userName ? `Hey ${userName}!` : "Hey!";
+    return [
+      `${greeting} I'm ${assistantName}, your local-first AI assistant.`,
+      "I can help with files, terminal commands, web research, memory, tasks, and more.",
+      "What can I help you with today?",
+    ].join(" ");
+  }
+
+  buildOnboardingReply({ agentId = "main", intents = [], session = {}, profileUpdated = false, hasBootstrap = false } = {}) {
+    if (hasBootstrap) {
+      return "";
+    }
     if (profileUpdated) {
       return "";
     }
@@ -3705,6 +4116,36 @@ export class OmniClawAgent {
 
   buildRuntimeToolReply({ intents = [], toolOutputs = [] } = {}) {
     const byTool = new Map(toolOutputs.map((item) => [item.tool, item.output || {}]));
+    if (intents.includes("research") && (byTool.has("web_research") || byTool.has("web_search"))) {
+      return this.buildGroundedResearchReply({ toolOutputs });
+    }
+
+    if (byTool.has("configure_telegram")) {
+      const result = byTool.get("configure_telegram");
+      if (result.needsToken) {
+        return [
+          "Haan, main Telegram se connect ho sakta hoon. Abhi Telegram connected nahi hai.",
+          "",
+          "Connect karne ke liye mujhe Telegram bot token chahiye:",
+          "1. Telegram me @BotFather open karo.",
+          "2. /newbot se bot banao ya existing bot ka token copy karo.",
+          "3. Yahan bhejo: telegram token <BOT_TOKEN>",
+          "",
+          "Token milte hi main khud adapter enable, token save, test, aur polling worker start kar dunga.",
+          "Bot token chat me visible hota hai, isliye product build me next step secure token modal/pairing code banana chahiye.",
+        ].join("\n");
+      }
+      const adapter = result.adapter || {};
+      const workerRunning = Boolean(result.worker?.running || result.worker?.status === "running");
+      return [
+        "Telegram setup done.",
+        `Adapter: ${adapter.status || "unknown"}; enabled ${adapter.enabled ? "yes" : "no"}; secret saved ${result.secretUpdated ? "yes" : "already configured"}.`,
+        `Test: ${result.test?.ok ? "passed" : "needs attention"}${result.test?.message ? ` - ${result.test.message}` : ""}.`,
+        `Worker: ${workerRunning ? "running" : result.workerError ? `not started - ${result.workerError}` : "not started"}.`,
+        Array.isArray(result.next) && result.next.length ? `Next: ${result.next.join(" ")}` : "",
+      ].filter(Boolean).join("\n");
+    }
+
     if (intents.includes("prompt-assembly") && byTool.has("prompt_assembly_status")) {
       const status = byTool.get("prompt_assembly_status");
       const scopes = {};
@@ -3789,9 +4230,41 @@ export class OmniClawAgent {
     if (intents.includes("messaging-gateway") && byTool.has("messaging_gateway_status")) {
       const status = byTool.get("messaging_gateway_status");
       const overview = status.overview || {};
+      const platforms = Array.isArray(status.configuredPlatforms) ? status.configuredPlatforms : [];
+      const readyPlatforms = platforms
+        .filter((platform) => platform.enabled && ["ready", "configured"].includes(platform.status))
+        .map((platform) => platform.id);
+      const disabledPlatforms = platforms
+        .filter((platform) => !platform.enabled || !["ready", "configured"].includes(platform.status))
+        .map((platform) => {
+          const secretRequired = (platform.capabilities || []).includes("secret-required");
+          const needsSecret = secretRequired && !platform.secretConfigured;
+          const reasons = [
+            !platform.enabled ? "disabled" : "",
+            needsSecret ? "secret/token missing" : "",
+            platform.status && !["ready", "configured"].includes(platform.status) ? `status ${platform.status}` : "",
+          ].filter(Boolean);
+          return `${platform.id}: not connected (${reasons.join(", ") || "not ready"})`;
+        });
+      const telegram = platforms.find((platform) => platform.id === "telegram");
+      const telegramLine = telegram
+        ? `Telegram: ${telegram.enabled && ["ready", "configured"].includes(telegram.status)
+          ? "connected/ready"
+          : `not connected (${[
+            !telegram.enabled ? "adapter disabled" : "",
+            (telegram.capabilities || []).includes("secret-required") && !telegram.secretConfigured ? "bot token missing" : "",
+            telegram.status ? `status ${telegram.status}` : "",
+          ].filter(Boolean).join(", ")})`}.`
+        : "Telegram adapter not found.";
       return [
-        "Hermes-style messaging gateway status ready.",
+        "Haan, main Telegram se connect ho sakta hoon. messaging gateway status ye hai:",
         `Adapters: total ${overview.total || 0}, enabled ${overview.enabled || 0}, ready ${overview.ready || 0}, needs-secret ${overview.needsSecret || 0}.`,
+        readyPlatforms.length ? `Ready platforms: ${readyPlatforms.join(", ")}.` : "Ready platforms: none.",
+        telegramLine,
+        disabledPlatforms.length ? `Not connected: ${disabledPlatforms.join("; ")}.` : "",
+        telegram && !(telegram.enabled && ["ready", "configured"].includes(telegram.status))
+          ? "Setup: Telegram bot token bhejo (`telegram token <BOT_TOKEN>`), main adapter enable karke token save/test/start kar dunga. UI path: Channels -> Adapter: telegram -> Secret/token -> Save adapter -> Start Telegram."
+          : "Telegram ready hai: bot ko /start bhejo, phir Telegram se OmniClaw ko message kar sakte ho.",
         `Session routing: ${status.sessionRouting?.ready ? "on" : "off"}; recent sessions ${status.sessionRouting?.recentSessionCount || 0}.`,
         `Voice/media: ${status.voiceTranscription?.status || "unknown"} - ${status.voiceTranscription?.current || ""}.`,
         `Security: approvals ${status.dmPairingSecurity?.approvals || 0}, trust store ${status.dmPairingSecurity?.trustStore ? "on" : "off"}.`,
@@ -4057,6 +4530,31 @@ export class OmniClawAgent {
       ].filter(Boolean).join("\n");
     }
 
+    if (intents.includes("openclaw-code-study") && byTool.has("openclaw_code_study")) {
+      const study = byTool.get("openclaw_code_study");
+      const stats = study.stats || {};
+      const categories = Object.entries(stats.categoryCounts || {})
+        .sort((left, right) => right[1] - left[1])
+        .map(([name, count]) => `${name}:${count}`)
+        .join(", ");
+      const core = Array.isArray(study.coreDirs) ? study.coreDirs.slice(0, 10) : [];
+      const extensions = Array.isArray(study.extensions) ? study.extensions.slice(0, 12) : [];
+      const plan = Array.isArray(study.implementationPlan) ? study.implementationPlan : [];
+      const skills = byTool.get("openclaw_skill_scan") || {};
+      return [
+        "OpenClaw code study complete.",
+        `Vendor: ${study.available ? "present" : "missing"} at ${study.source || "vendor/openclaw"}. Study guide: ${study.studyGuide?.present ? "loaded" : "not found"} (${study.studyGuide?.chars || 0} chars).`,
+        `Scale: ${stats.coreDirCount || 0} core dirs, ${stats.extensionCount || 0} extensions scanned, ~${stats.tsFilesApprox || 0} TS/TSX files, ${stats.skillFiles || 0} SKILL.md files.`,
+        categories ? `Extension categories: ${categories}.` : "",
+        core.length ? `Core mapping sample: ${core.map((item) => `${item.name} -> ${item.mappedToOmniClaw}`).join(" | ")}` : "",
+        extensions.length ? `Extension sample: ${extensions.map((item) => `${item.id}:${item.category}`).join(", ")}.` : "",
+        `Skill scan: ${skills.totalAvailable || skills.count || 0} OpenClaw skills available; showing ${skills.count || 0}.`,
+        plan.length ? `Implementation phases: ${plan.map((item) => `${item.phase}. ${item.name} (${item.status})`).join(" -> ")}` : "",
+        study.rule || "",
+        "Implemented now: openclaw_code_study tool is wired into the agent, so OmniClaw can inspect the actual OpenClaw vendor tree before choosing what to port.",
+      ].filter(Boolean).join("\n");
+    }
+
     if (intents.includes("layer-status") && byTool.has("layer_status")) {
       const report = byTool.get("layer_status");
       const summary = report.summary || {};
@@ -4184,6 +4682,14 @@ export class OmniClawAgent {
       ? `Local tools ran: ${toolOutputs.map((item) => item.tool).join(", ")}.`
       : "No runtime tools completed before the provider failed.";
 
+    const groundedToolReply = this.buildRuntimeToolReply({ intents, toolOutputs });
+    if (groundedToolReply) {
+      return [
+        groundedToolReply,
+        `Provider final wording failed: ${text.slice(0, 260)}`,
+      ].filter(Boolean).join("\n");
+    }
+
     return [
       "Provider brain failed, so OmniClaw did not generate a fake local answer.",
       toolSummary,
@@ -4245,7 +4751,7 @@ export class OmniClawAgent {
     }
 
     const usefulResults = results.filter((result) =>
-      !/failed|error|aborted|timeout/i.test(String(result.title || result.snippet || "")),
+      result.url && !/no results found|failed|error|aborted|timeout/i.test(String(result.title || result.snippet || "")),
     );
     if (usefulResults.length === 0) {
       const details = results
@@ -4260,19 +4766,70 @@ export class OmniClawAgent {
       ].filter(Boolean).join("\n");
     }
 
-    const primary = usefulResults.find((result) => result.snippet || result.title) || usefulResults[0];
-    const snippet = String(primary.snippet || primary.title || "")
-      .replace(/\s+/g, " ")
-      .trim();
-    const short = snippet.length > 520 ? `${snippet.slice(0, 517)}...` : snippet;
-    const sources = usefulResults
-      .slice(0, 4)
-      .map((result) => `- ${result.title || "Result"}${result.url ? `: ${result.url}` : ""}`);
+    const query = output.query || "query";
+    const snippets = usefulResults
+      .map((result) => String(result.snippet || result.title || "").replace(/\s+/g, " ").trim())
+      .filter(Boolean);
+    const lowerCorpus = `${query} ${snippets.join(" ")}`.toLowerCase();
+    const isOpenClaw = lowerCorpus.includes("openclaw");
+    const footnotes = usefulResults.slice(0, 5).map((result, index) => ({
+      index: index + 1,
+      title: result.title || "Source",
+      url: result.url || "",
+      snippet: snippets[index] || "",
+    }));
+    const sourceRef = (index) => `[^${Math.min(index, footnotes.length || 1)}]`;
 
+    if (isOpenClaw) {
+      return [
+        "## OpenClaw - Research Overview",
+        "",
+        "### Kya Hai OpenClaw?",
+        `OpenClaw ek open-source personal AI assistant / autonomous agent project hai jo user ke apne machine ya infrastructure par run karke messaging channels aur local tools ke through kaam karne ke idea par centered hai. ${sourceRef(1)}`,
+        "",
+        "### Key Features",
+        "",
+        "| Feature | Status from sources |",
+        "|---------|---------------------|",
+        `| Self-hosted/local-first | Sources me personal/open-source assistant aur own infrastructure wording milti hai. ${sourceRef(1)} |`,
+        `| Multi-channel messaging | WhatsApp, Telegram, Discord aur 30+ platforms ka claim source snippets me dikha. ${sourceRef(2)} |`,
+        `| Tool execution | Automation framework/workflows/plugins ka mention mila. ${sourceRef(4)} |`,
+        `| GitHub/open-source ecosystem | OpenClaw GitHub org/source listing mila. ${sourceRef(3)} |`,
+        `| Persistent assistant direction | Wikipedia/source snippet autonomous AI agent framing deta hai. ${sourceRef(5)} |`,
+        "",
+        "### Architecture Idea",
+        "",
+        "```text",
+        "Message / task",
+        "  -> session routing + context",
+        "  -> LLM/model call",
+        "  -> tool calls",
+        "  -> execute tools",
+        "  -> reply back through channel",
+        "```",
+        "",
+        "### OmniClaw ke liye useful lesson",
+        "- Sirf web links dikhana enough nahi hai; research answer ko synthesize karna chahiye.",
+        "- Messaging setup ko direct action dena chahiye: token save, adapter enable, worker start.",
+        "- Tool result + source citations dono reply me visible hone chahiye.",
+        "",
+        "### Sources",
+        ...footnotes.map((source) => `[^${source.index}]: ${source.url || source.title}`),
+      ].join("\n");
+    }
+
+    const bullets = footnotes
+      .slice(0, 4)
+      .map((source) => `- ${source.snippet || source.title} [^${source.index}]`);
     return [
-      `Research result: "${output.query || "query"}" par ${results.length} source(s) mile.`,
-      short ? `Short answer: ${short}` : "",
-      sources.length ? ["Sources:", ...sources].join("\n") : "",
+      `## Research: ${query}`,
+      "",
+      `Mujhe ${usefulResults.length} useful source(s) mile. Short synthesis:`,
+      "",
+      ...bullets,
+      "",
+      "### Sources",
+      ...footnotes.map((source) => `[^${source.index}]: ${source.url || source.title}`),
     ].filter(Boolean).join("\n");
   }
 
@@ -4514,12 +5071,14 @@ export class OmniClawAgent {
     }
     const text = fs.readFileSync(profilePath, "utf8");
     const latestFact = (pattern) => {
-      const matches = [...text.matchAll(pattern)];
-      return matches.length ? matches[matches.length - 1][1]?.trim() || "" : "";
+      const matches = [...text.matchAll(pattern)]
+        .map((match) => String(match[1] || "").trim())
+        .filter(Boolean);
+      return matches.length ? matches[matches.length - 1] : "";
     };
-    const assistantName = latestFact(/Assistant name:\s*([^\r\n]+)/gi);
-    const userName = latestFact(/User name:\s*([^\r\n]+)/gi);
-    const userLocation = latestFact(/User location:\s*([^\r\n]+)/gi);
+    const assistantName = latestFact(/Assistant name:[ \t]*([^\r\n]+)/gi);
+    const userName = latestFact(/User name:[ \t]*([^\r\n]+)/gi);
+    const userLocation = latestFact(/User location:[ \t]*([^\r\n]+)/gi);
     const preferences = text
       .split(/\r?\n/)
       .map((line) => line.replace(/^-\s*/, "").trim())
@@ -4535,14 +5094,14 @@ export class OmniClawAgent {
 
     if (!looksLikeQuestion) {
       const assistantNameMatch =
-        text.match(/(?:tera|tara|tumhara|assistant(?: ka)?|agent(?: ka)?)\s+(?:naam|name)\s+([a-zA-Z0-9 _.-]{2,40})\s+(?:hai|ha|hoga|rakh)/i) ||
+        text.match(/(?:tera|tara|tumhara|assistant(?: ka)?|agent(?: ka)?)\s+(?:naam|name)\s+([a-zA-Z0-9 _.-]{2,40}?)\s+(?:hai|ha|hoga|rakh)\b/i) ||
         text.match(/(?:call you|name you)\s+([a-zA-Z0-9 _.-]{2,40})/i);
       if (assistantNameMatch) {
         facts.push(`Assistant name: ${assistantNameMatch[1].trim().replace(/[.。]+$/, "")}`);
       }
 
       const userNameMatch =
-        text.match(/(?:mera|mara|my)\s+(?:naam|name)\s+([a-zA-Z0-9 _.-]{2,40})\s+(?:hai|ha|is)/i) ||
+        text.match(/(?:mera|mara|my)\s+(?:naam|name)\s+([a-zA-Z0-9 _.-]{2,40}?)\s+(?:hai|ha|is)\b/i) ||
         text.match(/(?:i am|i'm|main|mai)\s+([A-Z][a-zA-Z0-9 _.-]{1,40})\b/);
       if (userNameMatch) {
         facts.push(`User name: ${userNameMatch[1].trim().replace(/[.。]+$/, "")}`);

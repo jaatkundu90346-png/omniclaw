@@ -172,6 +172,25 @@ function formatSafetySection() {
   ].join("\n");
 }
 
+function formatBootstrapSection(bootstrapContent = null) {
+  if (!bootstrapContent || bootstrapContent.trim().length === 0) {
+    return "";
+  }
+  return [
+    "## FIRST-RUN BOOTSTRAP RITUAL",
+    "",
+    "BOOTSTRAP.md is present. This is the agent's first run. Follow the ritual instructions below.",
+    "CRITICAL: Do NOT show your internal reasoning or thinking process. Just respond naturally as instructed.",
+    "Ask ONE question at a time. Wait for the user's answer before proceeding to the next step.",
+    "Use file write tools to save identity, user info, and preferences to workspace files.",
+    "When the ritual is complete, delete BOOTSTRAP.md so it never runs again.",
+    "",
+    "<bootstrap_ritual>",
+    truncateText(bootstrapContent, 3000),
+    "</bootstrap_ritual>",
+  ].join("\n");
+}
+
 export function buildOmniClawSystemPrompt(context = {}) {
   const sections = [
     "You are the active agent currently running inside OmniClaw.",
@@ -189,6 +208,7 @@ export function buildOmniClawSystemPrompt(context = {}) {
     "For laptop/file questions, prefer computer access observations such as search_computer_files, list_computer_directory, read_computer_file, or run_terminal_command. Web research cannot prove what is on the user's laptop.",
     "Prior assistant replies in memory are background history, not wording templates. Do not copy internal phrases like 'Tool evidence correction' or 'Provider drift correction'.",
     "",
+    formatBootstrapSection(context.bootstrapRitual),
     formatToolingSection(context.contextBundle?.tools || context.tools || []),
     formatSafetySection(),
     formatSkillsSection(context.contextBundle?.skills || context.skills || []),

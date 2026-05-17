@@ -1169,9 +1169,44 @@ class WsConnection {
   }
 }
 
-export function attachWsGateway({ server, agent, pathname = "/ws" }) {
+export function attachWsGateway({ server, agent, pathname = "/ws", handler = null }) {
  let pingInterval = null;
   const connections = new Set();
+
+  if (handler) {
+    server.on("upgrade", (req, socket) => {
+      try {
+        const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+        if (url.pathname !== pathname) {
+          return;
+        }
+
+        const upgrade = String(req.headers.upgrade || "").toLowerCase();
+        const key = req.headers["sec-websocket-key"];
+        if (upgrade !== "websocket" || !key) {
+          socket.destroy();
+          return;
+        }
+
+        const accept = computeAcceptValue(String(key));
+        socket.write(
+          [
+            "HTTP/1.1 101 Switching Protocols",
+            "Upgrade: websocket",
+            "Connection: Upgrade",
+            `Sec-WebSocket-Accept: ${accept}`,
+            "",
+            "",
+          ].join("\r\n"),
+        );
+
+        handler(socket, req);
+      } catch {
+        socket.destroy();
+      }
+    });
+    return;
+  }
 
   agent.gateway.onEvent((record) => {
     const message = {

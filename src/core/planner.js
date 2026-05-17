@@ -95,6 +95,21 @@ export class Planner {
       });
     }
 
+    if (intents.includes("openclaw-code-study")) {
+      steps.push({
+        type: "tool",
+        tool: "openclaw_code_study",
+        input: { includeExtensions: true, includeCore: true },
+        reason: "User provided an OpenClaw study guide and wants OmniClaw to study the vendored OpenClaw codebase before implementing features.",
+      });
+      steps.push({
+        type: "tool",
+        tool: "openclaw_skill_scan",
+        input: { source: "all", limit: 16 },
+        reason: "OpenClaw skills are the safest first implementation layer to import into OmniClaw.",
+      });
+    }
+
     if (intents.includes("real-task-hardening")) {
       steps.push({
         type: "tool",
@@ -138,6 +153,17 @@ export class Planner {
     }
 
     if (intents.includes("messaging-gateway")) {
+      const telegramSetup = this.extractTelegramSetup(message);
+      if (telegramSetup.shouldConfigure) {
+        steps.push({
+          type: "tool",
+          tool: "configure_telegram",
+          input: telegramSetup,
+          reason: telegramSetup.botToken
+            ? "The user provided or requested Telegram setup; configure the Telegram adapter."
+            : "The user asked to connect Telegram; explain the token requirement and current status.",
+        });
+      }
       steps.push({
         type: "tool",
         tool: "messaging_gateway_status",
@@ -952,6 +978,24 @@ JSON:`;
       return "artificial intelligence";
     }
     return cleaned || message;
+  }
+
+  extractTelegramSetup(message) {
+    const text = String(message || "");
+    const lowered = text.toLowerCase();
+    const tokenMatch = text.match(/\b\d{6,}:[A-Za-z0-9_-]{20,}\b/);
+    const shouldConfigure = /\btelegram\b/i.test(text) && (
+      Boolean(tokenMatch) ||
+      /connect|setup|set\s*up|enable|start|token|bot|configure|jod|jodo|add|save/i.test(lowered)
+    );
+    return {
+      shouldConfigure,
+      botToken: tokenMatch?.[0] || "",
+      enabled: true,
+      startWorker: Boolean(tokenMatch) || /start|chala|run|enable/i.test(lowered),
+      defaultAgentId: "main",
+      mode: "polling",
+    };
   }
 
   extractComputerSearchQuery(message) {

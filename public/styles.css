@@ -2779,7 +2779,8 @@ body.is-dark .provider-endpoints small {
 }
 
 /* ─── Streaming indicator ──────────────────────────────────────── */
-.chat-bubble.streaming {
+.chat-bubble.streaming,
+.chat-bubble.is-streaming {
   border-left: 3px solid var(--accent);
   animation: pulse-border 1.5s ease-in-out infinite;
 }
@@ -2788,15 +2789,40 @@ body.is-dark .provider-endpoints small {
   50% { border-left-color: transparent; }
 }
 
+/* ─── Loading state ────────────────────────────────────────────── */
+.chat-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px;
+  color: var(--text-muted);
+  font-size: 0.9em;
+}
+.chat-loading::before {
+  content: "";
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--text-muted);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
 /* ─── Markdown in chat bubbles ─────────────────────────────────── */
-.chat-bubble .md-code {
+.chat-bubble .md-code,
+.chat-bubble .md-inline-code {
   background: var(--bg-strong);
   padding: 2px 6px;
   border-radius: 4px;
   font-family: var(--mono);
   font-size: 0.9em;
 }
-.chat-bubble .md-pre {
+.chat-bubble .md-code-block,
+.chat-bubble .md-pre,
+.chat-bubble pre {
   background: var(--bg-strong);
   padding: 12px;
   border-radius: 8px;
@@ -2804,12 +2830,31 @@ body.is-dark .provider-endpoints small {
   font-family: var(--mono);
   font-size: 0.85em;
   margin: 8px 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.chat-bubble .md-code-block code {
+  background: none;
+  padding: 0;
 }
 .chat-bubble .md-p { margin: 4px 0; }
-.chat-bubble .md-ul, .chat-bubble .md-ol {
+.chat-bubble .md-list,
+.chat-bubble .md-ul, .chat-bubble .md-ol,
+.chat-bubble ul, .chat-bubble ol {
   margin: 4px 0;
   padding-left: 20px;
 }
+.chat-bubble .md-h2, .chat-bubble .md-h3, .chat-bubble .md-h4,
+.chat-bubble h2, .chat-bubble h3, .chat-bubble h4 {
+  margin: 8px 0 4px;
+  font-weight: 600;
+}
+.chat-bubble a {
+  color: var(--accent);
+  text-decoration: underline;
+}
+.chat-bubble strong { font-weight: 600; }
+.chat-bubble em { font-style: italic; }
 
 /* ─── Toast notifications ──────────────────────────────────────── */
 .toast-container {

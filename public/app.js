@@ -857,16 +857,71 @@ function renderChatTranscript(session) {
     .map((entry) => {
       const role = entry.role === "assistant" ? "assistant" : entry.role === "user" ? "user" : "system";
       const traceHtml = role === "assistant" ? renderChatToolTrace(entry) : "";
+      const textContent = role === "assistant" ? renderMarkdown(entry.text || "") : escapeHtml(entry.text || "");
       return [
         `<div class="chat-bubble chat-bubble-${escapeHtml(role)}">`,
         `<div class="chat-bubble-meta">${escapeHtml(role)} | ${escapeHtml(formatDate(entry.at))}</div>`,
-        `<div class="chat-bubble-text">${escapeHtml(entry.text || "")}</div>`,
+        `<div class="chat-bubble-text">${textContent}</div>`,
         traceHtml,
         `</div>`,
       ].join("");
     })
     .join("");
   chatTranscript.scrollTop = chatTranscript.scrollHeight;
+}
+
+// ─── Simple Markdown Renderer ──────────────────────────────────
+function renderMarkdownSafe(text) {
+  if (!text) return "";
+  let html = escapeHtml(text);
+  // Code blocks
+  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre class="md-code-block"><code>$2</code></pre>');
+  // Inline code
+  html = html.replace(/`([^`]+)`/g, '<code class="md-inline-code">$1</code>');
+  // Bold
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  // Italic
+  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+  // Headers
+  html = html.replace(/^### (.+)$/gm, '<h4 class="md-h4">$1</h4>');
+  html = html.replace(/^## (.+)$/gm, '<h3 class="md-h3">$1</h3>');
+  html = html.replace(/^# (.+)$/gm, '<h2 class="md-h2">$1</h2>');
+  // Unordered lists
+  html = html.replace(/^- (.+)$/gm, '<li>$1</li>');
+  html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ul class="md-list">$&</ul>');
+  // Links
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  // Line breaks
+  html = html.replace(/\n/g, '<br>');
+  // Clean up extra breaks after block elements
+  html = html.replace(/(<\/(pre|ul|ol|h[234])>)<br>/g, '$1');
+  return html;
+}
+
+function appendChatBubble(role, text, isStreaming = false) {
+  if (!chatTranscript) return null;
+  const bubble = document.createElement("div");
+  bubble.className = `chat-bubble chat-bubble-${role}${isStreaming ? " is-streaming" : ""}`;
+  const meta = role === "assistant" ? "assistant" : role === "user" ? "user" : "system";
+  const time = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  bubble.innerHTML = [
+    `<div class="chat-bubble-meta">${escapeHtml(meta)} | ${escapeHtml(time)}</div>`,
+    `<div class="chat-bubble-text">${role === "assistant" ? renderMarkdown(text) : escapeHtml(text || "")}</div>`,
+  ].join("");
+  chatTranscript.appendChild(bubble);
+  chatTranscript.scrollTop = chatTranscript.scrollHeight;
+  return bubble;
+}
+
+function updateChatBubble(bubble, text) {
+  if (!bubble) return;
+  const textEl = bubble.querySelector(".chat-bubble-text");
+  if (textEl) {
+    textEl.innerHTML = renderMarkdown(text);
+  }
+  if (chatTranscript) {
+    chatTranscript.scrollTop = chatTranscript.scrollHeight;
+  }
 }
 
 function formatChatResponse(data) {
@@ -4208,7 +4263,9 @@ form.addEventListener("submit", async (event) => {
   if (abortRunButton) {
     abortRunButton.disabled = false;
   }
-  chatOutput.textContent = "Running through the gateway...";
+
+  // Show loading state
+  chatOutput.innerHTML = '<div class="chat-loading">Thinking...</div>';
   resetLiveRunTimeline("Waiting for gateway acceptance...");
 
   const selected = selectedSessionSummary();
@@ -4226,6 +4283,9 @@ form.addEventListener("submit", async (event) => {
   ) {
     payload.sessionId = selected.id;
   }
+
+  // Add user message to chat immediately
+  appendChatBubble("user", message);
 
   try {
     const tokenInput = document.querySelector("#gw-token");
@@ -4248,58 +4308,71 @@ form.addEventListener("submit", async (event) => {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
-    let data = {};
-    
-    chatOutput.textContent = "";
+    let fullReply = "";
+    let runId = "";
+    let sessionId = "";
+    let toolOutputs = [];
+
+    // Create assistant bubble for streaming
+    const assistantBubble = appendChatBubble("assistant", "", true);
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
+
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split("\n");
       buffer = lines.pop() || "";
+
       for (const line of lines) {
-        if (line.startsWith("data: ")) {
-          try {
-            const event = JSON.parse(line.slice(6));
-            if (event.type === "token") {
-              chatOutput.textContent += event.content;
-            } else if (event.type === "done") {
-              data = event.data || {};
-              chatOutput.textContent = formatChatResponse(data);
-            } else if (event.type === "error") {
-              throw new Error(event.error || "Unknown stream error");
-            }
-          } catch (err) {
-            // ignore JSON parse errors for incomplete chunks
+        if (!line.startsWith("data: ")) continue;
+        try {
+          const event = JSON.parse(line.slice(6));
+          if (event.type === "token") {
+            fullReply += event.content;
+            updateChatBubble(assistantBubble, fullReply);
+          } else if (event.type === "done" && event.data) {
+            const data = event.data || {};
+            runId = data.run?.id || event.runId || "";
+            sessionId = data.sessionId || data.session?.id || event.sessionId || "";
+            toolOutputs = Array.isArray(data.toolOutputs) ? data.toolOutputs : toolOutputs;
+            fullReply = formatChatResponse(data);
+            updateChatBubble(assistantBubble, fullReply);
+          } else if (event.type === "done") {
+            runId = event.runId || "";
+            sessionId = event.sessionId || "";
+          } else if (event.type === "tools") {
+            toolOutputs = event.toolOutputs || [];
+          } else if (event.type === "error") {
+            fullReply += `\n\nError: ${event.error}`;
+            updateChatBubble(assistantBubble, fullReply);
           }
-        }
+        } catch {}
       }
     }
 
-    if (data.run?.id) {
-      activeRunId = data.run.id;
-      renderLiveRunTimeline("Run completed.");
-    }
     messageInput.value = "";
-    if (data.run?.id) {
-      await fetchPromptTrace(data.run.id);
-      if ((Array.isArray(data.toolOutputs) && data.toolOutputs.length > 0) || data.modelToolLoop?.attempted) {
-        await fetchToolTrace(data.run.id);
+    if (runId) {
+      activeRunId = runId;
+      renderLiveRunTimeline("Run completed.");
+      await fetchPromptTrace(runId);
+      if (toolOutputs.length > 0) {
+        await fetchToolTrace(runId);
       }
     }
-
-    if (data.session?.id) {
-      selectedSessionId = data.session.id;
-      selectedAgentId = normalizeAgentId(data.session.agentId || payload.agentId);
+    if (sessionId) {
+      selectedSessionId = sessionId;
+      selectedAgentId = normalizeAgentId(payload.agentId);
       rememberSelectedSession({ id: selectedSessionId, agentId: selectedAgentId });
-      sessionLabelInput.value = data.session.label || sessionLabelInput.value;
+      sessionLabelInput.value = payload.label || sessionLabelInput.value;
     }
-
     await loadState();
   } catch (error) {
-    chatOutput.textContent =
-      error?.name === "AbortError" ? "Task stopped. Conversation history is still saved." : `Run failed: ${error.message}`;
+    if (error?.name === "AbortError") {
+      appendChatBubble("system", "Task stopped. Conversation history is still saved.");
+    } else {
+      appendChatBubble("system", `Run failed: ${error.message}`);
+    }
   } finally {
     activeChatController = null;
     if (abortRunButton) {
@@ -5042,7 +5115,7 @@ reloadPluginsButton.addEventListener("click", async () => {
   await loadState();
 });
 
-function initGatewayConnection() {
+async function initGatewayConnection() {
   const bootScreen = document.getElementById("boot-screen");
   const gatewayCard = bootScreen?.querySelector(".gateway-card");
   const form = document.getElementById("gateway-connect-form");
@@ -5273,6 +5346,16 @@ function initGatewayConnection() {
 
   updateSetupMode();
   if (!hasCompletedSetup() && firstLaunchForm) {
+    try {
+      const healthResp = await fetch("/api/health");
+      const health = await healthResp.json();
+      if (health?.provider?.ready && health?.provider?.apiKeyConfigured) {
+        markSetupComplete("auto-detected");
+        gatewayCard?.classList.remove("is-first-launch");
+        await autoConnect();
+        return;
+      }
+    } catch {}
     gatewayCard?.classList.add("is-first-launch");
     return;
   }

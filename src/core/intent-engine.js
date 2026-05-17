@@ -278,6 +278,21 @@ export class IntentEngine {
     }
 
     if (
+      (lowered.includes("openclaw") && (
+        lowered.includes("code study") ||
+        lowered.includes("codebase study") ||
+        lowered.includes("sara code") ||
+        lowered.includes("source code") ||
+        lowered.includes("study guide") ||
+        lowered.includes("implement karna") ||
+        lowered.includes("implement karo")
+      )) ||
+      lowered.includes("omniclaw_study_guide")
+    ) {
+      intents.push("openclaw-code-study");
+    }
+
+    if (
       lowered.includes("v2") ||
       lowered.includes("weak") ||
       lowered.includes("kami") ||

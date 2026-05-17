@@ -7,6 +7,8 @@ import { execSync, spawn } from "node:child_process";
 
 import { OmniClawAgent } from "./src/core/agent.js";
 import { attachWsGateway } from "./src/core/ws-gateway.js";
+import { OpenAICompatibleAPI } from "./src/core/openai-api.js";
+import { GatewayWSProtocol } from "./src/core/gateway-ws-protocol.js";
 
 // ─── CORS ──────────────────────────────────────────────────────────
 const CORS_HEADERS = {
@@ -65,6 +67,7 @@ const publicDir = path.join(process.pkg ? runtimeDir : sourceDir, "public");
 const agent = new OmniClawAgent({
   rootDir: runtimeDir,
 });
+const openaiAPI = new OpenAICompatibleAPI(agent);
 const eventClients = new Set();
 
 const port = Number(process.env.PORT || 3147);
@@ -283,13 +286,19 @@ const server = http.createServer(async (req, res) => {
  return;
  }
 
- // Auth check
- if (!checkAuth(req, pathname)) {
- sendJson(res, 401, { error: "Unauthorized. Provide gateway token via Authorization: Bearer <token> or ?token=<token>" });
- return;
- }
+  // Auth check (skip for OpenAI-compatible API - it has its own auth)
+  if (!pathname.startsWith("/v1/") && !checkAuth(req, pathname)) {
+  sendJson(res, 401, { error: "Unauthorized. Provide gateway token via Authorization: Bearer <token> or ?token=<token>" });
+  return;
+  }
 
- // Improved health endpoint
+  // OpenAI-compatible API routes
+  if (pathname.startsWith("/v1/")) {
+    const handled = await openaiAPI.handleRequest(req, res, url, pathname);
+    if (handled) return;
+  }
+
+  // Improved health endpoint
  if (req.method === "GET" && pathname === "/api/health") {
  sendJson(res, 200, {
  ok: true,
@@ -2009,6 +2018,11 @@ if (req.method === "GET" && pathname === "/") {
 });
 
 attachWsGateway({ server, agent, pathname: "/ws" });
+
+const gatewayWSProtocol = new GatewayWSProtocol(agent);
+attachWsGateway({ server, agent, pathname: "/ws/gateway", handler: (ws, req) => gatewayWSProtocol.handleConnection(ws, req) });
+
+agent.gatewayWSProtocol = gatewayWSProtocol;
 
 
 // ─── Session Auto-Compaction (every 10 min) ──────────────────────

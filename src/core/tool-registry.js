@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 function normalizeContext(context = {}) {
@@ -300,6 +301,7 @@ export class ToolRegistry {
     agentRegistry,
     connectorStore,
     agentRuntime,
+    subAgentSpawner,
   }) {
     this.memoryStore = memoryStore;
     this.taskStore = taskStore;
@@ -316,6 +318,7 @@ export class ToolRegistry {
     this.agentRegistry = agentRegistry;
     this.connectorStore = connectorStore;
     this.agentRuntime = agentRuntime;
+    this.subAgentSpawner = subAgentSpawner;
     this.tools = {
       time_now: {
         description: "Get the current local time in ISO format.",
@@ -1055,6 +1058,12 @@ export class ToolRegistry {
         group: "openclaw",
         run: async () => this.getOpenClawVendorStatus(),
       },
+      openclaw_code_study: {
+        description: "Study the vendored OpenClaw source tree and produce an OmniClaw implementation map.",
+        permission: null,
+        group: "openclaw",
+        run: async (input = {}) => this.getOpenClawCodeStudy(input),
+      },
       hermes_reference_status: {
         description: "Summarize Hermes Agent reference ideas and map them to OmniClaw's current runtime.",
         permission: null,
@@ -1163,6 +1172,12 @@ export class ToolRegistry {
         permission: null,
         group: "gateway",
         run: async (_, context) => this.getMessagingGatewayStatus(context),
+      },
+      configure_telegram: {
+        description: "Configure the Telegram Bot adapter from a bot token, test it, and optionally start the polling worker.",
+        permission: "allowConnectorWrite",
+        group: "gateway",
+        run: async (input = {}) => this.configureTelegramAdapter(input),
       },
       terminal_backends_status: {
         description: "Hermes-style terminal backend status: local/docker/ssh/cloud backends, process registry, and approval gates.",
@@ -2067,6 +2082,43 @@ export class ToolRegistry {
         group: "media",
         run: async ({ text }) => this.mediaNotConfigured("tts", text),
       },
+      delegate_task: {
+        description: "Delegate a complex task to a sub-agent that runs independently with its own tool loop. Returns when the sub-agent completes.",
+        permission: "allowTaskWrite",
+        group: "delegation",
+        run: async ({ task, tools, model, timeoutMs, systemPrompt }, context) => {
+          if (!this.subAgentSpawner) {
+            throw new Error("Sub-agent spawner is not available.");
+          }
+          return this.subAgentSpawner.spawn({
+            task: String(task || "").trim(),
+            parentAgentId: this.getAgentId(context),
+            tools: Array.isArray(tools) ? tools : [],
+            model: String(model || "").trim(),
+            timeoutMs: Number(timeoutMs) || 0,
+            systemPrompt: String(systemPrompt || "").trim(),
+            context,
+          });
+        },
+      },
+      subagents: {
+        description: "List active and recently completed sub-agents, or cancel a running sub-agent.",
+        permission: null,
+        group: "delegation",
+        run: async ({ action, agentId } = {}) => {
+          if (!this.subAgentSpawner) {
+            throw new Error("Sub-agent spawner is not available.");
+          }
+          const normalizedAction = String(action || "").toLowerCase();
+          if (normalizedAction === "cancel" && agentId) {
+            return this.subAgentSpawner.cancel(String(agentId).trim());
+          }
+          if (normalizedAction === "history") {
+            return { history: this.subAgentSpawner.getHistory(20) };
+          }
+          return this.subAgentSpawner.getStatus();
+        },
+      },
     };
   }
 
@@ -2706,6 +2758,62 @@ export class ToolRegistry {
     };
   }
 
+  async configureTelegramAdapter(input = {}) {
+    const botToken = String(input.botToken || input.token || input.secret || "").trim();
+    const defaultAgentId = String(input.defaultAgentId || "main").trim() || "main";
+    const startWorker = input.startWorker !== false;
+
+    if (!botToken) {
+      const adapter = this.connectorStore?.getAdapter?.("telegram") || null;
+      return {
+        ok: false,
+        needsToken: true,
+        adapterId: "telegram",
+        status: adapter?.status || "unknown",
+        enabled: Boolean(adapter?.enabled),
+        secretConfigured: Boolean(adapter?.secretConfigured),
+        setup: [
+          "Telegram me @BotFather open karo.",
+          "/newbot se bot banao ya existing bot token copy karo.",
+          "OmniClaw chat me token bhejo: telegram token <BOT_TOKEN>",
+          "Main token save karke Telegram adapter enable/start kar dunga.",
+        ],
+      };
+    }
+
+    const configResult = this.connectorStore.setAdapterConfig({
+      adapterId: "telegram",
+      enabled: input.enabled !== false,
+      defaultAgentId,
+      mode: input.mode || "polling",
+      secret: botToken,
+    });
+    const test = this.connectorStore.testAdapter("telegram");
+    let worker = null;
+    let workerError = "";
+    if (startWorker && this.agentRuntime?.telegramWorker?.start) {
+      try {
+        worker = await this.agentRuntime.telegramWorker.start({ limit: 5 });
+      } catch (error) {
+        workerError = error.message;
+      }
+    }
+
+    return {
+      ok: true,
+      adapterId: "telegram",
+      secretUpdated: Boolean(configResult.secretUpdated),
+      adapter: configResult.adapter,
+      test,
+      worker,
+      workerError,
+      next: [
+        "Telegram me bot ko /start bhejo.",
+        "Phir OmniClaw ko Telegram par message bhejkar poll/start test karo.",
+      ],
+    };
+  }
+
   async getTerminalBackendsStatus(context = {}) {
     const config = this.configStore.getConfig();
     const shellPermissions = config.tools?.permissions || {};
@@ -3214,6 +3322,209 @@ export class ToolRegistry {
         "Use docs/OPENCLAW_TO_OMNICLAW_TRANSPLANT_MAP.md for layer-by-layer runtime work.",
       ],
     };
+  }
+
+  countFilesUnder(dir, { extensions = null, max = 50000 } = {}) {
+    if (!fs.existsSync(dir)) {
+      return 0;
+    }
+    let count = 0;
+    const stack = [dir];
+    const allowed = Array.isArray(extensions) ? new Set(extensions.map((item) => item.toLowerCase())) : null;
+    while (stack.length > 0 && count < max) {
+      const current = stack.pop();
+      let entries = [];
+      try {
+        entries = fs.readdirSync(current, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const entry of entries) {
+        if (["node_modules", ".git", "dist", "target", ".next"].includes(entry.name)) {
+          continue;
+        }
+        const absolutePath = path.join(current, entry.name);
+        if (entry.isDirectory()) {
+          stack.push(absolutePath);
+        } else if (!allowed || allowed.has(path.extname(entry.name).toLowerCase())) {
+          count += 1;
+          if (count >= max) break;
+        }
+      }
+    }
+    return count;
+  }
+
+  listOpenClawExtensionCatalog(limit = 140) {
+    const extensionsDir = path.join(this.getOpenClawRoot(), "extensions");
+    if (!fs.existsSync(extensionsDir)) {
+      return [];
+    }
+    return fs.readdirSync(extensionsDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => {
+        const extensionDir = path.join(extensionsDir, entry.name);
+        const manifestPath = path.join(extensionDir, "openclaw.plugin.json");
+        const packagePath = path.join(extensionDir, "package.json");
+        const manifest = fs.existsSync(manifestPath) ? JSON.parse(fs.readFileSync(manifestPath, "utf8")) : {};
+        const packageJson = fs.existsSync(packagePath) ? JSON.parse(fs.readFileSync(packagePath, "utf8")) : {};
+        const name = entry.name;
+        const category = this.classifyOpenClawExtension(name, manifest, packageJson);
+        return {
+          id: name,
+          category,
+          title: manifest.displayName || manifest.name || packageJson.name || name,
+          description: manifest.description || packageJson.description || "",
+          hasManifest: fs.existsSync(manifestPath),
+          hasPackage: fs.existsSync(packagePath),
+          tsFiles: this.countFilesUnder(extensionDir, { extensions: [".ts", ".tsx"], max: 2000 }),
+          skillFiles: this.walkOpenClawSkillFiles(extensionDir, []).length,
+        };
+      })
+      .sort((left, right) => left.category.localeCompare(right.category) || left.id.localeCompare(right.id))
+      .slice(0, Math.max(1, Math.min(Number(limit) || 140, 300)));
+  }
+
+  classifyOpenClawExtension(name, manifest = {}, packageJson = {}) {
+    const text = [name, manifest.name, manifest.description, packageJson.description].join(" ").toLowerCase();
+    if (/telegram|whatsapp|discord|slack|signal|imessage|bluebubbles|matrix|mattermost|feishu|line|messenger|teams|googlechat|irc|nostr|qqbot|twitch|nextcloud|synology/.test(text)) {
+      return "channel";
+    }
+    if (/openai|anthropic|deepseek|groq|nvidia|minimax|moonshot|qwen|mistral|ollama|openrouter|together|fireworks|bedrock|azure|vertex|gemini|huggingface|cerebras|perplexity|litellm|vllm|lmstudio|venice|qianfan/.test(text)) {
+      return "model-provider";
+    }
+    if (/brave|duckduckgo|exa|firecrawl|searxng|tavily|web|readability/.test(text)) {
+      return "web-search";
+    }
+    if (/speech|tts|audio|voice|deepgram|elevenlabs|senseaudio|talk/.test(text)) {
+      return "speech";
+    }
+    if (/image|video|music|fal|comfy|runway|media/.test(text)) {
+      return "media";
+    }
+    if (/memory|lancedb|wiki|active-memory/.test(text)) {
+      return "memory";
+    }
+    if (/browser|phone|device|pair|file-transfer|diffs|codex|opencode|mcp|acp|qa|diagnostics|webhooks/.test(text)) {
+      return "tooling";
+    }
+    return "other";
+  }
+
+  getOpenClawCodeStudy({ includeExtensions = true, includeCore = true, limit = 140 } = {}) {
+    const root = this.getOpenClawRoot();
+    const studyGuidePath = path.join(os.homedir(), "Downloads", "OMNICLAW_STUDY_GUIDE.md");
+    const coreDirs = includeCore && fs.existsSync(path.join(root, "src"))
+      ? fs.readdirSync(path.join(root, "src"), { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => {
+          const dir = path.join(root, "src", entry.name);
+          return {
+            name: entry.name,
+            tsFiles: this.countFilesUnder(dir, { extensions: [".ts", ".tsx"], max: 5000 }),
+            mappedToOmniClaw: this.mapOpenClawCoreDir(entry.name),
+          };
+        })
+        .sort((left, right) => left.name.localeCompare(right.name))
+      : [];
+    const extensions = includeExtensions ? this.listOpenClawExtensionCatalog(limit) : [];
+    const categories = extensions.reduce((acc, item) => {
+      acc[item.category] = (acc[item.category] || 0) + 1;
+      return acc;
+    }, {});
+    const keyFiles = [
+      "openclaw.mjs",
+      "src/entry.ts",
+      "src/agents/index.ts",
+      "src/gateway/index.ts",
+      "src/channels/base.ts",
+      "src/config/index.ts",
+      "src/plugin-sdk/index.ts",
+    ].map((relative) => ({
+      path: relative,
+      exists: fs.existsSync(path.join(root, relative)),
+    }));
+    const implementationPlan = [
+      {
+        phase: 1,
+        name: "Study and catalog",
+        status: "implemented-now",
+        action: "openclaw_code_study maps core dirs, extensions, key files, and safe import points.",
+      },
+      {
+        phase: 2,
+        name: "Safe skill transplant",
+        status: "available",
+        action: "openclaw_skill_scan/openclaw_skill_import imports SKILL.md guidance into OmniClaw agents.",
+      },
+      {
+        phase: 3,
+        name: "Provider/channel setup parity",
+        status: "next",
+        action: "Turn OpenClaw extension manifests into OmniClaw provider/channel setup cards and token flows.",
+      },
+      {
+        phase: 4,
+        name: "Runtime parity",
+        status: "next",
+        action: "Port selected working adapters one by one: Telegram, browser, web-search, memory, media.",
+      },
+      {
+        phase: 5,
+        name: "Hard sandbox/product installer",
+        status: "next",
+        action: "Installer, permissions, sandbox, and auto-update must be native OmniClaw code, not blind copied.",
+      },
+    ];
+    return {
+      source: "vendor/openclaw",
+      available: fs.existsSync(root),
+      root,
+      studyGuide: {
+        path: studyGuidePath,
+        present: fs.existsSync(studyGuidePath),
+        chars: fs.existsSync(studyGuidePath) ? fs.readFileSync(studyGuidePath, "utf8").length : 0,
+      },
+      stats: {
+        coreDirCount: coreDirs.length,
+        extensionCount: extensions.length,
+        categoryCounts: categories,
+        skillFiles: this.getOpenClawSkillFiles("all").length,
+        tsFilesApprox: this.countFilesUnder(root, { extensions: [".ts", ".tsx"], max: 20000 }),
+      },
+      keyFiles,
+      coreDirs,
+      extensions: extensions.slice(0, 80),
+      implementationPlan,
+      rule: "OpenClaw code is a reference donor. OmniClaw should port compatible patterns/adapters with tests, not paste the full repo into runtime.",
+    };
+  }
+
+  mapOpenClawCoreDir(name) {
+    const map = {
+      agents: "src/core/agent.js + tool loop + sub-agent spawner",
+      gateway: "src/core/ws-gateway.js + connector-store + session routing",
+      channels: "connectors/adapters + Telegram/Discord workers",
+      tools: "src/core/tool-registry.js aliases and native tools",
+      terminal: "run_terminal_command + sandbox-runner + process monitor",
+      "web-search": "src/core/web-research.js providers/fallbacks",
+      "web-fetch": "src/core/web-research.js fetchUrl/read_url",
+      memory: "memory-store + long-term memory + dream sweep",
+      "context-engine": "src/core/context-engine.js + summarizer",
+      sessions: "session-store transcripts and session search",
+      config: "config-store + provider profiles + BYOK UI",
+      secrets: "secret-store provider/connector keys",
+      security: "approval store + shell policy + computer access guard",
+      plugins: "OpenClaw extension catalog -> OmniClaw plugin plan",
+      "plugin-sdk": "future OmniClaw plugin SDK",
+      cron: "job-store + background-worker",
+      pairing: "trust-store pairing requests",
+      media: "connector attachment cache + media analysis",
+      tts: "text_to_speech placeholder -> provider plugin",
+      "image-generation": "image_generate placeholder -> provider plugin",
+      "video-generation": "video_analyze/video provider placeholders",
+    };
+    return map[name] || "not mapped yet";
   }
 
   getHermesVendorStatus() {

@@ -259,6 +259,7 @@ export class ContextEngine {
       artifacts: [],
       tasks: [],
       workspaceContext: null,
+      bootstrapRitual: input.bootstrapRitual || null,
       sessionSummary: null,
       report: null,
     };
@@ -320,6 +321,9 @@ export class ContextEngine {
     if (input.workspaceContext) {
       bundle.workspaceContext = compactWorkspaceContext(input.workspaceContext);
       reserve("workspaceContext", "Workspace identity files", bundle.workspaceContext);
+    }
+    if (input.bootstrapRitual) {
+      reserve("bootstrapRitual", "First-run bootstrap ritual", input.bootstrapRitual);
     }
     reserve("plan", "Planner output", bundle.plan);
 
