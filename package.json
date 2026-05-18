@@ -27,5 +27,8 @@
     "@tauri-apps/cli": "^2.10.1",
     "@yao-pkg/pkg": "^6.19.0",
     "esbuild": "^0.28.0"
+  },
+  "dependencies": {
+    "playwright": "^1.60.0"
   }
 }

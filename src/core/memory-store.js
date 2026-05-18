@@ -531,7 +531,7 @@ ${JSON.stringify(candidates.map(c => ({ id: c.id, title: c.title, text: c.text }
     const q = String(query || "").toLowerCase().trim();
     if (!q) return [];
     return this.filterByAgent(this.read().notes, agentId).filter(note =>
-      note.text.toLowerCase().includes(q)
+      String(note.text || "").toLowerCase().includes(q)
     );
   }
 

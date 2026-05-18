@@ -1030,6 +1030,46 @@ export class ToolRegistry {
         permission: "allowShellExecution",
         run: async ({ filter }) => this.systemMonitor.listProcesses(String(filter || "").trim()),
       },
+      exec: {
+        description: "Execute a shell command with optional background mode. Use background=true for long-running commands. Returns processId for background processes.",
+        permission: "allowShellExecution",
+        group: "terminal",
+        run: async ({ command, cwd, background, timeout }, context) => {
+          const result = await this.shellExecutor.execute({
+            command: String(command || "").trim(),
+            cwd: String(cwd || "").trim(),
+            background: Boolean(background),
+          });
+          return result;
+        },
+      },
+      process_list: {
+        description: "List all background processes started by OmniClaw. Filter by status: running, completed, failed, killed.",
+        permission: null,
+        group: "terminal",
+        run: async ({ status }) => this.shellExecutor.listProcesses({ status }),
+      },
+      process_status: {
+        description: "Get detailed status and output of a background process by ID.",
+        permission: null,
+        group: "terminal",
+        run: async ({ processId }) => this.shellExecutor.getProcessStatus(String(processId || "").trim()),
+      },
+      process_kill: {
+        description: "Kill a running background process by ID. Default signal is SIGTERM.",
+        permission: "allowShellExecution",
+        group: "terminal",
+        run: async ({ processId, signal }) => this.shellExecutor.killProcess(
+          String(processId || "").trim(),
+          String(signal || "SIGTERM").trim()
+        ),
+      },
+      process_cleanup: {
+        description: "Remove completed/failed processes from the registry. Default maxAge is 1 hour.",
+        permission: null,
+        group: "terminal",
+        run: async ({ maxAge }) => this.shellExecutor.cleanupProcesses({ maxAge }),
+      },
       computer_system_status: {
         description: "Check laptop RAM, CPU, OS, and disk storage status.",
         permission: null,
@@ -1692,6 +1732,86 @@ export class ToolRegistry {
         group: "sessions",
         run: async (input) => this.tools.message.run(input),
       },
+
+      browser_open: {
+        description: "Open a URL in a browser. Returns sessionId for subsequent operations.",
+        permission: null,
+        group: "browser",
+        run: async ({ url, sessionId }) => this.browser.open({ url, sessionId }),
+      },
+      browser_view: {
+        description: "View current page content and/or screenshot. Format: markdown, screenshot, or both.",
+        permission: null,
+        group: "browser",
+        run: async ({ sessionId, format }) => this.browser.view({ sessionId, format: format || "markdown" }),
+      },
+      browser_screenshot: {
+        description: "Take a screenshot of current page or specific element.",
+        permission: null,
+        group: "browser",
+        run: async ({ sessionId, fullPage, selector }) => this.browser.screenshot({ sessionId, fullPage, selector }),
+      },
+      browser_click: {
+        description: "Click an element on the page. Use CSS selector.",
+        permission: null,
+        group: "browser",
+        run: async ({ sessionId, selector, waitForNavigation }) => this.browser.click({ sessionId, selector, waitForNavigation }),
+      },
+      browser_type: {
+        description: "Type text into an input field. Set pressEnter=true to submit.",
+        permission: null,
+        group: "browser",
+        run: async ({ sessionId, selector, text, pressEnter }) => this.browser.type({ sessionId, selector, text, pressEnter }),
+      },
+      browser_scroll: {
+        description: "Scroll the page. Direction: up or down.",
+        permission: null,
+        group: "browser",
+        run: async ({ sessionId, direction, amount }) => this.browser.scroll({ sessionId, direction: direction || "down", amount: amount || 500 }),
+      },
+      browser_wait: {
+        description: "Wait for element or timeout in ms.",
+        permission: null,
+        group: "browser",
+        run: async ({ sessionId, selector, timeout }) => this.browser.wait({ sessionId, selector, timeout }),
+      },
+      browser_evaluate: {
+        description: "Run JavaScript in the browser page context.",
+        permission: "allowBrowserEvaluate",
+        group: "browser",
+        run: async ({ sessionId, script }) => this.browser.evaluate({ sessionId, script }),
+      },
+      browser_back: {
+        description: "Navigate back in browser history.",
+        permission: null,
+        group: "browser",
+        run: async ({ sessionId }) => this.browser.goBack({ sessionId }),
+      },
+      browser_forward: {
+        description: "Navigate forward in browser history.",
+        permission: null,
+        group: "browser",
+        run: async ({ sessionId }) => this.browser.goForward({ sessionId }),
+      },
+      browser_close: {
+        description: "Close the browser session.",
+        permission: null,
+        group: "browser",
+        run: async ({ sessionId }) => this.browser.close({ sessionId }),
+      },
+      browser_automate: {
+        description: "Perform multiple browser actions in sequence. Actions: click, type, scroll, wait, screenshot, evaluate.",
+        permission: null,
+        group: "browser",
+        run: async ({ url, actions, sessionId }) => this.browser.automate({ url, actions, sessionId }),
+      },
+      browser_sessions: {
+        description: "List all active browser sessions.",
+        permission: null,
+        group: "browser",
+        run: async () => this.browser.listSessions(),
+      },
+
       sessions_spawn: {
         description: "Start a new OmniClaw session lane by label, agent, and channel.",
         permission: null,
