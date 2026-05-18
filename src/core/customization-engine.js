@@ -167,6 +167,72 @@ export class CustomizationEngine {
     };
   }
 
+  async configureProviderBrain(input = {}) {
+    const config = this.configStore.getConfig();
+    const profileId = String(input.profileId || input.providerId || "").trim();
+    const profile = profileId ? config.providerProfiles?.[profileId] : null;
+    const providerKeyId = String(
+      input.apiKeyProviderId ||
+      profile?.apiKeyProviderId ||
+      profileId ||
+      config.provider?.apiKeyProviderId ||
+      "openai-compatible",
+    ).trim();
+    const apiKey = String(input.apiKey || "").trim();
+
+    let keyStatus = this.secretStore.getProviderKeyStatus(providerKeyId);
+    if (apiKey) {
+      keyStatus = this.secretStore.setProviderKey(providerKeyId, apiKey);
+    }
+
+    const providerPatch = {
+      ...(profile || {}),
+      mode: String(input.mode || profile?.mode || config.provider?.mode || "openai-compatible").trim(),
+      baseUrl: String(input.baseUrl || profile?.baseUrl || config.provider?.baseUrl || "").trim(),
+      model: String(input.model || profile?.model || config.provider?.model || "").trim(),
+      apiKeyProviderId: providerKeyId,
+      httpReferer: String(input.httpReferer || profile?.httpReferer || config.provider?.httpReferer || "").trim(),
+      appTitle: String(input.appTitle || profile?.appTitle || config.provider?.appTitle || config.app?.name || "").trim(),
+    };
+
+    this.validateProviderProfile(profileId || providerKeyId || "active", providerPatch);
+    const updatedConfig = this.configStore.updateUserConfig({ provider: providerPatch });
+    const readiness = await this.testProviderProfile({
+      ...providerPatch,
+      live: input.live === false ? false : true,
+      timeoutMs: input.timeoutMs || 45000,
+    });
+
+    let models = null;
+    if (input.fetchModels) {
+      models = await this.listProviderModels({
+        ...providerPatch,
+        timeoutMs: input.timeoutMs || 45000,
+      });
+    }
+
+    return {
+      updated: true,
+      profileId: profileId || null,
+      mode: providerPatch.mode,
+      baseUrl: providerPatch.baseUrl,
+      model: providerPatch.model,
+      apiKeyProviderId: providerKeyId,
+      keySaved: Boolean(apiKey),
+      keyStatus,
+      readiness,
+      models,
+      config: {
+        provider: {
+          mode: updatedConfig.provider?.mode,
+          baseUrl: updatedConfig.provider?.baseUrl,
+          model: updatedConfig.provider?.model,
+          apiKeyProviderId: updatedConfig.provider?.apiKeyProviderId,
+        },
+      },
+    };
+  }
+
   getProviderKeyStatus(input = {}) {
     const providerId = String(input.providerId || "").trim();
     if (providerId) {

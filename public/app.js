@@ -23,6 +23,7 @@ const messageInput = document.querySelector("#message");
 const chatOutput = document.querySelector("#chat-output");
 const chatTranscript = document.querySelector("#chat-transcript");
 const liveRunOutput = document.querySelector("#live-run-output");
+const computerStage = document.querySelector(".computer-stage");
 const clearOutputButton = document.querySelector("#clear-output");
 const abortRunButton = document.querySelector("#abort-run");
 const globalSearchInput = document.querySelector("#global-search");
@@ -96,6 +97,7 @@ const approvalOutput = document.querySelector("#approval-output");
 const workspaceOutput = document.querySelector("#workspace-output");
 const approveLatestButton = document.querySelector("#approve-latest");
 const resetSessionButton = document.querySelector("#reset-session");
+const cleanupHistoryButton = document.querySelector("#cleanup-history");
 const pluginOutput = document.querySelector("#plugin-output");
 const pluginDetailOutput = document.querySelector("#plugin-detail-output");
 const pluginConfigFields = document.querySelector("#plugin-config-fields");
@@ -253,6 +255,14 @@ let activeChatController = null;
 let activeRunId = "";
 let activeRunEvents = [];
 let activeRunStartedAt = 0;
+let activeAssistantBubble = null;
+let activeLiveEvidence = {
+  toolOutputs: [],
+  modelToolLoop: null,
+  providerDiagnostics: null,
+  plan: { summary: "Waiting for runtime events..." },
+  run: {},
+};
 const providerFetchedModelCache = new Map();
 
 function readStoredValue(key, fallback = "") {
@@ -782,10 +792,13 @@ function renderChatToolTrace(entry = {}) {
   const blocks = [];
 
   if (provider?.status || entry.planSummary) {
+    const routeLabel = provider?.status ? "Provider" : "Route";
+    const routeStatus = provider?.status || "local";
+    const routeTone = provider?.status ? toneForStatus(provider.status) : "muted";
     blocks.push([
       `<div class="chat-trace-card chat-trace-card-provider">`,
-      `<div class="chat-trace-head"><strong>Provider</strong>${provider?.status ? statusPill(provider.status, toneForStatus(provider.status)) : ""}</div>`,
-      `<p>${escapeHtml(entry.planSummary || provider?.reason || "Provider response completed.")}</p>`,
+      `<div class="chat-trace-head"><strong>${escapeHtml(routeLabel)}</strong>${statusPill(routeStatus, routeTone)}</div>`,
+      `<p>${escapeHtml(entry.planSummary || provider?.reason || (provider?.status ? "Provider response completed." : "Local runtime answered without a provider call."))}</p>`,
       provider?.durationMs ? `<small>${escapeHtml(`${provider.providerId || "provider"} | ${provider.model || "model"} | ${provider.durationMs}ms`)}</small>` : "",
       `</div>`,
     ].join(""));
@@ -836,6 +849,107 @@ function renderChatToolTrace(entry = {}) {
   }
 
   return blocks.length ? `<div class="chat-trace">${blocks.join("")}</div>` : "";
+}
+
+function eventStatusForTool(record = {}) {
+  const name = String(record.event || "");
+  const payload = record.payload || {};
+  if (name.endsWith(".tool_started") || name === "tool.started") {
+    return "running";
+  }
+  if (name.endsWith(".tool_completed") || name === "tool.completed") {
+    return payload.error ? "failed" : payload.blocked ? "blocked" : "completed";
+  }
+  if (name === "tool.failed") {
+    return "failed";
+  }
+  return "";
+}
+
+function mergeLiveEvidenceEvent(record = {}) {
+  const name = String(record.event || "");
+  const payload = record.payload || {};
+  const runId = payload.runId || activeRunId || "";
+  activeLiveEvidence.run = {
+    ...(activeLiveEvidence.run || {}),
+    id: runId,
+    status: name === "agent.completed" ? "completed" : name === "agent.failed" ? "failed" : "running",
+  };
+  if (name === "provider.started") {
+    activeLiveEvidence.providerDiagnostics = {
+      status: "running",
+      providerId: payload.providerId || "provider",
+      model: payload.model || "",
+      reason: "Provider request started.",
+    };
+    activeLiveEvidence.plan = { summary: "Provider brain is thinking with runtime context." };
+  }
+  if (name === "provider.completed" || name === "provider.failed") {
+    activeLiveEvidence.providerDiagnostics = {
+      ...(activeLiveEvidence.providerDiagnostics || {}),
+      status: name === "provider.completed" ? "completed" : "failed",
+      providerId: payload.providerId || activeLiveEvidence.providerDiagnostics?.providerId || "provider",
+      model: payload.model || activeLiveEvidence.providerDiagnostics?.model || "",
+      durationMs: payload.durationMs || activeLiveEvidence.providerDiagnostics?.durationMs || 0,
+      reason: payload.reason || payload.message || "",
+    };
+  }
+  if (name === "model_tool_loop.round_started") {
+    activeLiveEvidence.modelToolLoop = {
+      ...(activeLiveEvidence.modelToolLoop || {}),
+      attempted: true,
+      rounds: Math.max(Number(activeLiveEvidence.modelToolLoop?.rounds || 0), Number(payload.round || 0)),
+      stoppedReason: "running",
+      roundDetails: [
+        ...((activeLiveEvidence.modelToolLoop?.roundDetails || []).filter((item) => item.round !== payload.round)),
+        { round: payload.round, status: "running" },
+      ],
+    };
+  }
+  if (name === "model_tool_loop.native_fallback") {
+    activeLiveEvidence.modelToolLoop = {
+      ...(activeLiveEvidence.modelToolLoop || {}),
+      attempted: true,
+      errors: [...(activeLiveEvidence.modelToolLoop?.errors || []), `native fallback: ${payload.error || "provider did not return native tool calls"}`],
+    };
+  }
+  const toolStatus = eventStatusForTool(record);
+  if (toolStatus && payload.tool) {
+    const source = name.startsWith("model_tool_loop") ? "model-tool-loop" : "runtime-plan";
+    const existing = activeLiveEvidence.toolOutputs.find((item) => item.tool === payload.tool && item.source === source && item.round === payload.round);
+    const liveTool = {
+      tool: payload.tool,
+      source,
+      round: payload.round || null,
+      reason: payload.reason || (toolStatus === "running" ? "Tool is running." : "Tool event completed."),
+      toolSummary: {
+        status: toolStatus,
+      },
+      output: {
+        status: toolStatus,
+        ok: toolStatus === "completed",
+        message: toolStatus === "running" ? "Running now..." : toolStatus,
+      },
+    };
+    if (existing) {
+      Object.assign(existing, liveTool);
+    } else {
+      activeLiveEvidence.toolOutputs.push(liveTool);
+    }
+    activeLiveEvidence.modelToolLoop = {
+      ...(activeLiveEvidence.modelToolLoop || {}),
+      attempted: true,
+      toolCallCount: activeLiveEvidence.toolOutputs.filter((item) => item.source === "model-tool-loop").length,
+    };
+  }
+}
+
+function renderLiveEvidenceInChat() {
+  if (!activeAssistantBubble) {
+    return;
+  }
+  updateChatBubbleTrace(activeAssistantBubble, activeLiveEvidence);
+  renderComputerEvidence(activeLiveEvidence);
 }
 
 function renderChatTranscript(session) {
@@ -924,63 +1038,160 @@ function updateChatBubble(bubble, text) {
   }
 }
 
+function updateChatBubbleTrace(bubble, data = {}) {
+  if (!bubble || !data || typeof data !== "object") return;
+  let traceEl = bubble.querySelector(".chat-trace");
+  const traceHtml = renderChatToolTrace({
+    toolOutputs: data.toolOutputs || [],
+    modelToolLoop: data.modelToolLoop || null,
+    providerDiagnostics: data.providerDiagnostics || null,
+    planSummary: data.plan?.summary || "",
+  });
+  if (!traceHtml) {
+    return;
+  }
+  if (traceEl) {
+    traceEl.outerHTML = traceHtml;
+  } else {
+    bubble.insertAdjacentHTML("beforeend", traceHtml);
+  }
+  if (chatTranscript) {
+    chatTranscript.scrollTop = chatTranscript.scrollHeight;
+  }
+}
+
+function runEvidenceStats(data = {}) {
+  const outputs = Array.isArray(data.toolOutputs) ? data.toolOutputs : [];
+  const loop = data.modelToolLoop && typeof data.modelToolLoop === "object" ? data.modelToolLoop : {};
+  const provider = data.providerDiagnostics && typeof data.providerDiagnostics === "object" ? data.providerDiagnostics : {};
+  const completed = outputs.filter((item) => toolOutputStatus(item) === "completed").length;
+  const failed = outputs.filter((item) => ["failed", "blocked"].includes(toolOutputStatus(item))).length;
+  const pending = outputs.filter((item) => toolOutputStatus(item) === "pending-approval").length;
+  return {
+    outputs,
+    loop,
+    provider,
+    completed,
+    failed,
+    pending,
+    total: outputs.length,
+  };
+}
+
+function renderComputerEvidence(data = {}) {
+  if (!computerStage) {
+    return;
+  }
+  const stats = runEvidenceStats(data);
+  const run = data.run || {};
+  const route = stats.provider.status
+    ? `${stats.provider.status}${stats.provider.durationMs ? ` in ${stats.provider.durationMs}ms` : ""}`
+    : data.plan?.source || "local runtime";
+  const loopTone = stats.loop.errors?.length ? "danger" : stats.loop.toolCallCount ? "ok" : "muted";
+  const toolRows = stats.outputs.slice(-6).map((item) => {
+    const status = toolOutputStatus(item);
+    const tone = status === "completed" ? "ok" : status === "pending-approval" ? "warn" : "danger";
+    return [
+      `<div class="evidence-row">`,
+      `<span>${escapeHtml(item.tool || "tool")}</span>`,
+      statusPill(status, tone),
+      `<small>${escapeHtml(truncate(summarizeToolOutput(item), 92))}</small>`,
+      `</div>`,
+    ].join("");
+  }).join("");
+  computerStage.innerHTML = [
+    `<div class="evidence-board">`,
+    `<div class="evidence-board-head">`,
+    `<span class="stage-orb evidence-orb" aria-hidden="true"></span>`,
+    `<div>`,
+    `<strong>Run evidence</strong>`,
+    `<p>${escapeHtml(run.id || activeRunId || "latest run")} | ${escapeHtml(route)}</p>`,
+    `</div>`,
+    `</div>`,
+    `<div class="evidence-metrics">`,
+    `<span><strong>${escapeHtml(String(stats.completed))}/${escapeHtml(String(stats.total))}</strong><small>tools done</small></span>`,
+    `<span><strong>${escapeHtml(String(stats.loop.rounds || 0))}</strong><small>brain rounds</small></span>`,
+    `<span><strong>${escapeHtml(String(stats.failed + stats.pending))}</strong><small>attention</small></span>`,
+    `</div>`,
+    `<div class="evidence-loop">`,
+    `<div class="chat-trace-head"><strong>Brain loop</strong>${statusPill(stats.loop.stoppedReason || stats.loop.skippedReason || "checked", loopTone)}</div>`,
+    `<small>${escapeHtml([
+      stats.loop.nativeToolsUsed ? "native tools" : "",
+      stats.loop.toolCallCount ? `${stats.loop.toolCallCount} tool call(s)` : "no extra tool calls",
+      stats.loop.recoveredToolCalls ? `${stats.loop.recoveredToolCalls} recovered` : "",
+      stats.loop.errors?.length ? `${stats.loop.errors.length} error(s)` : "",
+    ].filter(Boolean).join(" | "))}</small>`,
+    `</div>`,
+    toolRows ? `<div class="evidence-tools">${toolRows}</div>` : `<div class="evidence-empty">No tool execution was needed for this answer.</div>`,
+    `</div>`,
+  ].join("");
+}
+
+function resetComputerStage(message = "Browser, files, terminal, and memory show up here.", detail = "When a task is running, this area becomes the agent's visible work log.") {
+  if (!computerStage) {
+    return;
+  }
+  computerStage.innerHTML = [
+    `<span class="stage-orb"></span>`,
+    `<strong>${escapeHtml(message)}</strong>`,
+    `<p>${escapeHtml(detail)}</p>`,
+  ].join("");
+}
+
 function formatChatResponse(data) {
   if (data.error) {
-    return `ERROR\n${data.error}\n\n${formatJson(data)}`;
+    return `Error: ${data.error}`;
   }
 
   const run = data.run || {};
   const session = data.session || {};
   const agent = data.agent || {};
-  const provider = data.provider || {};
   const plan = data.plan || {};
+  const toolOutputs = Array.isArray(data.toolOutputs) ? data.toolOutputs : [];
+  const diagnostics = data.providerDiagnostics || null;
+  const route =
+    diagnostics?.status
+      ? `provider ${diagnostics.status}${diagnostics.durationMs ? ` (${diagnostics.durationMs}ms)` : ""}`
+      : toolOutputs.length
+        ? "local tools"
+        : "local runtime";
   const lines = [
-    `RUN ${run.id || "unknown"} -> ${run.status || "unknown"}`,
-    `SESSION ${session.label || "main"} | ${session.channel || "webchat"}`,
-    `AGENT ${agent.id || session.agentId || "main"}${agent.profileId ? ` | ${agent.profileId}` : ""}`,
-    `PROVIDER ${provider.id || "unknown"}`,
-    "",
     data.reply || "(no reply)",
+    "",
+    `Run: ${run.status || "unknown"} | Agent: ${agent.id || session.agentId || "main"}${agent.profileId ? `/${agent.profileId}` : ""} | Route: ${route}`,
   ];
 
-  if (data.providerDiagnostics) {
-    const diag = data.providerDiagnostics;
-    lines.push(
-      "",
-      `PROVIDER STATUS ${diag.status || "unknown"}${diag.reason ? ` | ${diag.reason}` : ""}${diag.durationMs ? ` | ${diag.durationMs}ms` : ""}`,
-    );
-    if (diag.message) {
-      lines.push(diag.message);
-    }
+  if (diagnostics?.message && diagnostics.status !== "completed") {
+    lines.push(`Provider detail: ${diagnostics.message}`);
   }
 
   if (Array.isArray(data.intents) && data.intents.length > 0) {
-    lines.push("", `INTENTS ${data.intents.join(", ")}`);
+    lines.push(`Intent: ${data.intents.join(", ")}`);
   }
 
   if (plan.summary) {
-    lines.push("", `PLAN ${plan.summary}`);
+    lines.push(`Plan: ${plan.summary}`);
   }
 
-  if (Array.isArray(plan.steps) && plan.steps.length > 0) {
+  if (toolOutputs.length > 0) {
+    const completed = toolOutputs.filter((item) => toolOutputStatus(item) === "completed").length;
+    const attention = toolOutputs.length - completed;
+    lines.push(`Tools: ${completed}/${toolOutputs.length} completed${attention ? `, ${attention} need attention` : ""}.`);
+  } else if (run.id) {
+    lines.push("Tools: none needed.");
+  }
+
+  if (Array.isArray(plan.steps) && plan.steps.length > 0 && toolOutputs.length === 0) {
     lines.push(
       ...plan.steps.map((step, index) => {
         const tool = step.tool ? ` | ${step.tool}` : "";
-        return `${index + 1}. ${step.type}${tool} - ${step.reason || "no reason"}`;
+        return `Step ${index + 1}: ${step.type}${tool} - ${step.reason || "no reason"}`;
       }),
     );
   }
 
-  if (Array.isArray(data.toolOutputs) && data.toolOutputs.length > 0) {
-    lines.push("", "TOOL OUTPUTS", formatJson(data.toolOutputs));
-  }
-
-  if (data.modelToolLoop) {
-    lines.push("", "BRAIN LOOP", formatJson(data.modelToolLoop));
-  }
-
   if (Array.isArray(data.approvals) && data.approvals.length > 0) {
-    lines.push("", `APPROVALS ${data.approvals.length} pending`);
+    lines.push(`Approvals: ${data.approvals.length} pending`);
   }
 
   return lines.join("\n");
@@ -990,6 +1201,13 @@ function resetLiveRunTimeline(message = "Starting gateway run...") {
   activeRunId = "";
   activeRunEvents = [];
   activeRunStartedAt = Date.now();
+  activeLiveEvidence = {
+    toolOutputs: [],
+    modelToolLoop: null,
+    providerDiagnostics: null,
+    plan: { summary: message },
+    run: {},
+  };
   renderLiveRunTimeline(message);
 }
 
@@ -1012,7 +1230,7 @@ function renderLiveRunTimeline(fallback = "No active run.") {
     if (name === "model_tool_loop.tool_completed" || name === "tool.completed") return `Tool done: ${lastPayload.tool || "tool"}`;
     if (name === "tool.failed") return `Tool failed: ${lastPayload.tool || "tool"}`;
     if (name === "context.compacted") return "Building context";
-    if (name === "agent.completed") return "Task completed";
+    if (name === "agent.completed") return lastPayload.directLocalReply ? "Answered from local memory" : "Task completed";
     if (name === "agent.failed") return "Task failed";
     return "Working";
   })();
@@ -1022,8 +1240,9 @@ function renderLiveRunTimeline(fallback = "No active run.") {
     const provider = payload.providerId ? ` | ${payload.providerId}${payload.model ? `/${payload.model}` : ""}` : "";
     const status = payload.status ? ` | ${payload.status}` : "";
     const reason = payload.reason ? ` | ${payload.reason}` : "";
+    const direct = payload.directLocalReply ? " | local reply" : "";
     const time = record.at ? formatDate(record.at) : "now";
-    return `${time}  ${record.event || record.type}${tool}${provider}${status}${reason}`;
+    return `${time}  ${record.event || record.type}${tool}${provider}${status}${reason}${direct}`;
   });
   liveRunOutput.innerHTML = [
     `<div class="live-run-header">${escapeHtml(header)}</div>`,
@@ -1057,6 +1276,8 @@ function trackLiveRunEvent(record) {
     return;
   }
   activeRunEvents.push(record);
+  mergeLiveEvidenceEvent(record);
+  renderLiveEvidenceInChat();
   renderLiveRunTimeline("Waiting for first gateway event...");
 }
 
@@ -1398,6 +1619,19 @@ function pickSessionForAgent(agentId, sessions = []) {
       (session) => normalizeAgentId(session.agentId) === normalized && session.lifecycleState !== "archived",
     ) ||
     sessions.find((session) => normalizeAgentId(session.agentId) === normalized) ||
+    null
+  );
+}
+
+function pickActiveSession({ sessions = [], selectedId = "", agentId = "" } = {}) {
+  const activeSessions = sessions.filter((session) => session.lifecycleState !== "archived");
+  const selected = activeSessions.find((session) => session.id === selectedId) || null;
+  if (selected) {
+    return selected;
+  }
+  return (
+    pickSessionForAgent(agentId || selectedAgentId || "main", activeSessions) ||
+    activeSessions[0] ||
     null
   );
 }
@@ -1838,8 +2072,9 @@ function renderSessions(state) {
     selectedAgentId = selectedSessionSummary()?.agentId || state.agents?.[0]?.id || "main";
   }
 
-  if (!sessions.some((item) => item.id === selectedSessionId)) {
-    const preferred = pickSessionForAgent(selectedAgentId, sessions) || sessions[0] || null;
+  const selectedCandidate = sessions.find((item) => item.id === selectedSessionId) || null;
+  if (!selectedCandidate || selectedCandidate.lifecycleState === "archived") {
+    const preferred = pickActiveSession({ sessions, selectedId: selectedSessionId, agentId: selectedAgentId });
     selectedSessionId = preferred ? preferred.id : "";
     if (preferred) {
       rememberSelectedSession(preferred);
@@ -4100,15 +4335,24 @@ async function loadState() {
     latestGateway = gateway;
     syncRuntimeControls(state);
 
-    const selectedSession = state.sessions?.find((item) => item.id === selectedSessionId) || null;
+    const selectedSession = pickActiveSession({
+      sessions: state.sessions || [],
+      selectedId: selectedSessionId,
+      agentId: selectedAgentId || "main",
+    });
     if (selectedSession) {
+      selectedSessionId = selectedSession.id;
       selectedAgentId = normalizeAgentId(selectedSession.agentId);
+      rememberSelectedSession(selectedSession);
+    } else if (selectedSessionId) {
+      selectedSessionId = "";
+      rememberSelectedSession(null);
     }
     if (!state.agents?.some((agent) => agent.id === selectedAgentId)) {
       selectedAgentId = selectedSession?.agentId || state.agents?.[0]?.id || "main";
     }
 
-    const detail = await fetchSessionDetail(selectedSessionId || state.sessions?.[0]?.id || "");
+    const detail = await fetchSessionDetail(selectedSessionId || "");
     if (!selectedSessionId && detail?.id) {
       selectedSessionId = detail.id;
       selectedAgentId = normalizeAgentId(detail.agentId || selectedAgentId);
@@ -4267,6 +4511,7 @@ form.addEventListener("submit", async (event) => {
   // Show loading state
   chatOutput.innerHTML = '<div class="chat-loading">Thinking...</div>';
   resetLiveRunTimeline("Waiting for gateway acceptance...");
+  resetComputerStage("Starting task", "OmniClaw will show real tool evidence here as soon as the run completes.");
 
   const selected = selectedSessionSummary();
   const payload = {
@@ -4315,6 +4560,8 @@ form.addEventListener("submit", async (event) => {
 
     // Create assistant bubble for streaming
     const assistantBubble = appendChatBubble("assistant", "", true);
+    activeAssistantBubble = assistantBubble;
+    renderLiveEvidenceInChat();
 
     while (true) {
       const { done, value } = await reader.read();
@@ -4338,6 +4585,15 @@ form.addEventListener("submit", async (event) => {
             toolOutputs = Array.isArray(data.toolOutputs) ? data.toolOutputs : toolOutputs;
             fullReply = formatChatResponse(data);
             updateChatBubble(assistantBubble, fullReply);
+            updateChatBubbleTrace(assistantBubble, data);
+            renderComputerEvidence(data);
+            activeLiveEvidence = {
+              toolOutputs: Array.isArray(data.toolOutputs) ? data.toolOutputs : [],
+              modelToolLoop: data.modelToolLoop || null,
+              providerDiagnostics: data.providerDiagnostics || null,
+              plan: data.plan || {},
+              run: data.run || {},
+            };
           } else if (event.type === "done") {
             runId = event.runId || "";
             sessionId = event.sessionId || "";
@@ -4356,9 +4612,7 @@ form.addEventListener("submit", async (event) => {
       activeRunId = runId;
       renderLiveRunTimeline("Run completed.");
       await fetchPromptTrace(runId);
-      if (toolOutputs.length > 0) {
-        await fetchToolTrace(runId);
-      }
+      await fetchToolTrace(runId);
     }
     if (sessionId) {
       selectedSessionId = sessionId;
@@ -4375,6 +4629,7 @@ form.addEventListener("submit", async (event) => {
     }
   } finally {
     activeChatController = null;
+    activeAssistantBubble = null;
     if (abortRunButton) {
       abortRunButton.disabled = true;
     }
@@ -4387,6 +4642,7 @@ clearOutputButton?.addEventListener("click", () => {
   activeRunEvents = [];
   activeRunStartedAt = 0;
   renderLiveRunTimeline("No active run.");
+  resetComputerStage();
 });
 // ─── Keyboard Shortcuts ─────────────────────────────────────────
 if (messageInput) {
@@ -4797,6 +5053,28 @@ resetSessionButton.addEventListener("click", async () => {
   }
 
   selectedSessionId = "";
+  await loadState();
+});
+
+cleanupHistoryButton?.addEventListener("click", async () => {
+  sessionDetailOutput.innerHTML = emptyState("Archiving old confusing chat history...");
+  const data = await postJson("/api/sessions/cleanup-problem-history", {
+    reason: "dashboard-clean-old-bad-chats",
+  });
+  if (data.error) {
+    sessionDetailOutput.innerHTML = emptyState(data.error);
+    return;
+  }
+  selectedSessionId = "";
+  sessionDetailOutput.innerHTML = [
+    `<div class="stack-item">`,
+    `<strong>Old chat cleanup complete</strong>`,
+    `<p>${escapeHtml(String(data.archivedCount || 0))} confusing session(s) archived. Nothing was deleted.</p>`,
+    data.archived?.length
+      ? `<small>${escapeHtml(data.archived.slice(0, 8).map((item) => item.label || item.id).join(", "))}${data.archived.length > 8 ? " ..." : ""}</small>`
+      : `<small>No matching bad-history sessions found.</small>`,
+    `</div>`,
+  ].join("");
   await loadState();
 });
 

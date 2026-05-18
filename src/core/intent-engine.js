@@ -436,7 +436,9 @@ export class IntentEngine {
       lowered.includes("site kholo") ||
       lowered.includes("url kholo") ||
       lowered.includes("navigate browser") ||
-      /\bopen\s+https?:\/\//i.test(lowered)
+      /\bopen\s+https?:\/\//i.test(lowered) ||
+      /\b(?:open|preview|run|chalao|chala|kholo)\b[\s\S]{0,80}\.html\b/i.test(lowered) ||
+      /\b(?:open|preview|run|chalao|chala|kholo)\b[\s\S]{0,80}\b(?:generated app|last app|html app|website)\b/i.test(lowered)
     ) {
       intents.push("browser-navigate");
     }
@@ -478,7 +480,10 @@ export class IntentEngine {
       lowered.includes("disk") ||
       lowered.includes("drive") ||
       lowered.includes("system status") ||
-      lowered.includes("laptop status")
+      lowered.includes("laptop status") ||
+      lowered.includes("computer status") ||
+      lowered.includes("server status") ||
+      lowered.includes("machine status")
     ) {
       intents.push("system-status");
     }
@@ -512,12 +517,16 @@ export class IntentEngine {
       lowered.startsWith("task ") ||
       lowered.startsWith("todo ") ||
       lowered.includes("create task") ||
-      lowered.includes("add task")
+      lowered.includes("create a task") ||
+      lowered.includes("add task") ||
+      lowered.includes("add a task") ||
+      lowered.includes("new task")
     ) {
       intents.push("task-create");
     }
 
-    if (lowered.includes("tasks") || lowered.includes("todo list")) {
+    const asksTodoApp = /\b(?:todo|to-do)\b[\s\S]{0,80}\b(?:app|web app|website|features)\b/i.test(lowered);
+    if (lowered.includes("tasks") || (lowered.includes("todo list") && !asksTodoApp)) {
       intents.push("task-list");
     }
 
@@ -554,14 +563,19 @@ export class IntentEngine {
     }
 
     const mentionsPackageJson = /\bpackage\.json\b/i.test(lowered);
-    if (!mentionsPackageJson && (
+    const asksProductBuild = /\bbuild\b[\s\S]{0,80}\b(?:website|web app|app|clone|application|platform|calculator|todo)\b/i.test(lowered);
+    const asksOmniBuild =
+      /\b(?:omniclaw|repo|repository|project|portable|installer|windows app|release zip|exe)\b/i.test(lowered) ||
+      /^(?:build|rebuild|package|portable build|exe|release zip)\s*(?:karo|kar|bana|bna)?$/i.test(lowered.trim());
+    if (!mentionsPackageJson && !asksProductBuild && asksOmniBuild && (
       /\b(build|rebuild|package|portable build|exe|release zip)\b/i.test(lowered) ||
       /\b(build|banao|bnao|package|exe)\s*(karo|kar|bana|bna)\b/i.test(lowered)
     )) {
       intents.push("project-build");
     }
 
-    if (/\b(test|verify|check)\s*(karo|kar|run)?\b/i.test(lowered) || lowered.includes("smoke test")) {
+    const looksLikeFileCreation = /\b(?:create|write|save)\s+(?:a\s+)?file\b/i.test(lowered) || /\bsave\s+.*\.\w+\b/i.test(lowered);
+    if (!looksLikeFileCreation && (/\b(test|verify|check)\b(?!\s*\.)\s*(karo|kar|run)?\b/i.test(lowered) || lowered.includes("smoke test"))) {
       intents.push("project-test");
     }
 
@@ -604,10 +618,19 @@ export class IntentEngine {
     if (
       lowered.includes("write file") ||
       lowered.includes("create file") ||
+      /create\s+a\s+file/i.test(lowered) ||
+      /create\s+(?:a\s+)?(?:computer|laptop|pc|desktop)\s+file/i.test(lowered) ||
+      /(?:computer|laptop|pc|desktop)\s+file\s+(?:banao|bnao|create|write|save)/i.test(lowered) ||
+      /save\s+(it\s+)?(as|to)\s+\S+\.\w+/i.test(lowered) ||
       lowered.includes("save file") ||
-      lowered.includes("append file")
+      lowered.includes("append file") ||
+      /\bsave\s+.*\.(txt|html|js|css|json|md|py|ts|csv)\b/i.test(lowered)
     ) {
-      intents.push("file-write");
+      if (/\b(?:laptop|computer|pc|desktop|downloads|documents|home folder)\b/i.test(lowered) || /[a-z]:[\\/]/i.test(message)) {
+        intents.push("computer-file-write");
+      } else {
+        intents.push("file-write");
+      }
     }
 
     if (
@@ -618,6 +641,37 @@ export class IntentEngine {
       lowered.includes("find on web")
     ) {
       intents.push("research");
+    }
+
+    if (
+      /build.*(?:website|app|system|clone|application|platform)/i.test(lowered) ||
+      /create.*(?:full.*stack|complete|entire|web.*app|mobile.*app)/i.test(lowered) ||
+      /create.*(?:html page|website|web page)/i.test(lowered) ||
+      /develop.*(?:application|platform|service|system)/i.test(lowered) ||
+      /make.*(?:similar to|like|clone of|jaisa|jasi)/i.test(lowered) ||
+      lowered.includes("netflix") ||
+      lowered.includes("youtube") ||
+      lowered.includes("twitter") ||
+      lowered.includes("instagram") ||
+      lowered.includes("facebook") ||
+      lowered.includes("whatsapp")
+    ) {
+      intents.push("complex-build");
+    }
+
+    if (
+      (lowered.includes("research") && (
+        lowered.includes("then") ||
+        lowered.includes("and") ||
+        lowered.includes("build") ||
+        lowered.includes("create") ||
+        lowered.includes("phir") ||
+        lowered.includes("uske baad")
+      )) ||
+      lowered.includes("research and build") ||
+      lowered.includes("research then build")
+    ) {
+      intents.push("research-then-build");
     }
 
     if (

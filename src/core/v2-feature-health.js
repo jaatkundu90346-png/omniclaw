@@ -61,6 +61,7 @@ export class V2FeatureHealth {
     const agents = runtime.agents.getAll();
     const pluginTools = runtime.plugins.getToolDefinitions();
     const modelToolLoop = runtime.getModelToolLoopSettings?.() || {};
+    const nativeToolCalling = modelToolLoop.nativeToolCalling !== false && typeof runtime.provider?.completeWithTools === "function";
     const sandboxStatus = runtime.sandboxRunner?.getStatus?.() || {};
     const browserStatus = runtime.browserOperator?.getStatus?.() || {};
     const browserAutomationReady = Boolean(
@@ -118,11 +119,11 @@ export class V2FeatureHealth {
         layer: "runtime",
         status: modelToolLoop.enabled && toolIds.has("provider_status") && toolIds.has("exec") && toolIds.has("web_search") ? "ready" : "partial",
         priority: "critical",
-        evidence: [`tools=${tools.length}`, `provider_status=${toolIds.has("provider_status")}`, `exec=${toolIds.has("exec")}`, `modelToolLoop=${Boolean(modelToolLoop.enabled)}`, `maxRounds=${modelToolLoop.maxRounds || 0}`],
+        evidence: [`tools=${tools.length}`, `provider_status=${toolIds.has("provider_status")}`, `exec=${toolIds.has("exec")}`, `modelToolLoop=${Boolean(modelToolLoop.enabled)}`, `nativeToolCalling=${nativeToolCalling}`, `nativeTimeoutMs=${modelToolLoop.nativeToolTimeoutMs || 8000}`, `maxRounds=${modelToolLoop.maxRounds || 0}`],
         gaps: modelToolLoop.enabled
-          ? ["Uses provider-guided JSON tool calls; provider-native API function schemas are still a future optimization."]
+          ? (nativeToolCalling ? [] : ["Provider-native API function schemas are not available for this provider."])
           : ["Model tool loop is disabled."],
-        nextAction: modelToolLoop.enabled ? "Broaden loop coverage and add provider-native tool schemas." : "Enable runtime.modelToolLoop.",
+        nextAction: nativeToolCalling ? "Broaden native tool schema detail and add provider-specific compatibility tests." : "Enable runtime.modelToolLoop.",
       }),
       feature({
         id: "filesystem",

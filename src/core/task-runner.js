@@ -18,7 +18,9 @@ export class TaskRunner {
       startedAt: new Date().toISOString(),
     });
 
-    const checklist = this.buildChecklist(inProgress.title);
+    const checklist = Array.isArray(inProgress.plan) && inProgress.plan.length > 0
+      ? inProgress.plan
+      : this.buildChecklist(inProgress.title);
     const summary = this.buildSummary(inProgress.title, checklist);
 
     const completed = this.taskStore.updateTask(task.id, {
@@ -26,6 +28,16 @@ export class TaskRunner {
       completedAt: new Date().toISOString(),
       lastRunSummary: summary,
       checklist,
+      runHistory: [
+        ...(Array.isArray(inProgress.runHistory) ? inProgress.runHistory : []),
+        {
+          at: new Date().toISOString(),
+          status: "completed",
+          summary,
+          checklist,
+          toolPlan: inProgress.toolPlan || [],
+        },
+      ],
     });
 
     return {

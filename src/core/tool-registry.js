@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 function normalizeContext(context = {}) {
   if (typeof context === "string") {
@@ -291,8 +292,10 @@ export class ToolRegistry {
     configStore,
     fileStore,
     shellPlanner,
+    shellExecutor,
     webResearch,
     browserOperator,
+    browser,
     sandboxRunner,
     systemMonitor,
     taskRunner,
@@ -308,8 +311,10 @@ export class ToolRegistry {
     this.configStore = configStore;
     this.fileStore = fileStore;
     this.shellPlanner = shellPlanner;
+    this.shellExecutor = shellExecutor || agentRuntime?.shellExecutor;
     this.webResearch = webResearch;
     this.browserOperator = browserOperator;
+    this.browser = browser || agentRuntime?.browserPlaywright;
     this.sandboxRunner = sandboxRunner;
     this.systemMonitor = systemMonitor;
     this.taskRunner = taskRunner;
@@ -433,11 +438,30 @@ export class ToolRegistry {
       create_task: {
         description: "Create a task in the local task list.",
         permission: "allowTaskWrite",
-        run: async ({ title }, context) => {
+        run: async (input = {}, context) => {
+          const title = String(input.title || input.objective || "").trim();
+          const plan = Array.isArray(input.plan) ? input.plan : this.buildTaskPlan(input);
+          const toolPlan = Array.isArray(input.toolPlan) ? input.toolPlan : this.buildTaskToolPlan(input);
+          const acceptanceCriteria = Array.isArray(input.acceptanceCriteria)
+            ? input.acceptanceCriteria
+            : this.buildTaskAcceptanceCriteria(input);
           const task = this.taskStore.createTask(String(title || "").trim(), {
             agentId: this.getAgentId(context),
+            objective: input.objective || title,
+            sourceMessage: input.sourceMessage || input.message || "",
+            taskType: input.taskType || this.inferTaskType(input),
+            priority: input.priority || "normal",
+            plan,
+            toolPlan,
+            acceptanceCriteria,
+            automation: input.automation || null,
+            context: {
+              createdFrom: context.source || "chat",
+              sessionId: context.sessionId || "",
+              runId: context.runId || "",
+            },
           });
-          return { created: true, task };
+          return { created: true, task, plan, toolPlan, acceptanceCriteria };
         },
       },
       list_tasks: {
@@ -967,6 +991,44 @@ export class ToolRegistry {
           });
         },
       },
+      verify_html_artifact: {
+        description: "Verify a generated HTML artifact is nonblank, structured, and has interactive app pieces.",
+        permission: "allowFileRead",
+        run: async ({ path }) => {
+          const config = this.configStore.getConfig();
+          const file = this.fileStore.readText(path, config.tools.filesystem.maxReadBytes);
+          const html = String(file.content || "");
+          const withoutScripts = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ");
+          const withoutStyles = withoutScripts.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ");
+          const textPreview = withoutStyles
+            .replace(/<[^>]+>/g, " ")
+            .replace(/\s+/g, " ")
+            .trim()
+            .slice(0, 300);
+          const checks = [
+            { id: "exists", label: "File exists and was readable", ok: true },
+            { id: "html-root", label: "Contains <!doctype> or <html>", ok: /<!doctype html|<html[\s>]/i.test(html) },
+            { id: "body", label: "Contains <body>", ok: /<body[\s>]/i.test(html) },
+            { id: "visible-text", label: "Has visible text content", ok: textPreview.length >= 10 },
+            { id: "interactive-control", label: "Has buttons, inputs, selects, textareas, or links", ok: /<(button|input|select|textarea|a)\b/i.test(html) },
+            { id: "script", label: "Has client-side script", ok: /<script\b/i.test(html) },
+            { id: "responsive-meta", label: "Has viewport meta tag", ok: /<meta\b[^>]+name=["']viewport["']/i.test(html) },
+          ];
+          const passed = checks.filter((check) => check.ok).length;
+          const score = Math.round((passed / checks.length) * 100);
+          return {
+            path: file.path,
+            bytes: file.totalBytes || file.bytesRead || html.length,
+            ok: score >= 75 && checks.find((check) => check.id === "visible-text")?.ok,
+            score,
+            passed,
+            total: checks.length,
+            checks,
+            issues: checks.filter((check) => !check.ok).map((check) => check.id),
+            textPreview,
+          };
+        },
+      },
       plan_shell_command: {
         description: "Prepare a shell-command request that requires later approval.",
         permission: "allowShellPlanning",
@@ -992,8 +1054,14 @@ export class ToolRegistry {
       open_browser_url: {
         description: "Open a URL in the laptop's default browser.",
         permission: "allowBrowserControl",
-        run: async ({ url }, context) =>
-          this.runBrowserOperation("open_url", () => this.browserOperator.openUrl(String(url || "").trim()), context),
+        run: async ({ url, path: filePath }, context) =>
+          this.runBrowserOperation("open_url", () => {
+            const target = String(url || filePath || "").trim();
+            const resolved = /^(?:https?|file):\/\//i.test(target)
+              ? target
+              : pathToFileURL(this.fileStore.resolveWorkspacePath(target)).href;
+            return this.browserOperator.openUrl(resolved);
+          }, context),
       },
       run_terminal_command: {
         description: "Execute a terminal command through OmniClaw shell policy and audit logging.",
@@ -1339,6 +1407,12 @@ export class ToolRegistry {
         permission: "allowConfigWrite",
         run: async (input) => this.customizationEngine.setProviderKey(input),
       },
+      configure_provider_brain: {
+        description: "Atomically configure provider profile, base URL, model, API key, and readiness test.",
+        permission: "allowConfigWrite",
+        group: "provider",
+        run: async (input) => this.customizationEngine.configureProviderBrain(input),
+      },
       get_provider_key_status: {
         description: "Read provider BYOK key status (masked only).",
         permission: "allowConfigWrite",
@@ -1355,16 +1429,57 @@ export class ToolRegistry {
         run: async (input) => this.customizationEngine.listProviderModels(input),
       },
       exec: {
-        description: "OpenClaw-compatible alias for governed terminal command execution.",
+        description: "OpenClaw/Hermes-compatible governed terminal command execution. Supports background processes.",
         permission: "allowShellExecution",
-        group: "runtime",
-        run: async ({ command, cwd }, context) => this.tools.run_terminal_command.run({ command, cwd }, context),
+        group: "terminal",
+        run: async ({ command, cwd, background } = {}, context = {}) => {
+          if (this.shellExecutor?.execute) {
+            return this.shellExecutor.execute({
+              command: String(command || "").trim(),
+              cwd: String(cwd || "").trim(),
+              background: Boolean(background),
+              runId: context.runId || "",
+              sessionId: context.sessionId || "",
+            });
+          }
+          return this.tools.run_terminal_command.run({ command, cwd }, context);
+        },
       },
       terminal: {
         description: "Hermes-compatible governed terminal command execution.",
         permission: "allowShellExecution",
         group: "hermes-terminal",
-        run: async ({ command, cwd }, context) => this.tools.run_terminal_command.run({ command, cwd }, context),
+        run: async ({ command, cwd, background } = {}, context) => this.tools.exec.run({ command, cwd, background }, context),
+      },
+      process_list: {
+        description: "List background processes started by OmniClaw.",
+        permission: null,
+        group: "terminal",
+        run: async ({ status } = {}) => {
+          if (!this.shellExecutor?.listProcesses) {
+            return { processes: [], message: "Background process registry is not available." };
+          }
+          return this.shellExecutor.listProcesses({ status });
+        },
+      },
+      process_status: {
+        description: "Get detailed status and captured output for a background process.",
+        permission: null,
+        group: "terminal",
+        run: async ({ processId } = {}) => this.requireShellExecutor().getProcessStatus(String(processId || "").trim()),
+      },
+      process_kill: {
+        description: "Kill a running background process by ID.",
+        permission: "allowShellExecution",
+        group: "terminal",
+        run: async ({ processId, signal } = {}) =>
+          this.requireShellExecutor().killProcess(String(processId || "").trim(), String(signal || "SIGTERM").trim()),
+      },
+      process_cleanup: {
+        description: "Remove old completed/killed process entries from the registry.",
+        permission: null,
+        group: "terminal",
+        run: async ({ maxAgeMs } = {}) => this.requireShellExecutor().cleanupProcesses({ maxAge: Number(maxAgeMs || 3600000) }),
       },
       process: {
         description: "OpenClaw-compatible process inspection tool.",
@@ -1422,7 +1537,25 @@ export class ToolRegistry {
         description: "Check real browser automation availability and current browser session.",
         permission: null,
         group: "ui",
-        run: async () => this.browserOperator.getStatus?.() || {},
+        run: async () => ({
+          operator: this.browserOperator.getStatus?.() || {},
+          playwrightSessions: this.browser?.listSessions?.() || [],
+          playwrightReady: Boolean(this.browser),
+        }),
+      },
+      browser_open: {
+        description: "Open a URL in a real Playwright browser session.",
+        permission: "allowBrowserControl",
+        group: "browser",
+        run: async ({ url, sessionId } = {}, context) =>
+          this.runBrowserOperation("browser_open", () => this.requireBrowserPlaywright().open({ url, sessionId }), context),
+      },
+      browser_view: {
+        description: "View current page content and/or screenshot. Format: markdown, screenshot, or both.",
+        permission: "allowBrowserControl",
+        group: "browser",
+        run: async ({ sessionId, format } = {}, context) =>
+          this.runBrowserOperation("browser_view", () => this.requireBrowserPlaywright().view({ sessionId, format: format || "markdown" }), context),
       },
       browser_audit: {
         description: "List recent governed browser actions captured in the gateway audit feed.",
@@ -1450,9 +1583,13 @@ export class ToolRegistry {
       browser_screenshot: {
         description: "Capture a screenshot from the current automated browser page.",
         permission: "allowBrowserControl",
-        group: "ui",
-        run: async (input = {}, context) =>
-          this.runBrowserOperation("screenshot", () => this.browserOperator.automate({ ...input, action: "screenshot" }), context),
+        group: "browser",
+        run: async (input = {}, context) => {
+          if (this.browser) {
+            return this.runBrowserOperation("browser_screenshot", () => this.browser.screenshot(input), context);
+          }
+          return this.runBrowserOperation("screenshot", () => this.browserOperator.automate({ ...input, action: "screenshot" }), context);
+        },
       },
       browser_text: {
         description: "Extract visible text from the current automated browser page.",
@@ -1466,35 +1603,92 @@ export class ToolRegistry {
         permission: "allowBrowserControl",
         group: "hermes-browser",
         run: async ({ url } = {}, context) =>
-          this.tools.browser.run({ action: "navigate", url }, context),
+          this.tools.browser_open.run({ url }, context),
       },
       browser_click: {
         description: "Hermes-compatible browser click tool.",
         permission: "allowBrowserControl",
         group: "hermes-browser",
-        run: async (input = {}, context) =>
-          this.tools.browser.run({ ...input, action: "click" }, context),
+        run: async (input = {}, context) => {
+          if (this.browser) {
+            return this.runBrowserOperation("browser_click", () => this.browser.click(input), context);
+          }
+          return this.tools.browser.run({ ...input, action: "click" }, context);
+        },
       },
       browser_type: {
         description: "Hermes-compatible browser type/fill tool.",
         permission: "allowBrowserControl",
         group: "hermes-browser",
-        run: async (input = {}, context) =>
-          this.tools.browser.run({ ...input, action: "type" }, context),
+        run: async (input = {}, context) => {
+          if (this.browser) {
+            return this.runBrowserOperation("browser_type", () => this.browser.type(input), context);
+          }
+          return this.tools.browser.run({ ...input, action: "type" }, context);
+        },
       },
       browser_scroll: {
         description: "Hermes-compatible browser scroll tool.",
         permission: "allowBrowserControl",
         group: "hermes-browser",
-        run: async (input = {}, context) =>
-          this.tools.browser.run({ ...input, action: "scroll" }, context),
+        run: async (input = {}, context) => {
+          if (this.browser) {
+            return this.runBrowserOperation("browser_scroll", () => this.browser.scroll(input), context);
+          }
+          return this.tools.browser.run({ ...input, action: "scroll" }, context);
+        },
       },
       browser_back: {
         description: "Hermes-compatible browser back tool.",
         permission: "allowBrowserControl",
         group: "hermes-browser",
+        run: async (input = {}, context) => {
+          if (this.browser) {
+            return this.runBrowserOperation("browser_back", () => this.browser.goBack(input), context);
+          }
+          return this.tools.browser.run({ ...input, action: "back" }, context);
+        },
+      },
+      browser_forward: {
+        description: "Hermes-compatible browser forward tool.",
+        permission: "allowBrowserControl",
+        group: "hermes-browser",
         run: async (input = {}, context) =>
-          this.tools.browser.run({ ...input, action: "back" }, context),
+          this.runBrowserOperation("browser_forward", () => this.requireBrowserPlaywright().goForward(input), context),
+      },
+      browser_wait: {
+        description: "Wait for a selector in the active browser session.",
+        permission: "allowBrowserControl",
+        group: "browser",
+        run: async (input = {}, context) =>
+          this.runBrowserOperation("browser_wait", () => this.requireBrowserPlaywright().wait(input), context),
+      },
+      browser_evaluate: {
+        description: "Evaluate JavaScript in the active browser session.",
+        permission: "allowBrowserControl",
+        group: "browser",
+        run: async (input = {}, context) =>
+          this.runBrowserOperation("browser_evaluate", () => this.requireBrowserPlaywright().evaluate(input), context),
+      },
+      browser_close: {
+        description: "Close a browser session.",
+        permission: "allowBrowserControl",
+        group: "browser",
+        run: async (input = {}, context) =>
+          this.runBrowserOperation("browser_close", () => this.requireBrowserPlaywright().close(input), context),
+      },
+      browser_automate: {
+        description: "Perform multiple browser actions in sequence with Playwright.",
+        permission: "allowBrowserControl",
+        group: "browser",
+        run: async (input = {}, context) =>
+          this.runBrowserOperation("browser_automate", () => this.requireBrowserPlaywright().automate(input), context),
+      },
+      browser_sessions: {
+        description: "List active Playwright browser sessions.",
+        permission: null,
+        group: "browser",
+        run: async () => this.browser?.listSessions?.() || [],
       },
       browser_press: {
         description: "Hermes-compatible browser key press tool.",
@@ -2315,6 +2509,20 @@ export class ToolRegistry {
       }));
   }
 
+  requireShellExecutor() {
+    if (!this.shellExecutor) {
+      throw new Error("Shell executor is not available in this OmniClaw runtime.");
+    }
+    return this.shellExecutor;
+  }
+
+  requireBrowserPlaywright() {
+    if (!this.browser) {
+      throw new Error("Playwright browser automation is not available in this OmniClaw runtime.");
+    }
+    return this.browser;
+  }
+
   async runBrowserOperation(action, fn, context = {}) {
     const startedAt = Date.now();
     const config = this.configStore.getConfig();
@@ -2372,6 +2580,83 @@ export class ToolRegistry {
         seq: event.seq,
         ...event.payload,
       }));
+  }
+
+  inferTaskType(input = {}) {
+    const text = `${input.title || ""} ${input.objective || ""} ${input.sourceMessage || ""}`.toLowerCase();
+    if (/research|search|study|compare|analyse|analyze/.test(text)) return "research";
+    if (/build|code|implement|app|website|feature|fix|debug/.test(text)) return "build";
+    if (/browser|form|fill|login|website|open/.test(text)) return "browser";
+    if (/schedule|daily|hourly|weekly|every|24\s*hours|monitor|watch/.test(text)) return "automation";
+    if (/file|folder|download|document|pdf/.test(text)) return "file";
+    return "general";
+  }
+
+  buildTaskPlan(input = {}) {
+    const type = this.inferTaskType(input);
+    const base = [
+      "Understand the user's goal, constraints, and success criteria.",
+      "Inspect available local context, memory, files, tools, and provider status.",
+    ];
+    const byType = {
+      research: [
+        "Run web research and fetch/read primary pages where possible.",
+        "Compare sources, extract evidence, and cite source URLs.",
+      ],
+      build: [
+        "Read the relevant code/files before editing.",
+        "Implement the smallest useful working slice.",
+        "Run build/tests or static verification and report proof.",
+      ],
+      browser: [
+        "Open or inspect the target browser page.",
+        "Fill forms/click controls only when the user has authorized the action.",
+        "Capture screenshot/snapshot proof after the browser action.",
+      ],
+      automation: [
+        "Convert the request into a persisted schedule or background job plan.",
+        "Record delivery channel, interval, retry policy, and stop condition.",
+      ],
+      file: [
+        "Locate/read the target file or folder through governed access.",
+        "Write/copy/move only inside allowed roots, then read/list back to verify.",
+      ],
+      general: [
+        "Choose the safest relevant tool sequence.",
+        "Execute, observe, and summarize results with proof.",
+      ],
+    };
+    return [...base, ...(byType[type] || byType.general)];
+  }
+
+  buildTaskToolPlan(input = {}) {
+    const type = this.inferTaskType(input);
+    const toolsByType = {
+      research: ["web_research", "web_fetch", "memory_search"],
+      build: ["read_file", "write_file", "verify_html_artifact", "run_terminal_command"],
+      browser: ["open_browser_url", "browser_snapshot", "browser_click", "browser_type"],
+      automation: ["cron", "create_task", "send_message"],
+      file: ["search_computer_files", "read_computer_file", "write_computer_file", "list_computer_directory"],
+      general: ["provider_status", "computer_access_status", "web_research"],
+    };
+    return toolsByType[type] || toolsByType.general;
+  }
+
+  buildTaskAcceptanceCriteria(input = {}) {
+    const type = this.inferTaskType(input);
+    const common = [
+      "Every claimed action must be backed by a tool output, file proof, browser proof, or provider diagnostic.",
+      "If a tool/provider is unavailable, report the blocker and next fix instead of pretending success.",
+    ];
+    const byType = {
+      research: ["Final answer includes source URLs or fetched-content evidence."],
+      build: ["Created/edited artifacts are verified with read-back, build/test, or artifact verification."],
+      browser: ["Browser state after the action is captured with snapshot/screenshot metadata."],
+      automation: ["Schedule/job is persisted with next run time and retry policy."],
+      file: ["File operations include read/list-back proof."],
+      general: ["Result includes clear completion status and remaining risks."],
+    };
+    return [...common, ...(byType[type] || byType.general)];
   }
 
   getProductToolMetadata(id, tool = {}) {
@@ -2977,6 +3262,13 @@ export class ToolRegistry {
     const provider = this.agentRuntime?.getProviderInfo?.() || {};
     const profiles = config.providerProfiles || {};
     const secretStatuses = this.agentRuntime?.secrets?.getAllStatuses?.() || [];
+    const fallbackChain = [
+      ...(config.provider?.fallbacks || []),
+      ...(config.fallbacks || []),
+    ].filter((item, index, arr) => item && arr.indexOf(item) === index);
+    const recentRuns = this.agentRuntime?.gateway?.listRuns?.(20) || [];
+    const recentProviderRun = recentRuns.find((run) => run.providerDiagnostics || run.providerAttempts);
+    const lastAttempts = recentProviderRun?.providerDiagnostics?.attempts || recentProviderRun?.providerAttempts || [];
     const activeProfile = Object.entries(profiles).find(([, profile]) =>
       profile?.mode === config.provider?.mode &&
       profile?.baseUrl === config.provider?.baseUrl &&
@@ -3005,15 +3297,21 @@ export class ToolRegistry {
         supportedModes: ["mock", "openai-compatible", "codex-cli"],
       },
       credentialPool: {
-        status: "partial",
+        status: secretStatuses.some((item) => item.configured) ? "partial" : "missing",
         configuredKeys: secretStatuses.filter((item) => item.configured).length,
         keys: secretStatuses,
         gap: "round-robin key rotation per provider is not implemented yet",
       },
       smartFailover: {
-        status: "partial",
-        current: "provider failures are classified and converted into fallback replies/status",
-        gap: "automatic secondary model failover and jittered retry policy still need a provider router",
+        status: fallbackChain.length > 0 ? "partial" : "missing",
+        current: fallbackChain.length > 0
+          ? "active provider failures can try configured fallback profiles in sequence"
+          : "provider failures are classified and converted into fallback replies/status",
+        configuredChain: fallbackChain,
+        lastAttempts,
+        gap: fallbackChain.length > 0
+          ? "fallback retry works by provider profile; key-pool rotation and persisted rate-limit scoring are still pending"
+          : "configure provider.fallbacks or agent fallbackChain for secondary model failover",
       },
       rateLimitTracker: {
         status: "planned",
@@ -3024,7 +3322,7 @@ export class ToolRegistry {
         tool: "list_provider_models",
         rule: "OpenAI-compatible /models endpoint can be fetched after base URL and key are configured",
       },
-      nextUpgrade: "Add provider router with key pool rotation, rate-limit header storage, and fallback model chain.",
+      nextUpgrade: "Add provider key-pool rotation and rate-limit header storage for smarter fallback ordering.",
     };
   }
 

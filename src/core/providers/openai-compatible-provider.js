@@ -335,6 +335,73 @@ export class OpenAICompatibleProvider {
     };
   }
 
+  async completeWithTools(messages = [], input = {}) {
+    const config = this.configStore.getConfig();
+    const providerConfig = {
+      ...config,
+      provider: {
+        ...config.provider,
+        baseUrl: input.baseUrl || config.provider.baseUrl,
+        model: input.model || config.provider.model,
+        apiKeyProviderId: input.apiKeyProviderId || config.provider.apiKeyProviderId,
+        httpReferer: input.httpReferer || config.provider.httpReferer,
+        appTitle: input.appTitle || config.provider.appTitle,
+        timeoutMs: input.timeoutMs || config.provider.timeoutMs,
+      },
+    };
+    const apiKey = String(input.apiKey || "").trim() || this.getResolvedApiKey(providerConfig);
+    if (!apiKey) {
+      throw new Error(`API key missing for ${providerConfig.provider.apiKeyProviderId || providerConfig.provider.apiKeyEnv}.`);
+    }
+
+    const tools = Array.isArray(input.tools) ? input.tools : [];
+    if (tools.length === 0) {
+      return this.complete(messages, input);
+    }
+
+    let response;
+    try {
+      response = await fetchWithTimeout(this.getChatCompletionsUrl(providerConfig), {
+        method: "POST",
+        headers: this.getHeaders(providerConfig, apiKey),
+        body: JSON.stringify({
+          model: providerConfig.provider.model,
+          temperature: Number(input.temperature ?? 0),
+          max_tokens: Number(input.maxTokens || providerConfig.provider.plannerMaxTokens || 700),
+          stream: false,
+          tool_choice: input.toolChoice || "auto",
+          tools,
+          messages: Array.isArray(messages) ? messages : [],
+        }),
+      }, Number(providerConfig.provider.timeoutMs || 45000));
+    } catch (error) {
+      throw new Error(`Provider native tool request failed: ${error.message}`);
+    }
+
+    if (!response.ok) {
+      throw new Error(`Provider native tool request failed with ${await this.parseProviderError(response)}`);
+    }
+
+    const data = await response.json();
+    const message = data.choices?.[0]?.message || {};
+    const toolCalls = Array.isArray(message.tool_calls)
+      ? message.tool_calls.map((call) => ({
+          id: call.id || "",
+          tool: call.function?.name || call.name || "",
+          input: call.function?.arguments || call.arguments || {},
+          type: call.type || "function",
+        }))
+      : [];
+    return {
+      text: message.content || "",
+      toolCalls,
+      model: data.model || providerConfig.provider.model,
+      usage: data.usage || null,
+      raw: data,
+      nativeTools: true,
+    };
+  }
+
 
   async respond(context, retries = 2) {
     const config = this.configStore.getConfig();

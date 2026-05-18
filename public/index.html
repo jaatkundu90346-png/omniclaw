@@ -30,15 +30,15 @@
             <label class="setup-choice">
               <input type="radio" name="setup-mode" value="offline" checked />
               <span>
-                <strong>Offline mode</strong>
-                <small>Works immediately with the local mock provider.</small>
+                <strong>Local task-only mode</strong>
+                <small>Runs tools and memory locally, but will not fake model replies.</small>
               </span>
             </label>
             <label class="setup-choice">
               <input type="radio" name="setup-mode" value="openai" />
               <span>
-                <strong>Use API key</strong>
-                <small>Store a provider key locally and use a real model.</small>
+                <strong>Connect real brain</strong>
+                <small>Store a provider key locally, fetch models, then save a real model.</small>
               </span>
             </label>
           </div>
@@ -401,7 +401,10 @@
                 <p class="section-kicker">Sessions</p>
                 <h3>Active and archived lanes</h3>
               </div>
-              <button id="reset-session" type="button" class="button button-ghost button-small">Reset selected</button>
+              <div class="hero-actions">
+                <button id="cleanup-history" type="button" class="button button-ghost button-small">Clean old bad chats</button>
+                <button id="reset-session" type="button" class="button button-ghost button-small">Reset selected</button>
+              </div>
             </div>
             <div class="surface-body">
               <div id="session-output" class="stack-list">Loading...</div>

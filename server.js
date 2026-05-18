@@ -1067,6 +1067,22 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (req.method === "POST" && pathname === "/api/sessions/cleanup-problem-history") {
+    try {
+      const body = await parseBody(req);
+      const result = agent.sessions.cleanupProblemSessions({
+        reason: body.reason || "cleanup-problem-history",
+        includeArchived: Boolean(body.includeArchived),
+        patterns: Array.isArray(body.patterns) ? body.patterns : undefined,
+      });
+      agent.gateway.addEvent("session.cleanup_problem_history", result);
+      sendJson(res, 200, result);
+    } catch (error) {
+      sendJson(res, 400, { error: error.message });
+    }
+    return;
+  }
+
   if (req.method === "GET" && pathname === "/api/system/status") {
     try {
       const summary = await agent.systemMonitor.getSystemSummary();
@@ -1901,63 +1917,17 @@ if (req.method === "POST" && pathname === "/api/chat") {
  const message = String(body.message || "").trim();
  if (!message) { sendJson(res, 400, { error: "message is required" }); return; }
  sendSSEHeaders(res);
- // Try real provider streaming first
- const provider = agent.provider;
- if (provider && typeof provider.respondStream === "function") {
- try {
- const context = {
- message,
- intents: [],
- toolOutputs: [],
- tools: agent.tools.getAll({ includeAllAgents: true }),
- skills: agent.skills.getAll(),
- profile: agent.config.getActiveProfile(),
- contextBundle: {
-   tools: agent.tools.getAll({ includeAllAgents: true }),
-   skills: agent.skills.getAll(),
-   toolOutputs: [],
-   workspaceContext: null,
-   report: null,
-   recentConversations: [],
-   notes: [],
-   longTermMemory: [],
-   research: [],
-   artifacts: [],
-   tasks: [],
-   agent: null,
- },
- workspaceContext: null,
- recentConversations: [],
- notes: [],
- longTermMemory: [],
- research: [],
- artifacts: [],
- tasks: [],
-};
- const stream = await provider.respondStream(context);
- const reader = stream.getReader();
- while (true) {
- const { done, value } = await reader.read();
- if (done) break;
- res.write(value);
- }
- } catch (streamErr) {
- try { res.write("data: " + JSON.stringify({ type: "error", error: streamErr.message }) + "\n\n"); } catch {}
- }
- } else {
- // Fallback: simulate streaming from normal response
- res.write("data: " + JSON.stringify({ type: "start", timestamp: new Date().toISOString() }) + "\n\n");
+ res.write("data: " + JSON.stringify({ type: "start", timestamp: new Date().toISOString(), status: "agent-loop" }) + "\n\n");
  const result = await agent.handleMessage(message, { sessionId: body.sessionId, label: body.label, agentId: body.agentId, channel: body.channel });
  const reply = result.reply || "";
- const chunkSize = 8;
+ const chunkSize = 16;
  for (let i = 0; i < reply.length; i += chunkSize) {
  res.write("data: " + JSON.stringify({ type: "token", content: reply.slice(i, i + chunkSize) }) + "\n\n");
  }
  if (result.toolOutputs && result.toolOutputs.length > 0) {
  res.write("data: " + JSON.stringify({ type: "tools", toolOutputs: result.toolOutputs }) + "\n\n");
  }
- res.write("data: " + JSON.stringify({ type: "done", runId: result.run?.id || "", sessionId: result.session?.id || "" }) + "\n\n");
- }
+ res.write("data: " + JSON.stringify({ type: "done", runId: result.run?.id || "", sessionId: result.session?.id || "", data: result }) + "\n\n");
  } catch (error) { try { res.write("data: " + JSON.stringify({ type: "error", error: error.message }) + "\n\n"); } catch {} }
  res.end();
  return;

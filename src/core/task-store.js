@@ -51,6 +51,17 @@ export class TaskStore {
       title,
       agentId: normalizeAgentId(options.agentId),
       status: "open",
+      objective: String(options.objective || title || "").trim(),
+      sourceMessage: String(options.sourceMessage || "").trim(),
+      taskType: String(options.taskType || "general").trim(),
+      priority: String(options.priority || "normal").trim(),
+      plan: Array.isArray(options.plan) ? options.plan : [],
+      toolPlan: Array.isArray(options.toolPlan) ? options.toolPlan : [],
+      acceptanceCriteria: Array.isArray(options.acceptanceCriteria) ? options.acceptanceCriteria : [],
+      automation: options.automation && typeof options.automation === "object" ? options.automation : null,
+      context: options.context && typeof options.context === "object" ? options.context : {},
+      artifacts: [],
+      runHistory: [],
       createdAt: new Date().toISOString(),
     };
     data.tasks.push(task);

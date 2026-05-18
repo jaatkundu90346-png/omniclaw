@@ -15,8 +15,8 @@ function createId(prefix) {
 
 function normalizeUrl(url) {
   const target = String(url || "").trim();
-  if (!/^https?:\/\//i.test(target)) {
-    throw new Error("Browser URL must start with http:// or https://");
+  if (!/^(?:https?|file):\/\//i.test(target)) {
+    throw new Error("Browser URL must start with http://, https://, or file://");
   }
   return target;
 }

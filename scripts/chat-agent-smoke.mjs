@@ -129,6 +129,63 @@ async function run() {
     );
     assertToolSummaries(research.toolOutputs, "research request");
 
+    const nodeResearch = await postChat(
+      "research and summarize the top 3 features of Node.js",
+      `chat-smoke-node-research-${suffix}`,
+    );
+    const nodeResearchOutput = nodeResearch.toolOutputs.find((item) => item.tool === "web_research")?.output || {};
+    assert(
+      nodeResearchOutput.query === "Node.js features",
+      "research query extraction should preserve the actual technical topic.",
+    );
+    assert(
+      nodeResearchOutput.contentFetched === true,
+      "web research should fetch top page content for grounded summaries.",
+    );
+    assert(
+      /node\.js/i.test(nodeResearch.reply),
+      "Node.js research reply should stay on the requested topic.",
+    );
+    assertToolSummaries(nodeResearch.toolOutputs, "Node.js research request");
+
+    const fileCreate = await postChat(
+      "create a file called test.txt with content Hello World",
+      `chat-smoke-file-create-${suffix}`,
+    );
+    assert(
+      fileCreate.toolOutputs.some((item) => item.tool === "write_file" && item.output?.path === "test.txt"),
+      "file creation should use write_file with the requested filename.",
+    );
+    assert(
+      fileCreate.toolOutputs.some((item) => item.tool === "read_file" && item.output?.path === "test.txt"),
+      "file creation should verify the written file with read_file.",
+    );
+    assert(/Verified read-back/i.test(fileCreate.reply), "file creation reply should include read-back verification.");
+    assert(fs.existsSync(path.join(smokeRootDir, "test.txt")), "file creation should write the requested file.");
+    assertToolSummaries(fileCreate.toolOutputs, "file creation request");
+
+    const calculator = await postChat(
+      "build a simple calculator website with HTML CSS and JavaScript",
+      `chat-smoke-calculator-${suffix}`,
+    );
+    assert(
+      calculator.toolOutputs.some((item) => item.tool === "write_file" && item.output?.path === "data/generated/index.html"),
+      "calculator build should create a runnable HTML artifact.",
+    );
+    const calculatorVerification = calculator.toolOutputs.find((item) => item.tool === "verify_html_artifact")?.output || {};
+    assert(calculatorVerification.ok === true, "calculator build should verify the generated HTML artifact.");
+    assert(calculatorVerification.score >= 75, "calculator HTML verification score should be strong enough.");
+    assert(
+      calculator.reply.includes("Build complete"),
+      "calculator build should return a clean grounded build reply.",
+    );
+    assert(
+      /Verified: passed/i.test(calculator.reply),
+      "calculator build reply should include verification proof.",
+    );
+    assert(fs.existsSync(path.join(smokeRootDir, "data", "generated", "index.html")), "calculator HTML artifact should exist.");
+    assertToolSummaries(calculator.toolOutputs, "calculator build request");
+
     const task = await postChat("test karo", `chat-smoke-test-${suffix}`);
     const commands = task.toolOutputs.map((item) => item.output?.command || "");
     assert(commands.includes("npm.cmd run build"), "test karo should run npm.cmd run build.");
@@ -159,12 +216,40 @@ async function run() {
     );
     assertToolSummaries(computerList.toolOutputs, "computer folder list request");
 
+    const computerProofPath = path.join(smokeRootDir, "computer-proof.txt");
+    const computerWrite = await postChat(
+      `create computer file "${computerProofPath}" with content "Hello laptop"`,
+      `chat-smoke-computer-write-${suffix}`,
+    );
+    assert(
+      computerWrite.toolOutputs.some((item) => item.tool === "write_computer_file"),
+      "computer file creation should execute write_computer_file.",
+    );
+    assert(
+      computerWrite.toolOutputs.some((item) => item.tool === "read_computer_file"),
+      "computer file creation should verify with read_computer_file.",
+    );
+    assert(/Verified read-back/i.test(computerWrite.reply), "computer file creation reply should include read-back proof.");
+    assert(fs.existsSync(computerProofPath), "computer file creation should write to the requested laptop path.");
+    assertToolSummaries(computerWrite.toolOutputs, "computer file creation request");
+
     const modelList = await postChat("fetch models", `chat-smoke-model-list-${suffix}`);
     assert(
       modelList.toolOutputs.some((item) => item.tool === "list_provider_models"),
       "model fetch request should execute list_provider_models.",
     );
     assertToolSummaries(modelList.toolOutputs, "provider model list request");
+
+    const brainSetup = await postChat(
+      "setup nvidia provider key DEMO_SMOKE_PROVIDER_KEY_12345 model z-ai/glm-5.1 skip live",
+      `chat-smoke-brain-setup-${suffix}`,
+    );
+    const brainSetupOutput = brainSetup.toolOutputs.find((item) => item.tool === "configure_provider_brain")?.output || {};
+    assert(brainSetupOutput.updated === true, "provider brain setup should save provider config atomically.");
+    assert(brainSetupOutput.apiKeyProviderId === "nvidia", "provider brain setup should use the provider key vault id.");
+    assert(brainSetupOutput.model === "z-ai/glm-5.1", "provider brain setup should preserve slash model ids.");
+    assert(!brainSetup.reply.includes("DEMO_SMOKE_PROVIDER_KEY_12345"), "provider setup reply must not leak raw API keys.");
+    assertToolSummaries(brainSetup.toolOutputs, "provider brain setup request");
 
     const realTask = await postChat("real task strong bna tools aur skills product ready karo", `chat-smoke-real-task-${suffix}`);
     assert(
@@ -189,6 +274,17 @@ async function run() {
       "real-task health score should not be perfect while placeholders remain.",
     );
     assertToolSummaries(realTask.toolOutputs, "real-task hardening request");
+
+    const taskBlueprint = await postChat(
+      "create task build a website, research competitors, write files, run tests, and verify output daily",
+      `chat-smoke-task-blueprint-${suffix}`,
+    );
+    const createdTask = taskBlueprint.toolOutputs.find((item) => item.tool === "create_task")?.output?.task || {};
+    assert(createdTask.plan?.length >= 4, "created task should include an execution plan.");
+    assert(createdTask.toolPlan?.length >= 2, "created task should include a tool plan.");
+    assert(createdTask.acceptanceCriteria?.length >= 2, "created task should include acceptance criteria.");
+    assert(/Task blueprint created/i.test(taskBlueprint.reply), "task creation reply should summarize the task blueprint.");
+    assertToolSummaries(taskBlueprint.toolOutputs, "task blueprint request");
 
     const selfBuild = await postChat(
       "Codex plus OpenClaw combine karke OmniClaw self build plan",
@@ -293,6 +389,11 @@ async function run() {
       "Model provider request should call model_provider_status.",
     );
     assert(modelStatus.reply.includes("multi-provider model status"), "Model provider reply should be grounded.");
+    const modelProviderOutput = modelStatus.toolOutputs.find((item) => item.tool === "model_provider_status")?.output || {};
+    assert(
+      Array.isArray(modelProviderOutput.smartFailover?.configuredChain),
+      "Model provider status should expose configured fallback chain.",
+    );
     assertToolSummaries(modelStatus.toolOutputs, "model provider request");
 
     const delegationStatus = await postChat("subagent delegation isolation guarantees shared iteration budget", `chat-smoke-subagent-delegation-${suffix}`);

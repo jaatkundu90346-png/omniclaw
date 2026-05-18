@@ -539,6 +539,78 @@ export class SessionStore {
     return this.summarizeSession(session);
   }
 
+  cleanupProblemSessions(options = {}) {
+    const data = this.read();
+    const reason = String(options.reason || "cleanup-problem-history").trim();
+    const includeArchived = Boolean(options.includeArchived);
+    const patterns = (Array.isArray(options.patterns) && options.patterns.length > 0
+      ? options.patterns
+      : [
+          "\\bAli\\b[\\s\\S]{0,160}\\bKarachi\\b",
+          "\\bKarachi\\b[\\s\\S]{0,160}\\bAli\\b",
+          "\\bClaw\\b[\\s\\S]{0,160}\\bAli\\b",
+          "\\bAli\\b[\\s\\S]{0,160}\\bClaw\\b",
+          "\\bSmokeUser\\w*\\b",
+          "\\bRequest timed out\\b",
+          "\\bRun timed out after\\b",
+          "\\bprovider took too long\\b",
+          "\\bno API key is available\\b",
+          "\\bbuilt-in mock provider\\b",
+          "\\bHui\\b[\\s\\S]{0,220}\\bOpenClaw\\b",
+          "\\bOpenClaw\\b[\\s\\S]{0,220}\\bHui\\b",
+          "\\bmock/local-rule-engine\\b",
+          "\\bmy name is indeed Claw\\b",
+          "\\bNamaste! Mera naam OmniClaw hai\\b",
+        ])
+      .map((pattern) => {
+        try {
+          return new RegExp(pattern, "i");
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
+
+    const archived = [];
+    const skipped = [];
+    for (const session of data.sessions) {
+      if (!includeArchived && session.lifecycleState === "archived") {
+        skipped.push({ id: session.id, reason: "already archived" });
+        continue;
+      }
+      if (session.activeRunId || session.queueDepth > 0) {
+        skipped.push({ id: session.id, reason: "active or queued" });
+        continue;
+      }
+      const transcript = this.readTranscriptEntries(session, 0);
+      const haystack = [
+        session.label,
+        session.lastUserMessagePreview,
+        session.lastAssistantPreview,
+        ...transcript.map((entry) => `${entry.role || entry.event || ""} ${entry.text || ""} ${JSON.stringify(entry.payload || {})}`),
+      ].join("\n");
+      const matched = patterns.find((pattern) => pattern.test(haystack));
+      if (!matched) {
+        continue;
+      }
+      this.archiveSessionInData(data, session.id, reason);
+      archived.push({
+        id: session.id,
+        label: session.label,
+        matched: String(matched),
+      });
+    }
+
+    this.write(data);
+    return {
+      archivedCount: archived.length,
+      skippedCount: skipped.length,
+      archived,
+      skipped,
+      reason,
+    };
+  }
+
   updateSession(sessionId, updates) {
     const data = this.read();
     const index = this.findSessionIndex(data, sessionId);

@@ -1,16 +1,9 @@
 # PROFILE
 
-- Assistant name: OmniClaw
-- User name:
-- User location:
-- User preferences:
+- Assistant name: Billu Baba
+- User name: Mankush
+- User location: Jind, Haryana
+- User likes vibe coding and building with AI.
+- User prefers practical AI that does real work and helps build things.
 
-Updated: fresh template
-
-- User name: Ali
-
-Updated: 2026-05-16T15:56:40.105Z
-
-- Assistant name: Claw
-
-Updated: 2026-05-16T15:57:55.702Z
+Updated: 2026-05-18T00:00:00.000Z

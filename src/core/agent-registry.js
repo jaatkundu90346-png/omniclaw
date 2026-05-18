@@ -76,6 +76,7 @@ export class AgentRegistry {
       blockedPermissions: asStringList(agent.blockedPermissions),
       allowedSkillIds: asStringList(agent.allowedSkillIds),
       blockedSkillIds: asStringList(agent.blockedSkillIds),
+      fallbackChain: asStringList(agent.fallbackChain || agent.providerFallbacks),
       channels: asStringList(agent.channels),
     };
   }

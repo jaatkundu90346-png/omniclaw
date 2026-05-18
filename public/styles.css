@@ -1419,6 +1419,31 @@ h3 {
   background: rgba(13, 17, 23, 0.62);
 }
 
+.chat-tool-card:has(.status-chip-muted),
+.chat-tool-card:has(.status-chip-warn) {
+  position: relative;
+  overflow: hidden;
+}
+
+.chat-tool-card:has(.status-chip-muted)::after,
+.chat-tool-card:has(.status-chip-warn)::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  animation: live-progress-sweep 1.4s linear infinite;
+}
+
+@keyframes live-progress-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
 .chat-trace-head {
   display: flex;
   align-items: center;
@@ -1458,6 +1483,7 @@ h3 {
   padding-top: 6px;
   border-top: 1px solid rgba(148, 163, 184, 0.18);
   color: var(--warning, #f59e0b) !important;
+  font-family: var(--sans);
 }
 
 .chat-tool-strip {
@@ -3392,6 +3418,113 @@ body[data-route="chat-panel"] .computer-progress-card {
   color: #b9b3aa;
   font-size: 0.78rem;
   line-height: 1.45;
+}
+
+.evidence-board {
+  display: grid;
+  width: 100%;
+  gap: 12px;
+  text-align: left;
+}
+
+.evidence-board-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.evidence-board-head strong {
+  display: block;
+  max-width: none;
+}
+
+.evidence-board-head p,
+.evidence-loop small,
+.evidence-row small {
+  max-width: none;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.evidence-orb {
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  margin: 0;
+  border-radius: 12px;
+}
+
+.evidence-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.evidence-metrics span,
+.evidence-loop,
+.evidence-row,
+.evidence-empty {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.evidence-metrics span {
+  display: grid;
+  gap: 2px;
+  padding: 10px;
+}
+
+.evidence-metrics strong {
+  max-width: none;
+  color: #fffdf8;
+  font-size: 0.98rem;
+}
+
+.evidence-metrics small,
+.evidence-row small,
+.evidence-empty {
+  color: #b9b3aa;
+  font-size: 0.72rem;
+}
+
+.evidence-loop {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+}
+
+.evidence-tools {
+  display: grid;
+  gap: 8px;
+  max-height: 136px;
+  overflow: auto;
+}
+
+.evidence-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 8px;
+  padding: 10px;
+}
+
+.evidence-row span {
+  min-width: 0;
+  overflow: hidden;
+  color: #fffdf8;
+  font-family: var(--mono);
+  font-size: 0.76rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.evidence-row small {
+  grid-column: 1 / -1;
+}
+
+.evidence-empty {
+  padding: 10px;
 }
 
 .computer-progress-card {

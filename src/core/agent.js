@@ -1,5 +1,6 @@
-import fs from "node:fs";
+﻿import fs from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { MemoryStore } from "./memory-store.js";
 import { SkillRegistry } from "./skill-registry.js";
@@ -33,6 +34,7 @@ import { TelegramPollingWorker } from "./telegram-polling-worker.js";
 import { DiscordGatewayWorker } from "./discord-gateway-worker.js";
 import { SummarizationEngine } from "./summarization-engine.js";
 import { BrowserOperator } from "./browser-operator.js";
+import { BrowserPlaywright } from "./browser-playwright.js";
 import { SystemMonitor } from "./system-monitor.js";
 import { V2FeatureHealth } from "./v2-feature-health.js";
 import { SandboxRunner } from "./sandbox-runner.js";
@@ -139,8 +141,13 @@ function classifyProviderOutcome(text = "") {
     ["auth_required", "authentication"],
     ["rate_limited", "429"],
     ["provider_request_failed", "provider request failed"],
+    ["provider_timeout", "provider request timed out"],
+    ["provider_timeout", "model bridge did not return in time"],
+    ["provider_timeout", "provider took too long"],
     ["provider_connection_failed", "provider connection failed"],
     ["provider_connection_failed", "request failed"],
+    ["provider_disabled", "real provider is not configured"],
+    ["provider_disabled", "offline mock brain is disabled"],
     ["cli_failed", "codex cli provider failed"],
     ["cli_not_ready", "codex cli bridge is selected"],
     ["empty_response", "provider returned an empty response"],
@@ -163,6 +170,7 @@ export class OmniClawAgent {
     this.sessions = new SessionStore(rootDir, this.config);
     this.gateway = new GatewayStore(rootDir);
     this.gateway.agentRef = this;
+    this.eventBus = new EventBus();
     this.shellAudit = new ShellAuditStore(rootDir);
     this.connectors = new ConnectorStore(rootDir, { secretStore: this.secrets });
     this.jobs = new JobStore(rootDir);
@@ -181,6 +189,7 @@ export class OmniClawAgent {
     this.shellExecutor = new ShellExecutor({
       rootDir,
       configStore: this.config,
+      eventBus: this.eventBus,
     });
     this.webResearch = new WebResearch(this.config, this.secrets);
     this.subAgentSpawner = new SubAgentSpawner({
@@ -199,6 +208,9 @@ export class OmniClawAgent {
     });
     this.contextEngine = new ContextEngine(this.config);
     this.browserOperator = new BrowserOperator({ rootDir });
+    this.browserPlaywright = new BrowserPlaywright({
+      screenshotDir: path.join(rootDir, "data", "browser-screenshots"),
+    });
     this.sandboxRunner = new SandboxRunner({
       rootDir,
       configStore: this.config,
@@ -212,8 +224,10 @@ export class OmniClawAgent {
       configStore: this.config,
       fileStore: this.files,
       shellPlanner: this.shellPlanner,
+      shellExecutor: this.shellExecutor,
       webResearch: this.webResearch,
       browserOperator: this.browserOperator,
+      browser: this.browserPlaywright,
       sandboxRunner: this.sandboxRunner,
       systemMonitor: this.systemMonitor,
       taskRunner: this.taskRunner,
@@ -235,17 +249,16 @@ export class OmniClawAgent {
       worker: this.worker,
       gatewayStore: this.gateway,
     });
-    this.eventBus = new EventBus();
   this.heartbeat = new Heartbeat({ agent: this, intervalMs: 1800000 });
   this.heartbeat.addCheck({ id: "memory-review", description: "Review and promote memory candidates", fn: (a) => a.memory.dreamSweep?.({ limit: 3, minScore: 0.7 }) });
   this.heartbeat.addCheck({ id: "approval-expiry", description: "Expire old pending approvals", fn: (a) => a.gateway.expireOldApprovals?.(30) });
   this.heartbeat.addCheck({ id: "session-cleanup", description: "Auto-compact large sessions", fn: (a) => { const sessions = a.sessions.listSessions(100); let compacted = 0; for (const s of sessions) { if (s.messageCount > 150) { try { a.sessions.compactSession(s.id, 80); compacted++; } catch {} } } return { compacted }; } });
   this.heartbeat.start();
 
-  // ─── MCP Server Registry ────────────────────────────────────────
+  // â”€â”€â”€ MCP Server Registry â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   this.mcp = new McpRegistry(this.rootDir);
 
-  // ─── Load Workspace Identity Files ──────────────────────────────
+  // â”€â”€â”€ Load Workspace Identity Files â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   this.workspaceIdentity = {};
   const idFiles = ["SOUL.md", "USER.md", "MEMORY.md", "AGENTS.md", "IDENTITY.md"];
   for (const fname of idFiles) {
@@ -650,17 +663,24 @@ export class OmniClawAgent {
   getAgentContext(agentId = "") {
     const agent = this.agents.resolveAgent(agentId);
     const profile = this.agents.getProfileForAgent(agent.id);
+    const longTermMemory = this.memory
+      .getLongTermMemory(40, agent.id)
+      .filter((item) => {
+        const text = `${item.title || ""} ${item.text || ""}`;
+        return !/\bSmokeUser\b/i.test(text) && !/\bUser name:\s*OmniClaw\b/i.test(text);
+      })
+      .slice(0, 8);
     return {
       agent,
       profile,
       skills: this.agents.filterSkills(this.skills.getAll(), agent.id),
       tools: this.tools.getAll({ agentId: agent.id }),
-      recentConversations: this.memory.getRecentConversations(profile.maxRecentConversations, agent.id),
+      recentConversations: this.memory.getRecentConversations(Math.min(profile.maxRecentConversations || 8, 8), agent.id),
       notes: this.memory.getNotes(agent.id),
-      longTermMemory: this.memory.getLongTermMemory(20, agent.id),
-      research: this.memory.getResearch(10, agent.id),
-      artifacts: this.memory.getArtifacts(10, agent.id),
-      tasks: profile.enableTasks ? this.tasks.listTasks(agent.id) : [],
+      longTermMemory,
+      research: this.memory.getResearch(5, agent.id),
+      artifacts: this.memory.getArtifacts(5, agent.id),
+      tasks: profile.enableTasks ? this.tasks.listTasks(agent.id).slice(0, 8) : [],
     };
   }
 
@@ -1811,8 +1831,8 @@ export class OmniClawAgent {
         queue.activeRunId = job.run.id;
         this.syncSessionRunQueue(sessionId);
         try {
-          // Hard timeout: entire run must complete within 90s
-          const hardTimeoutMs = 90000;
+          // Hard timeout: entire run must complete within 180s
+          const hardTimeoutMs = 180000;
           const result = await Promise.race([
             this.executeMessageRun(job),
             new Promise((_, reject) => setTimeout(
@@ -1957,8 +1977,27 @@ export class OmniClawAgent {
     // Human greeting override: only when no bootstrap ritual is active
     const isSimpleGreeting = intents.includes("greeting") && intents.length <= 2 && !intents.includes("capabilities");
     const greetingReply = (isSimpleGreeting && !hasBootstrap) ? this.buildGreetingReply({ agent: routedAgent, message, intents }) : "";
+    const hasProviderSetupDetails = intents.includes("api-setup") && (
+      /\b(?:openrouter|openai|nvidia|minimax|anthropic|gemini|groq|mistral|deepseek|together|fireworks|ollama|local-compatible|codex-cli)\b/i.test(message) ||
+      /\b(?:api\s*key|apikey|key|token)\s*(?:is|=|:)?\s*[A-Za-z0-9._:/+=-]{12,}/i.test(message) ||
+      /\b(?:model|base\s*url|endpoint)\s*(?:is|=|:)?\s*[A-Za-z0-9._:/+-]{2,}/i.test(message)
+    );
 
-    const forcedResponse = greetingReply || (realProviderReady
+    const directRuntimeReply = this.buildDirectRuntimeReply({
+      intents,
+      message,
+      agent: routedAgent,
+      tools: availableTools,
+      skills: matchedSkills,
+    });
+    const shouldUseDirectRuntimeReply = Boolean(
+      directRuntimeReply &&
+      !hasBootstrap &&
+      !hasProviderSetupDetails &&
+      (intents.includes("profile-question") || intents.includes("capabilities")),
+    );
+
+    const forcedResponse = greetingReply || (shouldUseDirectRuntimeReply ? directRuntimeReply : "") || (realProviderReady || hasProviderSetupDetails
       ? ""
       : (
           (profileUpdate?.updated ? this.buildProfileUpdateReply({ profileUpdate }) : "") ||
@@ -1969,22 +2008,23 @@ export class OmniClawAgent {
             profileUpdated: Boolean(profileUpdate?.updated),
             hasBootstrap,
           }) ||
-          this.buildDirectRuntimeReply({
-            intents,
-            message,
-            agent: routedAgent,
-            tools: availableTools,
-            skills: matchedSkills,
-          })
+          directRuntimeReply
         ));
     let plan = forcedResponse
       ? {
-          summary: hasBootstrap ? "Bootstrap ritual active — provider will guide first-run setup." : greetingReply ? "Human greeting response." : "OpenClaw-style onboarding response.",
+          summary: shouldUseDirectRuntimeReply
+            ? "Direct local runtime answer - provider skipped."
+            : hasBootstrap ? "Bootstrap ritual active - provider will guide first-run setup." : greetingReply ? "Human greeting response." : "OpenClaw-style onboarding response.",
           intents,
           profile,
           toolsAvailable: availableTools,
-          steps: [{ type: hasBootstrap ? "bootstrap" : "respond", reason: hasBootstrap ? "BOOTSTRAP.md present; agent will run first-run ritual." : greetingReply ? "Simple greeting; no tools needed." : "Fresh agent profile is incomplete; ask identity and user-profile questions." }],
-          source: hasBootstrap ? "bootstrap" : greetingReply ? "greeting" : "onboarding",
+          steps: [{
+            type: hasBootstrap ? "bootstrap" : "respond",
+            reason: shouldUseDirectRuntimeReply
+              ? "Answered from local runtime facts, tools, skills, and memory without a provider call."
+              : hasBootstrap ? "BOOTSTRAP.md present; agent will run first-run ritual." : greetingReply ? "Simple greeting; no tools needed." : "Fresh agent profile is incomplete; ask identity and user-profile questions.",
+          }],
+          source: shouldUseDirectRuntimeReply ? "local-runtime" : hasBootstrap ? "bootstrap" : greetingReply ? "greeting" : "onboarding",
         }
       : await this.planner.buildPlanWithModel({
       message,
@@ -2341,6 +2381,76 @@ export class OmniClawAgent {
       }
     }
 
+    if (forcedResponse && toolOutputs.length === 0) {
+      const response = this.normalizeAssistantReplyStyle({ response: forcedResponse, toolOutputs });
+      const assistantAt = new Date().toISOString();
+      this.sessions.appendMessage(session.id, {
+        id: `message_${Date.now()}_assistant`,
+        at: assistantAt,
+        role: "assistant",
+        text: response,
+        runId: run.id,
+        toolOutputs,
+        modelToolLoop: modelToolLoop.report,
+        providerDiagnostics: null,
+        planSummary: plan.summary || "",
+      });
+      this.sessions.finishRun(session.id, run.id, {
+        status: "idle",
+        at: assistantAt,
+        approvalIds: [],
+      });
+      const completedRun = this.gateway.updateRun(run.id, {
+        status: "completed",
+        completedAt: assistantAt,
+        context: {
+          profileId: profile.id,
+          maxChars: 0,
+          usedChars: 0,
+          omittedItems: 0,
+          summary: "Direct local runtime reply; provider and heavy context assembly skipped.",
+        },
+        toolOutputs,
+        reply: response,
+        providerDiagnostics: null,
+        approvalIds: [],
+      });
+      this.gateway.addEvent("agent.completed", {
+        runId: run.id,
+        sessionId: session.id,
+        agentId: routedAgent.id,
+        status: completedRun.status,
+        directLocalReply: true,
+      });
+      return {
+        session: {
+          id: session.id,
+          key: session.key,
+          label: session.label,
+          agentId: session.agentId,
+          channel: session.channel,
+        },
+        agent: {
+          id: routedAgent.id,
+          name: routedAgent.name,
+          profileId: profile.id,
+        },
+        run: {
+          id: run.id,
+          status: completedRun.status,
+          waitedMs,
+        },
+        reply: response,
+        intents,
+        plan,
+        toolOutputs,
+        modelToolLoop: modelToolLoop.report,
+        provider: this.provider.getInfo(),
+        providerDiagnostics: null,
+        approvals,
+      };
+    }
+
     try {
       const agentContext = this.getAgentContext(routedAgent.id);
       const sessionSummary = this.summarizer.readSummary(session.id);
@@ -2391,11 +2501,25 @@ export class OmniClawAgent {
       let response = forcedResponse || (runtimeToolReply && (preferRuntimeToolReply || !realProviderReadyForReply) ? runtimeToolReply : "");
       let providerDiagnostics = null;
       if (!response) {
-        const fallbackChain = routedAgent.fallbackChain || [];
+        const configForFallbacks = this.config.getConfig();
+        const fallbackChain = [
+          ...(routedAgent.fallbackChain || []),
+          ...(configForFallbacks.provider?.fallbacks || []),
+          ...(configForFallbacks.fallbacks || []),
+        ].filter((item, index, arr) => item && arr.indexOf(item) === index);
         const candidates = [this.provider];
+        const providerAttempts = [];
         for (const candidateId of fallbackChain) {
           const p = getProvider(this.config, this.secrets, candidateId);
-          if (p) candidates.push(p);
+          if (p) {
+            candidates.push(p);
+          } else {
+            providerAttempts.push({
+              profileId: candidateId,
+              status: "skipped",
+              reason: "profile missing, unsupported, or API key not configured",
+            });
+          }
         }
 
         const providerPayload = {
@@ -2431,11 +2555,21 @@ export class OmniClawAgent {
           const providerStartedAt = new Date().toISOString();
           const providerInfo = candidateProvider.getInfo?.() || {};
           finalProviderInfo = providerInfo;
+          const attempt = {
+            index: i,
+            providerId: providerInfo.id || "unknown",
+            model: providerInfo.model || "",
+            ready: providerInfo.ready !== false,
+            startedAt: providerStartedAt,
+            status: "running",
+          };
+          providerAttempts.push(attempt);
 
           this.gateway.updateRun(run.id, {
             providerStatus: "running",
             provider: providerInfo,
             providerStartedAt,
+            providerAttempts,
           });
           this.gateway.addEvent("provider.started", {
             runId: run.id,
@@ -2466,7 +2600,15 @@ export class OmniClawAgent {
             startedAt: providerStartedAt,
             completedAt: new Date().toISOString(),
             durationMs: Date.now() - Date.parse(providerStartedAt),
+            attempts: providerAttempts,
           };
+          Object.assign(attempt, {
+            status: providerDiagnostics.status,
+            reason: providerDiagnostics.reason,
+            message: providerDiagnostics.message,
+            completedAt: providerDiagnostics.completedAt,
+            durationMs: providerDiagnostics.durationMs,
+          });
 
           if (outcome.ok) {
             break;
@@ -2487,6 +2629,7 @@ export class OmniClawAgent {
         this.gateway.updateRun(run.id, {
           providerStatus: providerDiagnostics.status,
           providerDiagnostics,
+          providerAttempts,
         });
 
         if (outcome.ok) {
@@ -2669,11 +2812,13 @@ export class OmniClawAgent {
     const loop = config.runtime?.modelToolLoop || {};
     return {
       enabled: loop.enabled !== false,
-      maxRounds: Math.max(0, Math.min(5, Number(loop.maxRounds || 2))),
+      maxRounds: Math.max(0, Math.min(10, Number(loop.maxRounds || 2))),
       maxToolCallsPerRound: Math.max(1, Math.min(8, Number(loop.maxToolCallsPerRound || 3))),
       runWhenHeuristicHasTools: loop.runWhenHeuristicHasTools !== false,
       recoverMissingToolCalls: loop.recoverMissingToolCalls !== false,
       maxRepeatedToolCalls: Math.max(1, Math.min(4, Number(loop.maxRepeatedToolCalls || 1))),
+      nativeToolCalling: loop.nativeToolCalling !== false,
+      nativeToolTimeoutMs: Math.max(1000, Math.min(15000, Number(loop.nativeToolTimeoutMs || 8000))),
     };
   }
 
@@ -2751,12 +2896,20 @@ export class OmniClawAgent {
       "computer-search",
       "computer-directory-list",
       "computer-file-read",
+      "computer-file-write",
       "computer-delete",
       "browser-navigate",
       "browser-observe",
       "project-test",
       "project-build",
       "project-release",
+      "file-write",
+      "file-read",
+      "file-list",
+      "shell-plan",
+      "time",
+      "task-create",
+      "task-list",
     ]);
     if ((intents || []).some((intent) => deterministicIntents.has(intent))) {
       return true;
@@ -2766,10 +2919,13 @@ export class OmniClawAgent {
       "list_computer_directory",
       "search_computer_files",
       "read_computer_file",
+      "write_computer_file",
       "delete_computer_path",
       "browser_navigate",
+      "open_browser_url",
       "browser_snapshot",
       "provider_status",
+      "configure_provider_brain",
       "list_provider_models",
       "computer_system_status",
       "web_research",
@@ -2778,6 +2934,14 @@ export class OmniClawAgent {
       "openclaw_code_study",
       "run_terminal_command",
       "plan_shell_command",
+      "write_file",
+      "append_file",
+      "verify_html_artifact",
+      "read_file",
+      "list_files",
+      "time_now",
+      "list_tasks",
+      "create_task",
     ]);
     return toolOutputs.some((item) => deterministicTools.has(item.tool));
   }
@@ -2802,6 +2966,8 @@ export class OmniClawAgent {
       "If more runtime evidence is needed, return: {\"toolCalls\":[{\"tool\":\"tool_id\",\"input\":{},\"reason\":\"why\"}]}",
       "If no more tools are needed, return: {\"toolCalls\":[],\"finalReady\":true,\"reason\":\"why\"}",
       "Rules: use the fewest safe tool calls; never request destructive tools unless the user explicitly asked; do not call unknown tools.",
+      "For real tasks, prefer evidence over claims: after writing a file, request a read/verification tool; after building HTML, request verify_html_artifact; after research, fetch/read enough content to cite observations.",
+      "You may request multiple independent read-only tools in one round. Avoid repeating the same tool+input unless the previous output failed and the new input fixes it.",
       "",
       `Round: ${round}`,
       `User message: ${message}`,
@@ -2815,6 +2981,43 @@ export class OmniClawAgent {
       "",
       "JSON:",
     ].join("\n");
+  }
+
+  buildNativeToolSchemas(tools = []) {
+    return (tools || [])
+      .filter((tool) => tool.id && !["message", "sessions_send"].includes(tool.id))
+      .slice(0, 80)
+      .map((tool) => ({
+        type: "function",
+        function: {
+          name: tool.id,
+          description: truncateTraceText(tool.description || `Run ${tool.id}.`, 900),
+          parameters: {
+            type: "object",
+            additionalProperties: true,
+            properties: {},
+          },
+        },
+      }));
+  }
+
+  parseNativeToolLoopResponse(completion, allowedToolIds, maxCalls) {
+    const rawCalls = Array.isArray(completion?.toolCalls) ? completion.toolCalls : [];
+    const normalized = rawCalls.map((call) => ({
+      tool: String(call.tool || call.name || "").trim(),
+      input: this.normalizeModelToolInput(call),
+      reason: "Provider emitted a native tool call.",
+    }));
+    return {
+      raw: truncateTraceText(completion?.text || "", 2000),
+      validJson: true,
+      nativeTools: true,
+      finalReady: rawCalls.length === 0 && Boolean(String(completion?.text || "").trim()),
+      reason: rawCalls.length ? "native-tool-calls" : "native-no-tool-calls",
+      missingToolCallClaim: this.looksLikeUnexecutedToolClaim(completion?.text || ""),
+      rejectedCalls: normalized.filter((call) => !call.tool || !allowedToolIds.has(call.tool)),
+      calls: normalized.filter((call) => call.tool && allowedToolIds.has(call.tool)).slice(0, maxCalls),
+    };
   }
 
   parseModelToolCalls(text, allowedToolIds, maxCalls) {
@@ -2960,6 +3163,8 @@ export class OmniClawAgent {
       attempted: false,
       rounds: 0,
       toolCallCount: 0,
+      nativeToolAttempts: 0,
+      nativeToolsUsed: false,
       skippedReason: "",
       stoppedReason: "",
       finalReady: false,
@@ -2988,13 +3193,13 @@ export class OmniClawAgent {
         round,
       });
       let completion;
+      let usedNativeTools = false;
       try {
         const loopTimeoutMs = Math.max(
           5000,
           Math.min(30000, Number(this.config.getConfig().provider?.timeoutMs || 30000)),
         );
-        completion = await Promise.race([
-          this.provider.complete([
+        const loopMessages = [
           {
             role: "system",
             content: "You are an OmniClaw tool-call planner. Return only valid JSON.",
@@ -3009,12 +3214,44 @@ export class OmniClawAgent {
               round,
             }),
           },
-          ]),
+        ];
+        if (settings.nativeToolCalling && typeof this.provider.completeWithTools === "function") {
+          try {
+            const nativeTimeoutMs = Math.min(loopTimeoutMs, settings.nativeToolTimeoutMs);
+            report.nativeToolAttempts += 1;
+            completion = await Promise.race([
+              this.provider.completeWithTools(loopMessages, {
+                tools: this.buildNativeToolSchemas(tools),
+                toolChoice: "auto",
+                timeoutMs: nativeTimeoutMs,
+              }),
+              new Promise((_, reject) => setTimeout(
+                () => reject(new Error(`Native model tool loop timed out after ${nativeTimeoutMs}ms`)),
+                nativeTimeoutMs,
+              )),
+            ]);
+            usedNativeTools = Boolean(completion?.nativeTools);
+            report.nativeToolsUsed = report.nativeToolsUsed || usedNativeTools;
+          } catch (nativeError) {
+            report.errors.push(`native-tools-fallback: ${nativeError.message}`);
+            this.gateway.addEvent("model_tool_loop.native_fallback", {
+              runId: run.id,
+              sessionId: session.id,
+              agentId: agent.id,
+              round,
+              error: nativeError.message,
+            });
+          }
+        }
+        if (!completion) {
+          completion = await Promise.race([
+            this.provider.complete(loopMessages),
           new Promise((_, reject) => setTimeout(
             () => reject(new Error(`Model tool loop timed out after ${loopTimeoutMs}ms`)),
             loopTimeoutMs,
           )),
-        ]);
+          ]);
+        }
       } catch (error) {
         report.errors.push(error.message);
         report.roundDetails.push({
@@ -3032,7 +3269,9 @@ export class OmniClawAgent {
         break;
       }
 
-      const parsed = this.parseModelToolLoopResponse(completion?.text || "", allowedToolIds, settings.maxToolCallsPerRound);
+      const parsed = usedNativeTools
+        ? this.parseNativeToolLoopResponse(completion, allowedToolIds, settings.maxToolCallsPerRound)
+        : this.parseModelToolLoopResponse(completion?.text || "", allowedToolIds, settings.maxToolCallsPerRound);
       let calls = parsed.calls;
       if (parsed.rejectedCalls.length > 0) {
         report.rejectedToolCalls.push(...parsed.rejectedCalls.map((call) => ({
@@ -3171,10 +3410,11 @@ export class OmniClawAgent {
         });
       }
       report.roundDetails.push({
-        round,
-        status: executedThisRound > 0 ? "tools-executed" : "all-tools-skipped",
-        validJson: parsed.validJson,
-        callCount: executedThisRound,
+          round,
+          status: executedThisRound > 0 ? "tools-executed" : "all-tools-skipped",
+          validJson: parsed.validJson,
+          nativeTools: Boolean(parsed.nativeTools),
+          callCount: executedThisRound,
         skippedCallCount: calls.length - executedThisRound,
         recovered: !parsed.calls.length && calls.length > 0,
         rejectedCallCount: parsed.rejectedCalls.length,
@@ -3628,7 +3868,7 @@ export class OmniClawAgent {
   extractBootstrapFacts(message = "") {
     const text = String(message || "").trim();
     const clean = (value = "") =>
-      String(value || "").replace(/[.。]+$/g, "").replace(/\s+/g, " ").trim();
+      String(value || "").replace(/[.ã€‚]+$/g, "").replace(/\s+/g, " ").trim();
     const facts = {
       skip: /skip bootstrap|bootstrap skip|setup skip/i.test(text),
     };
@@ -3948,6 +4188,17 @@ export class OmniClawAgent {
       return this.buildProfileQuestionReply({ message, agent });
     }
 
+    if (intents.includes("capabilities")) {
+      const toolIds = tools.map((tool) => tool.id).filter(Boolean);
+      const skillNames = skills.map((skill) => skill.name || skill.id).filter(Boolean);
+      return [
+        `Main ${this.readAgentProfileFacts(agent.id || "main").assistantName || agent.name || "OmniClaw agent"} hoon. OmniClaw platform mujhe hands/eyes deta hai: files, laptop folders, terminal, browser, web research, memory, tasks, skills, providers, aur channels.`,
+        `Active tools: ${toolIds.slice(0, 18).join(", ")}${toolIds.length > 18 ? `, +${toolIds.length - 18} more` : ""}.`,
+        `Active skills: ${skillNames.slice(0, 8).join(", ") || "workspace skills load hone ke liye ready"}.`,
+        "Demo commands: 'C drive me Downloads list karo', 'OpenClaw research karo sources ke saath', 'todo app banao aur verify karo', 'Telegram token <token> setup karo'.",
+      ].join("\n");
+    }
+
     if (intents.includes("greeting") && intents.length === 1) {
       const profileFacts = this.readAgentProfileFacts(agent.id || "main");
       const assistantName = profileFacts.assistantName || agent.name || "Main Agent";
@@ -4120,29 +4371,123 @@ export class OmniClawAgent {
       return this.buildGroundedResearchReply({ toolOutputs });
     }
 
+    const writtenFiles = toolOutputs
+      .filter((item) =>
+        (item.tool === "write_file" || item.tool === "append_file") &&
+        item.output &&
+        !item.output.error &&
+        !item.output.blocked,
+      )
+      .map((item) => item.output);
+    const builtHtml = writtenFiles.filter((item) => /\.html?$/i.test(String(item.path || "")));
+    if (builtHtml.length > 0) {
+      const research = toolOutputs.find((item) => item.tool === "web_research" || item.tool === "web_search")?.output || {};
+      const verifications = toolOutputs
+        .filter((item) => item.tool === "verify_html_artifact" && item.output && !item.output.error && !item.output.blocked)
+        .map((item) => item.output);
+      const htmlLines = builtHtml.map((file) => {
+        const absolutePath = path.resolve(this.rootDir, file.path || "");
+        const verification = verifications.find((item) => item.path === file.path);
+        const verifyText = verification
+          ? ` Verified: ${verification.ok ? "passed" : "needs attention"} (${verification.score}/100, ${verification.passed}/${verification.total} checks).`
+          : "";
+        return `- Created ${file.path} (${file.bytesWritten || 0} bytes).${verifyText} Preview: ${pathToFileURL(absolutePath).href}`;
+      });
+      const issueLines = verifications
+        .filter((item) => Array.isArray(item.issues) && item.issues.length > 0)
+        .map((item) => `- ${item.path} issues: ${item.issues.join(", ")}`);
+      return [
+        "Build complete.",
+        htmlLines.join("\n"),
+        writtenFiles
+          .filter((file) => !/\.html?$/i.test(String(file.path || "")))
+          .map((file) => `- Wrote ${file.path} (${file.bytesWritten || 0} bytes).`)
+          .join("\n"),
+        issueLines.length ? ["Verification notes:", ...issueLines].join("\n") : "",
+        research.results ? `Research trace: ${research.results.length} source result(s), ${research.fetchedContent?.length || 0} page fetch attempt(s).` : "",
+        "Browser preview tool can open this file when asked to run/open/preview it.",
+      ].filter(Boolean).join("\n");
+    }
+
+    if (writtenFiles.length > 0 && (intents.includes("file-write") || toolOutputs.some((item) => item.tool === "read_file"))) {
+      const readbacks = toolOutputs
+        .filter((item) => item.tool === "read_file" && item.output && !item.output.error && !item.output.blocked)
+        .map((item) => item.output);
+      const lines = writtenFiles.map((file) => {
+        const readback = readbacks.find((item) => item.path === file.path);
+        const verified = readback ? ` Verified read-back: ${readback.bytesRead || 0}/${readback.totalBytes || 0} bytes.` : "";
+        const preview = readback?.content ? ` Preview: ${String(readback.content).replace(/\s+/g, " ").trim().slice(0, 160)}` : "";
+        return `- ${file.path}: wrote ${file.bytesWritten || 0} bytes.${verified}${preview}`;
+      });
+      return [
+        "File task complete.",
+        ...lines,
+      ].join("\n");
+    }
+
+    if (byTool.has("write_computer_file")) {
+      const writes = toolOutputs
+        .filter((item) => item.tool === "write_computer_file" && item.output && !item.output.error && !item.output.blocked)
+        .map((item) => item.output);
+      const readbacks = toolOutputs
+        .filter((item) => item.tool === "read_computer_file" && item.output && !item.output.error && !item.output.blocked)
+        .map((item) => item.output);
+      const lines = writes.map((file) => {
+        const readback = readbacks.find((item) => item.path === file.path);
+        const verified = readback ? ` Verified read-back: ${readback.bytesRead || 0}/${readback.totalBytes || 0} bytes.` : "";
+        const preview = readback?.content ? ` Preview: ${String(readback.content).replace(/\s+/g, " ").trim().slice(0, 160)}` : "";
+        return `- ${file.path}: wrote ${file.bytesWritten || 0} bytes.${verified}${preview}`;
+      });
+      return [
+        "Computer file task complete.",
+        ...lines,
+      ].join("\n");
+    }
+
     if (byTool.has("configure_telegram")) {
       const result = byTool.get("configure_telegram");
       if (result.needsToken) {
         return [
-          "Haan, main Telegram se connect ho sakta hoon. Abhi Telegram connected nahi hai.",
+          "Telegram connect kar sakta hoon, lekin abhi bot token missing hai.",
           "",
-          "Connect karne ke liye mujhe Telegram bot token chahiye:",
-          "1. Telegram me @BotFather open karo.",
-          "2. /newbot se bot banao ya existing bot ka token copy karo.",
-          "3. Yahan bhejo: telegram token <BOT_TOKEN>",
+          "Token milte hi main yeh kaam khud karunga:",
+          "1. Telegram adapter enable.",
+          "2. Bot token local secret store me save.",
+          "3. Adapter readiness test.",
+          "4. Polling worker start.",
+          "5. Chat me final status + next test step.",
           "",
-          "Token milte hi main khud adapter enable, token save, test, aur polling worker start kar dunga.",
-          "Bot token chat me visible hota hai, isliye product build me next step secure token modal/pairing code banana chahiye.",
+          "Abhi command bhejo:",
+          "`telegram token <BOT_TOKEN>`",
+          "",
+          "Security note: token chat transcript me aa sakta hai. Product build me secure token modal/pairing flow next upgrade hai.",
         ].join("\n");
       }
       const adapter = result.adapter || {};
       const workerRunning = Boolean(result.worker?.running || result.worker?.status === "running");
       return [
-        "Telegram setup done.",
+        "Telegram setup complete.",
         `Adapter: ${adapter.status || "unknown"}; enabled ${adapter.enabled ? "yes" : "no"}; secret saved ${result.secretUpdated ? "yes" : "already configured"}.`,
         `Test: ${result.test?.ok ? "passed" : "needs attention"}${result.test?.message ? ` - ${result.test.message}` : ""}.`,
         `Worker: ${workerRunning ? "running" : result.workerError ? `not started - ${result.workerError}` : "not started"}.`,
         Array.isArray(result.next) && result.next.length ? `Next: ${result.next.join(" ")}` : "",
+      ].filter(Boolean).join("\n");
+    }
+
+    if (intents.includes("task-create") && byTool.has("create_task")) {
+      const result = byTool.get("create_task");
+      const task = result.task || {};
+      const plan = Array.isArray(result.plan) ? result.plan : task.plan || [];
+      const toolPlan = Array.isArray(result.toolPlan) ? result.toolPlan : task.toolPlan || [];
+      const criteria = Array.isArray(result.acceptanceCriteria) ? result.acceptanceCriteria : task.acceptanceCriteria || [];
+      return [
+        "Task blueprint created.",
+        `Task: ${task.id || "unknown"} - ${task.title || "untitled"} (${task.taskType || "general"}, priority ${task.priority || "normal"}).`,
+        plan.length ? `Plan: ${plan.slice(0, 6).map((step, index) => `${index + 1}. ${step}`).join(" ")}` : "",
+        toolPlan.length ? `Tool path: ${toolPlan.join(" -> ")}.` : "",
+        criteria.length ? `Done when: ${criteria.slice(0, 4).join(" | ")}` : "",
+        task.automation?.requested ? `Automation hint: ${task.automation.intervalHint || "interval not parsed"} via ${task.automation.deliveryHint || "webchat"}.` : "",
+        "Run it with: run task " + (task.id || ""),
       ].filter(Boolean).join("\n");
     }
 
@@ -4295,6 +4640,24 @@ export class OmniClawAgent {
         `Model discovery tool: ${status.modelDiscovery?.tool || "list_provider_models"}.`,
         `Next upgrade: ${status.nextUpgrade || "provider router add karo"}`,
       ].join(" ");
+    }
+
+    if (byTool.has("configure_provider_brain")) {
+      const result = byTool.get("configure_provider_brain");
+      const readiness = result.readiness || {};
+      const key = result.keyStatus || {};
+      const models = result.models || null;
+      return [
+        readiness.ok === false ? "Brain setup saved, but live readiness needs attention." : "Brain setup saved.",
+        `Provider: ${result.profileId || result.apiKeyProviderId || "active"} (${result.mode || "unknown"}).`,
+        `Base URL: ${result.baseUrl || "not set"}.`,
+        `Model: ${result.model || "not set"}.`,
+        `Key vault: ${result.apiKeyProviderId || key.providerId || "unknown"} ${key.masked ? `(${key.masked})` : key.configured ? "(configured)" : "(missing)"}.`,
+        readiness.message || readiness.live?.error ? `Readiness: ${readiness.message || readiness.live?.error}` : "",
+        models ? `Models: ${models.ok === false ? "fetch failed" : `${models.count || models.models?.length || 0} fetched`}.` : "",
+        models?.error ? `Model fetch error: ${models.error}` : "",
+        "Next: send a normal message or ask /doctor; OmniClaw will use this provider instead of mock when ready.",
+      ].filter(Boolean).join("\n");
     }
 
     if (intents.includes("subagent-delegation") && byTool.has("subagent_delegation_status")) {
@@ -4644,10 +5007,10 @@ export class OmniClawAgent {
       ].filter(Boolean).join("\n");
     }
 
-    if (intents.includes("browser-navigate") && byTool.has("browser_navigate")) {
-      const result = byTool.get("browser_navigate");
+    if (intents.includes("browser-navigate") && (byTool.has("browser_navigate") || byTool.has("open_browser_url"))) {
+      const result = byTool.get("browser_navigate") || byTool.get("open_browser_url");
       return [
-        result.ok === false || result.error ? "Browser navigation needs attention." : "Browser navigation complete.",
+        result.ok === false || result.error ? "Browser navigation needs attention." : "Browser open/navigation complete.",
         `URL: ${result.url || result.snapshot?.url || "unknown"}.`,
         result.title || result.snapshot?.title ? `Title: ${result.title || result.snapshot?.title}.` : "",
         result.error ? `Error: ${result.error}` : "",
@@ -4767,6 +5130,18 @@ export class OmniClawAgent {
     }
 
     const query = output.query || "query";
+    const fetched = Array.isArray(output.fetchedContent)
+      ? output.fetchedContent.filter((item) => item.text && !item.error)
+      : [];
+    const queryTerms = String(query)
+      .toLowerCase()
+      .split(/[^a-z0-9.#+-]+/i)
+      .map((term) => term.trim())
+      .filter((term) => term.length >= 3 && !["top", "the", "and", "for", "with", "best", "features"].includes(term));
+    const relevantFetched = fetched.filter((page) => {
+      const haystack = `${page.url || ""} ${page.text || ""}`.toLowerCase();
+      return queryTerms.length === 0 || queryTerms.some((term) => haystack.includes(term));
+    });
     const snippets = usefulResults
       .map((result) => String(result.snippet || result.title || "").replace(/\s+/g, " ").trim())
       .filter(Boolean);
@@ -4777,12 +5152,17 @@ export class OmniClawAgent {
       title: result.title || "Source",
       url: result.url || "",
       snippet: snippets[index] || "",
+      source: result.source || "Search",
     }));
     const sourceRef = (index) => `[^${Math.min(index, footnotes.length || 1)}]`;
+    const fetchedCount = fetched.length;
+    const sourceSummary = `Sources: ${usefulResults.length} result(s), ${fetchedCount} page/snippet fetch(es), provider ${output.provider || "search"}.`;
 
     if (isOpenClaw) {
       return [
         "## OpenClaw - Research Overview",
+        "",
+        sourceSummary,
         "",
         "### Kya Hai OpenClaw?",
         `OpenClaw ek open-source personal AI assistant / autonomous agent project hai jo user ke apne machine ya infrastructure par run karke messaging channels aur local tools ke through kaam karne ke idea par centered hai. ${sourceRef(1)}`,
@@ -4814,22 +5194,27 @@ export class OmniClawAgent {
         "- Tool result + source citations dono reply me visible hone chahiye.",
         "",
         "### Sources",
-        ...footnotes.map((source) => `[^${source.index}]: ${source.url || source.title}`),
+        ...footnotes.map((source) => `[^${source.index}]: ${source.title} (${source.source}) - ${source.url || "no url"}`),
       ].join("\n");
     }
 
-    const bullets = footnotes
+    const fetchedBullets = relevantFetched.slice(0, 3).map((page, index) => {
+      const text = String(page.text || "").replace(/\s+/g, " ").trim().slice(0, 420);
+      return `- Source ${index + 1} fetched content: ${text}${page.truncated ? "..." : ""}`;
+    });
+    const bullets = (fetchedBullets.length ? fetchedBullets : footnotes
       .slice(0, 4)
-      .map((source) => `- ${source.snippet || source.title} [^${source.index}]`);
+      .map((source) => `- ${source.snippet || source.title} [^${source.index}]`));
     return [
       `## Research: ${query}`,
       "",
-      `Mujhe ${usefulResults.length} useful source(s) mile. Short synthesis:`,
+      `${sourceSummary} Short synthesis:`,
+      fetched.length ? `Top ${fetched.length} page(s) fetch kiye; ${relevantFetched.length} page(s) query se relevant lage.` : "",
       "",
       ...bullets,
       "",
       "### Sources",
-      ...footnotes.map((source) => `[^${source.index}]: ${source.url || source.title}`),
+      ...footnotes.map((source) => `[^${source.index}]: ${source.title} (${source.source}) - ${source.url || "no url"}`),
     ].filter(Boolean).join("\n");
   }
 
@@ -5097,14 +5482,14 @@ export class OmniClawAgent {
         text.match(/(?:tera|tara|tumhara|assistant(?: ka)?|agent(?: ka)?)\s+(?:naam|name)\s+([a-zA-Z0-9 _.-]{2,40}?)\s+(?:hai|ha|hoga|rakh)\b/i) ||
         text.match(/(?:call you|name you)\s+([a-zA-Z0-9 _.-]{2,40})/i);
       if (assistantNameMatch) {
-        facts.push(`Assistant name: ${assistantNameMatch[1].trim().replace(/[.。]+$/, "")}`);
+        facts.push(`Assistant name: ${assistantNameMatch[1].trim().replace(/[.ã€‚]+$/, "")}`);
       }
 
       const userNameMatch =
         text.match(/(?:mera|mara|my)\s+(?:naam|name)\s+([a-zA-Z0-9 _.-]{2,40}?)\s+(?:hai|ha|is)\b/i) ||
         text.match(/(?:i am|i'm|main|mai)\s+([A-Z][a-zA-Z0-9 _.-]{1,40})\b/);
       if (userNameMatch) {
-        facts.push(`User name: ${userNameMatch[1].trim().replace(/[.。]+$/, "")}`);
+        facts.push(`User name: ${userNameMatch[1].trim().replace(/[.ã€‚]+$/, "")}`);
       }
     }
 

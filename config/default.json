@@ -7,11 +7,13 @@
     "activeProfile": "balanced",
     "modelToolLoop": {
       "enabled": true,
-      "maxRounds": 3,
-      "maxToolCallsPerRound": 3,
+      "maxRounds": 10,
+      "maxToolCallsPerRound": 5,
       "runWhenHeuristicHasTools": true,
       "recoverMissingToolCalls": true,
-      "maxRepeatedToolCalls": 1
+      "maxRepeatedToolCalls": 2,
+      "nativeToolCalling": true,
+      "nativeToolTimeoutMs": 8000
     },
     "profiles": {
       "lite": {
@@ -45,13 +47,19 @@
     "apiKeyEnv": "OPENAI_API_KEY",
     "apiKeyProviderId": "openai-compatible",
     "temperature": 0.2,
-    "maxTokens": 1600,
-    "plannerMaxTokens": 700,
+    "maxTokens": 1200,
+    "plannerMaxTokens": 450,
     "timeoutMs": 45000,
     "systemPrompt": "You are OmniClaw, a practical local-first assistant focused on user needs, planning, execution, safety, and clarity.",
-    "fallbacks": []
+    "fallbacks": [
+      "openrouter",
+      "nvidia",
+      "minimax"
+    ]
   },
-  "fallbacks": [],
+  "fallbacks": [
+    "codex-cli"
+  ],
   "providerProfiles": {
     "openai": {
       "mode": "openai-compatible",
@@ -310,6 +318,7 @@
       "workspaceRoot": ".",
       "maxReadBytes": 65536,
       "writableRoots": [
+        ".",
         "data/generated",
         "docs/drafts",
         "notes"

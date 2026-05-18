@@ -1,4 +1,8 @@
 export class Planner {
+  getNpmCommand() {
+    return process.platform === "win32" ? "npm.cmd" : "npm";
+  }
+
   normalizeToolInput(step = {}) {
     const raw = step.input ?? step.arguments ?? {};
     if (raw && typeof raw === "object" && !Array.isArray(raw)) {
@@ -358,7 +362,17 @@ export class Planner {
       });
     }
 
-    if (intents.includes("greeting") || intents.includes("api-setup") || intents.includes("capabilities")) {
+    const providerSetupRequest = intents.includes("api-setup") ? this.extractProviderSetupRequest(message) : null;
+    if (providerSetupRequest?.shouldConfigure) {
+      steps.push({
+        type: "tool",
+        tool: "configure_provider_brain",
+        input: providerSetupRequest.input,
+        reason: "User supplied provider brain setup details; save key/model/base URL and test readiness in one atomic flow.",
+      });
+    }
+
+    if (intents.includes("greeting") || (intents.includes("api-setup") && !providerSetupRequest?.shouldConfigure) || intents.includes("capabilities")) {
       steps.push({
         type: "respond",
         reason: intents.includes("api-setup")
@@ -436,10 +450,12 @@ export class Planner {
       });
     }
     if (intents.includes("browser-navigate")) {
+      const target = this.extractBrowserUrl(message);
+      const opensWorkspaceFile = /^(?:file:\/\/|[^:]+\.html?$)/i.test(target) && !/^https?:\/\//i.test(target);
       steps.push({
         type: "tool",
-        tool: "browser_navigate",
-        input: { url: this.extractBrowserUrl(message) },
+        tool: opensWorkspaceFile ? "open_browser_url" : "browser_navigate",
+        input: opensWorkspaceFile ? { path: target } : { url: target },
         reason: "User asked OmniClaw to open or navigate a browser page.",
       });
     }
@@ -538,9 +554,18 @@ export class Planner {
       steps.push({
         type: "tool",
         tool: "create_task",
-        input: { title },
+        input: this.buildTaskBlueprintInput({ title, message }),
         reason: "Message looks like a task creation request.",
       });
+      if (!/\b(?:run now|start now|execute now|abhi run|abhi chala|run it)\b/i.test(message)) {
+        return {
+          summary: `Generated ${steps.length} step(s) using the ${profile.id} runtime profile.`,
+          intents,
+          profile,
+          toolsAvailable: tools,
+          steps,
+        };
+      }
     }
 
     if (intents.includes("task-list")) {
@@ -560,34 +585,37 @@ export class Planner {
     }
 
     if (intents.includes("project-test")) {
+      const npm = this.getNpmCommand();
       steps.push({
         type: "tool",
         tool: "plan_shell_command",
-        input: { request: '"npm.cmd run build"' },
+        input: { request: `"${npm} run build"` },
         reason: "Run the local syntax build check.",
       });
       steps.push({
         type: "tool",
         tool: "plan_shell_command",
-        input: { request: '"npm.cmd run test"' },
+        input: { request: `"${npm} run test"` },
         reason: "Run the local smoke test.",
       });
     }
 
     if (intents.includes("project-build") && !intents.includes("v2-audit") && !intents.includes("self-build")) {
+      const npm = this.getNpmCommand();
       steps.push({
         type: "tool",
         tool: "plan_shell_command",
-        input: { request: '"npm.cmd run portable:build"' },
-        reason: "Build the Windows portable executable package.",
+        input: { request: `"${npm} run portable:build"` },
+        reason: "Build the portable executable package.",
       });
     }
 
     if (intents.includes("project-release")) {
+      const npm = this.getNpmCommand();
       steps.push({
         type: "tool",
         tool: "plan_shell_command",
-        input: { request: '"npm.cmd run release:windows"' },
+        input: { request: `"${npm} run release:windows"` },
         reason: "Create the Windows release ZIP.",
       });
     }
@@ -637,13 +665,35 @@ export class Planner {
       });
     }
 
-    if (intents.includes("file-write")) {
+    if (intents.includes("file-write") && !intents.includes("complex-build")) {
       const writeRequest = this.extractWriteRequest(message);
       steps.push({
         type: "tool",
         tool: writeRequest.append ? "append_file" : "write_file",
         input: writeRequest,
         reason: "The user asked to create or update a workspace file.",
+      });
+      steps.push({
+        type: "tool",
+        tool: "read_file",
+        input: { path: writeRequest.path },
+        reason: "Read the file back after writing so the final reply proves the task completed.",
+      });
+    }
+
+    if (intents.includes("computer-file-write")) {
+      const writeRequest = this.extractComputerWriteRequest(message);
+      steps.push({
+        type: "tool",
+        tool: "write_computer_file",
+        input: writeRequest,
+        reason: "The user asked to create or update a laptop/computer file through governed computer access.",
+      });
+      steps.push({
+        type: "tool",
+        tool: "read_computer_file",
+        input: { path: writeRequest.path },
+        reason: "Read the laptop/computer file back after writing so the final reply proves completion.",
       });
     }
 
@@ -674,12 +724,54 @@ export class Planner {
       });
     }
 
-    if (intents.includes("research") && !intents.includes("delegation")) {
+    if (intents.includes("research") && !intents.includes("delegation") && !intents.includes("research-then-build")) {
       steps.push({
         type: "tool",
         tool: "web_research",
         input: { query: this.extractResearchQuery(message) },
         reason: "The user asked for lightweight web research.",
+      });
+    }
+
+    if (intents.includes("complex-build")) {
+      const artifact = this.buildGeneratedWebArtifact(message);
+      steps.push({
+        type: "tool",
+        tool: "web_research",
+        input: { query: this.extractResearchQuery(message) },
+        reason: "Research the architecture and implementation pattern for the requested build.",
+      });
+      steps.push({
+        type: "tool",
+        tool: "write_file",
+        input: {
+          path: "data/generated/build_plan.md",
+          content: `# Build Plan\n\nRequest: ${message}\n\n- Research architecture\n- Define files to create\n- Implement incrementally\n- Run verification\n`,
+        },
+        reason: "Create a structured build plan artifact before implementation.",
+      });
+      if (artifact) {
+        steps.push({
+          type: "tool",
+          tool: "write_file",
+          input: artifact,
+          reason: "Create a runnable first version instead of stopping at planning.",
+        });
+        steps.push({
+          type: "tool",
+          tool: "verify_html_artifact",
+          input: { path: artifact.path },
+          reason: "Verify the generated app artifact before claiming the build is complete.",
+        });
+      }
+    }
+
+    if (intents.includes("research-then-build")) {
+      steps.push({
+        type: "tool",
+        tool: "web_research",
+        input: { query: this.extractResearchQuery(message) },
+        reason: "Research first because the request explicitly asks to research before building.",
       });
     }
 
@@ -854,7 +946,12 @@ JSON:`;
     for (const pattern of patterns) {
       const match = message.match(pattern);
       if (match) {
-        return match[1].trim();
+        let extracted = match[1].trim();
+        extracted = extracted.replace(/^(?:in |from |of |at )(?:the )?/i, "").trim();
+        if (/^(?:workspace|project|root|current|here|cwd|\.?)$/i.test(extracted)) {
+          return fallback || ".";
+        }
+        if (extracted) return extracted;
       }
     }
 
@@ -900,6 +997,17 @@ JSON:`;
     if (quoted) {
       return this.normalizeBrowserUrl(quoted[1]);
     }
+    const fileUrl = text.match(/file:\/\/[^\s"'<>]+/i);
+    if (fileUrl) {
+      return fileUrl[0];
+    }
+    const htmlPath = text.match(/\b([A-Za-z0-9._\/\\-]+\.html?)\b/i);
+    if (htmlPath) {
+      return htmlPath[1];
+    }
+    if (/\b(?:generated app|last app|html app|website)\b/i.test(text) && /\b(?:open|preview|run|chalao|chala|kholo)\b/i.test(text)) {
+      return "data/generated/index.html";
+    }
     const url = text.match(/https?:\/\/[^\s"'<>]+/i);
     if (url) {
       return this.normalizeBrowserUrl(url[0]);
@@ -925,16 +1033,25 @@ JSON:`;
     if (!text) {
       return "http://localhost:3147/";
     }
-    return /^https?:\/\//i.test(text) ? text : `https://${text}`;
+    if (/^(?:https?|file):\/\//i.test(text) || /\.html?$/i.test(text)) {
+      return text;
+    }
+    return `https://${text}`;
   }
 
   extractWriteRequest(message) {
     const quoted = [...message.matchAll(/["']([^"']+)["']/g)].map((match) => match[1]);
     const append = message.toLowerCase().includes("append file");
+    const pathMatch =
+      message.match(/\b(?:called|named|as|to)\s+([A-Za-z0-9._\/\\-]+\.(?:txt|html|js|css|json|md|py|ts|csv))\b/i) ||
+      message.match(/\b([A-Za-z0-9._\/\\-]+\.(?:txt|html|js|css|json|md|py|ts|csv))\b/i);
+    const contentMatch =
+      message.match(/\b(?:with content|content|containing|write)\s+["']([^"']+)["']/i) ||
+      message.match(/\b(?:with content|content|containing)\s+(.+)$/i);
 
     return {
-      path: quoted[0] || "data/generated/output.txt",
-      content: quoted[1] || "Generated by OmniClaw.\n",
+      path: pathMatch?.[1] || quoted[0] || "data/generated/output.txt",
+      content: contentMatch?.[1]?.trim() || quoted[1] || "Generated by OmniClaw.\n",
       append,
     };
   }
@@ -964,11 +1081,27 @@ JSON:`;
     }
 
     const cleaned = String(message || "")
-      .replace(/research|reasearch|search web|look up|find on web/gi, "")
-      .replace(/\b(karo|kar|ke baare mein|ke bare mein|ka bara ma|ke bara ma|about)\b/gi, "")
+      .replace(/\buse\s+(?:a\s+)?(?:research|researcher|reasearch)\s+agent\s+to\b/gi, "")
+      .replace(/\b(do a |perform a |conduct a |make a )?research (on |about |for )?/gi, "")
+      .replace(/\b(reasearch|search (the web )?(for |on |about )?|look up |find (on web|information about|info on|info about|out about) )/gi, "")
+      .replace(/\b(summarize|summarise|explain|describe|tell me about|give me|show me|list|get)\b/gi, "")
+      .replace(/\bweb\b(?=\s*$|\s+(?:sources?|research|search)\b)/gi, "")
+      .replace(/\b(karo|kar|kr|karke|karna|de do|batao|bata do|dijiye)\b/gi, "")
+      .replace(/\b(ke baare mein|ke bare mein|ke baare me|ke bare me|ka bara ma|ke bara ma|ka bare ma|ke bare ma|ke sath|ke saath|sources? ke sath|sources? ke saath|source ke sath|source ke saath|with sources?|sources?)\b/gi, "")
+      .replace(/\b(?:ke|ka|ki)\s+(?:bare|bara|baare)\s+(?:me|mein|ma)\b/gi, "")
+      .replace(/\b(?:then|and)\s+(?:summarize|summarise|explain|describe)\s+(?:it|this|that)?\b/gi, "")
+      .replace(/\b(?:then|and)\s+(?:it|this|that)\b/gi, "")
+      .replace(/\btop\s+\d+\s+/gi, "")
+      .replace(/\b(?:the|a|an)\s+(?=(?:features|benefits|best practices|advantages)\b)/gi, "")
+      .replace(/\bweb\b\s*$/gi, "")
+      .replace(/^(and |then |now )+/gi, "")
       .replace(/[^\p{L}\p{N}\s._-]/gu, " ")
       .replace(/\s+/g, " ")
       .trim();
+    const ofPhrase = cleaned.match(/^(features|benefits|advantages|best practices)\s+of\s+(.+)$/i);
+    if (ofPhrase?.[1] && ofPhrase?.[2]) {
+      return `${ofPhrase[2].trim()} ${ofPhrase[1].trim()}`;
+    }
     const normalized = cleaned.toLowerCase();
     const tokens = normalized.split(/\s+/).filter(Boolean);
     const mostlyAiNoise =
@@ -976,6 +1109,16 @@ JSON:`;
       tokens.every((token) => ["ai", "ki", "i", "kisi", "koi", "ek", "ik"].includes(token));
     if (mostlyAiNoise) {
       return "artificial intelligence";
+    }
+    if (cleaned.length < 3 && message.length > 10) {
+      const keyTerms = message.match(/\b[A-Z][a-zA-Z0-9]+(?:\s+[A-Z][a-zA-Z0-9]+)*\b/g);
+      if (keyTerms?.length) {
+        return keyTerms.join(" ");
+      }
+      const afterPrep = message.match(/\b(?:about|for|on|of)\s+([a-zA-Z0-9\s._-]+?)(?:\s+and|\s+then|\s*[.,;]|$)/i);
+      if (afterPrep?.[1]?.trim().length > 2) {
+        return afterPrep[1].trim();
+      }
     }
     return cleaned || message;
   }
@@ -995,6 +1138,187 @@ JSON:`;
       startWorker: Boolean(tokenMatch) || /start|chala|run|enable/i.test(lowered),
       defaultAgentId: "main",
       mode: "polling",
+    };
+  }
+
+  extractComputerWriteRequest(message) {
+    const text = String(message || "");
+    const quoted = [...text.matchAll(/["']([^"']+)["']/g)].map((match) => match[1]);
+    const append = /\bappend\b/i.test(text);
+    const drivePath =
+      text.match(/[a-zA-Z]:[\\/][^\r\n"']+?\.(?:txt|html|js|css|json|md|py|ts|csv)\b/i)?.[0] ||
+      "";
+    const namedPath =
+      text.match(/\b(?:called|named|as|to|path|file)\s+([~A-Za-z0-9:._\/\\ -]+\.(?:txt|html|js|css|json|md|py|ts|csv))\b/i)?.[1] ||
+      "";
+    const path = (drivePath || namedPath || quoted.find((item) => /(?:[a-zA-Z]:[\\/]|[~\/\\]|\.\w+$)/.test(item)) || "").trim();
+    const contentMatch =
+      text.match(/\b(?:with content|content|containing|write)\s+["']([^"']+)["']/i) ||
+      text.match(/\b(?:with content|content|containing)\s+(.+)$/i);
+    const content = contentMatch?.[1]?.trim()
+      || quoted.find((item) => item !== path)
+      || "Generated by OmniClaw.\n";
+    return {
+      path: path || "~/Documents/omniclaw-output.txt",
+      content,
+      append,
+    };
+  }
+
+  buildGeneratedWebArtifact(message = "") {
+    const text = String(message || "");
+    const lower = text.toLowerCase();
+    const pathMatch = text.match(/\b(?:save|as|called|named|to)\s+([A-Za-z0-9._\/\\-]+\.html)\b/i);
+    const path = pathMatch?.[1] || "data/generated/index.html";
+    const title = lower.includes("calculator")
+      ? "OmniClaw Calculator"
+      : lower.includes("todo") || lower.includes("to-do")
+        ? "OmniClaw Todo"
+        : lower.includes("clock") || lower.includes("time")
+          ? "OmniClaw Clock"
+          : lower.includes("website") || lower.includes("web app") || lower.includes("app")
+            ? "OmniClaw Web App"
+            : "";
+    if (!title) {
+      return null;
+    }
+
+    if (lower.includes("calculator")) {
+      return {
+        path,
+        content: `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${title}</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, system-ui, sans-serif; background:#101112; color:#f7f7f4; }
+    body { margin:0; min-height:100vh; display:grid; place-items:center; }
+    main { width:min(360px, calc(100vw - 32px)); background:#1b1c1e; border:1px solid #303236; border-radius:22px; padding:20px; box-shadow:0 20px 80px rgba(0,0,0,.35); }
+    output { display:block; min-height:72px; padding:18px; margin-bottom:14px; border-radius:16px; background:#0b0c0d; font-size:34px; text-align:right; overflow:hidden; }
+    .keys { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; }
+    button { height:58px; border:0; border-radius:15px; background:#2b2d31; color:#fff; font-size:20px; cursor:pointer; }
+    button:hover { background:#383b40; }
+    .op { background:#ff7a1a; color:#111; font-weight:700; }
+    .wide { grid-column:span 2; }
+  </style>
+</head>
+<body>
+  <main aria-label="Calculator">
+    <output id="display">0</output>
+    <section class="keys">
+      <button data-clear class="wide">AC</button><button data-key="/">/</button><button data-key="*">*</button>
+      <button data-key="7">7</button><button data-key="8">8</button><button data-key="9">9</button><button data-key="-" class="op">-</button>
+      <button data-key="4">4</button><button data-key="5">5</button><button data-key="6">6</button><button data-key="+" class="op">+</button>
+      <button data-key="1">1</button><button data-key="2">2</button><button data-key="3">3</button><button data-equals class="op">=</button>
+      <button data-key="0" class="wide">0</button><button data-key=".">.</button>
+    </section>
+  </main>
+  <script>
+    const display = document.querySelector("#display");
+    let expr = "";
+    document.addEventListener("click", (event) => {
+      const button = event.target.closest("button");
+      if (!button) return;
+      if (button.dataset.clear !== undefined) expr = "";
+      if (button.dataset.key) expr += button.dataset.key;
+      if (button.dataset.equals !== undefined) {
+        try { expr = String(Function('"use strict"; return (' + expr + ')')()); }
+        catch { expr = "Error"; }
+      }
+      display.textContent = expr || "0";
+    });
+  </script>
+</body>
+</html>
+`,
+      };
+    }
+
+    if (lower.includes("todo") || lower.includes("to-do")) {
+      return {
+        path,
+        content: `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${title}</title>
+  <style>
+    body { margin:0; min-height:100vh; display:grid; place-items:center; background:#f4f1ea; color:#181818; font-family:Inter, system-ui, sans-serif; }
+    main { width:min(560px, calc(100vw - 32px)); background:white; border:1px solid #ddd7cc; border-radius:20px; padding:24px; box-shadow:0 16px 60px rgba(40,35,25,.16); }
+    h1 { margin:0 0 16px; font-size:30px; }
+    form { display:flex; gap:10px; }
+    input { flex:1; padding:14px; border-radius:12px; border:1px solid #ccc5b8; font-size:16px; }
+    button { border:0; border-radius:12px; padding:0 16px; background:#111; color:white; cursor:pointer; }
+    li { display:flex; align-items:center; gap:10px; padding:12px 0; border-bottom:1px solid #eee8dc; }
+    li.done span { text-decoration:line-through; color:#777; }
+    li span { flex:1; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Todo List</h1>
+    <form id="form"><input id="task" placeholder="Add a task" /><button>Add</button></form>
+    <ul id="list"></ul>
+  </main>
+  <script>
+    const form = document.querySelector("#form");
+    const task = document.querySelector("#task");
+    const list = document.querySelector("#list");
+    const items = JSON.parse(localStorage.omniclawTodos || "[]");
+    const save = () => localStorage.omniclawTodos = JSON.stringify(items);
+    const render = () => {
+      list.innerHTML = "";
+      items.forEach((item, index) => {
+        const li = document.createElement("li");
+        li.className = item.done ? "done" : "";
+        li.innerHTML = '<input type="checkbox" ' + (item.done ? 'checked' : '') + '><span></span><button>Delete</button>';
+        li.querySelector("span").textContent = item.text;
+        li.querySelector("input").onchange = () => { item.done = !item.done; save(); render(); };
+        li.querySelector("button").onclick = () => { items.splice(index, 1); save(); render(); };
+        list.appendChild(li);
+      });
+    };
+    form.onsubmit = (event) => { event.preventDefault(); if (task.value.trim()) items.push({ text: task.value.trim(), done:false }); task.value = ""; save(); render(); };
+    render();
+  </script>
+</body>
+</html>
+`,
+      };
+    }
+
+    return {
+      path,
+      content: `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${title}</title>
+  <style>
+    body { margin:0; min-height:100vh; display:grid; place-items:center; background:#111; color:#f7f7f2; font-family:Inter, system-ui, sans-serif; }
+    main { text-align:center; padding:40px; }
+    h1 { font-size:clamp(42px, 8vw, 92px); margin:0 0 18px; letter-spacing:0; }
+    p { color:#b8b8b0; font-size:18px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>${title}</h1>
+    <p id="status">Built by OmniClaw</p>
+  </main>
+  <script>
+    const status = document.querySelector("#status");
+    if (${lower.includes("clock") || lower.includes("time")}) {
+      setInterval(() => status.textContent = new Date().toLocaleTimeString(), 1000);
+    }
+  </script>
+</body>
+</html>
+`,
     };
   }
 
@@ -1093,6 +1417,53 @@ JSON:`;
     return match ? match[0] : "";
   }
 
+  buildTaskBlueprintInput({ title = "", message = "" } = {}) {
+    const text = `${title} ${message}`.toLowerCase();
+    const taskType = /build|code|implement|app|website|feature|fix|debug/.test(text)
+      ? "build"
+      : /research|search|study|compare|analyse|analyze/.test(text)
+        ? "research"
+        : /browser|form|fill|login|website|open/.test(text)
+          ? "browser"
+          : /schedule|daily|hourly|weekly|every|24\s*hours|monitor|watch/.test(text)
+            ? "automation"
+            : /file|folder|download|document|pdf/.test(text)
+              ? "file"
+              : "general";
+    return {
+      title,
+      objective: title,
+      sourceMessage: message,
+      taskType,
+      priority: /urgent|high priority|jaldi|fast|asap/i.test(message) ? "high" : "normal",
+      automation: taskType === "automation"
+        ? {
+            requested: true,
+            intervalHint: this.extractIntervalHint(message),
+            deliveryHint: this.extractDeliveryHint(message),
+          }
+        : null,
+    };
+  }
+
+  extractIntervalHint(message = "") {
+    const text = String(message || "");
+    if (/\b24\s*hours|daily|roz|har din|every day\b/i.test(text)) return "daily";
+    if (/\bhourly|every hour|har ghante\b/i.test(text)) return "hourly";
+    if (/\bweekly|every week|har hafte\b/i.test(text)) return "weekly";
+    const every = text.match(/\bevery\s+([0-9]+)\s+(minute|minutes|hour|hours|day|days)\b/i);
+    return every ? `every ${every[1]} ${every[2]}` : "";
+  }
+
+  extractDeliveryHint(message = "") {
+    const text = String(message || "").toLowerCase();
+    if (text.includes("telegram")) return "telegram";
+    if (text.includes("discord")) return "discord";
+    if (text.includes("whatsapp")) return "whatsapp";
+    if (text.includes("email")) return "email";
+    return "webchat";
+  }
+
   extractSkillRequest(message) {
     const quoted = [...message.matchAll(/["']([^"']+)["']/g)].map((match) => match[1]);
     return {
@@ -1119,6 +1490,51 @@ JSON:`;
       profile: profileMatch ? profileMatch[1] : "",
       providerMode,
       model: modelMatch ? modelMatch[1] : "",
+    };
+  }
+
+  extractProviderSetupRequest(message) {
+    const text = String(message || "");
+    const lowered = text.toLowerCase();
+    const profiles = [
+      "openrouter",
+      "openai",
+      "nvidia",
+      "minimax",
+      "anthropic",
+      "gemini",
+      "groq",
+      "mistral",
+      "deepseek",
+      "together",
+      "fireworks",
+      "ollama",
+      "local-compatible",
+      "codex-cli",
+    ];
+    const profileId = profiles.find((profile) => lowered.includes(profile)) || "";
+    const keyMatch =
+      text.match(/\b(?:api\s*key|apikey|key|token)\s*(?:is|=|:)?\s*([A-Za-z0-9._:/+=-]{12,})/i) ||
+      text.match(/\b(sk-[A-Za-z0-9._-]{12,}|sk-or-v1-[A-Za-z0-9._-]{12,}|nvapi-[A-Za-z0-9._-]{12,})\b/i);
+    const baseUrlMatch = text.match(/\b(?:base\s*url|endpoint|url)\s*(?:is|=|:)?\s*(https?:\/\/[^\s"'<>]+)/i);
+    const modelMatch = text.match(/\bmodel\s*(?:is|=|:)?\s*([A-Za-z0-9._:/+-]{2,})/i);
+    const mode = lowered.includes("codex-cli")
+      ? "codex-cli"
+      : profileId || keyMatch || baseUrlMatch || modelMatch
+        ? "openai-compatible"
+        : "";
+    const shouldConfigure = Boolean(profileId || keyMatch || baseUrlMatch || modelMatch);
+    return {
+      shouldConfigure,
+      input: {
+        profileId,
+        mode,
+        apiKey: keyMatch?.[1] || "",
+        baseUrl: baseUrlMatch?.[1]?.replace(/[),.]+$/g, "") || "",
+        model: modelMatch?.[1]?.replace(/[),.]+$/g, "") || "",
+        live: !/\b(?:no live|skip live|skip test|without test|test mat|test nahi)\b/i.test(text),
+        fetchModels: /\b(?:fetch models|list models|models fetch|model list)\b/i.test(text),
+      },
     };
   }
 

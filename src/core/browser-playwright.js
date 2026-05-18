@@ -10,6 +10,19 @@ function createSessionId() {
   return `browser_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function findChromiumExecutable() {
+  const explicitPath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
+  if (explicitPath && fs.existsSync(explicitPath)) {
+    return explicitPath;
+  }
+  const localAppData = process.env.LOCALAPPDATA || "";
+  const candidates = [
+    path.join(localAppData, "ms-playwright", "chromium-1223", "chrome-win64", "chrome.exe"),
+    path.join(localAppData, "ms-playwright", "chromium_headless_shell-1223", "chrome-headless-shell-win64", "chrome-headless-shell.exe"),
+  ];
+  return candidates.find((candidate) => candidate && fs.existsSync(candidate)) || undefined;
+}
+
 async function ensureBrowser(sessionId, options = {}) {
   let session = BROWSER_SESSIONS.get(sessionId);
   
@@ -18,8 +31,10 @@ async function ensureBrowser(sessionId, options = {}) {
     return session;
   }
   
+  const executablePath = findChromiumExecutable();
   const browser = await chromium.launch({
     headless: options.headless !== false,
+    ...(executablePath ? { executablePath } : {}),
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
@@ -57,7 +72,7 @@ async function ensureBrowser(sessionId, options = {}) {
 }
 
 function scheduleCleanup(sessionId) {
-  setTimeout(async () => {
+  const timer = setTimeout(async () => {
     const session = BROWSER_SESSIONS.get(sessionId);
     if (!session) return;
     
@@ -68,6 +83,7 @@ function scheduleCleanup(sessionId) {
       scheduleCleanup(sessionId);
     }
   }, SESSION_TIMEOUT_MS);
+  timer.unref?.();
 }
 
 async function closeSession(sessionId) {
@@ -97,10 +113,15 @@ export class BrowserPlaywright {
   }
 
   async open({ url, sessionId, waitUntil = "domcontentloaded" }) {
+    const targetUrl = String(url || "").trim();
+    if (!targetUrl) {
+      return { error: "URL is required. Use browser_open with a URL." };
+    }
     const sid = sessionId || this.defaultSessionId;
     const session = await ensureBrowser(sid);
-    
-    const normalizedUrl = url.startsWith("http") ? url : `https://${url}`;
+
+    const hasScheme = /^(https?:|file:|data:|about:)/i.test(targetUrl);
+    const normalizedUrl = hasScheme ? targetUrl : `https://${targetUrl}`;
     
     const response = await session.page.goto(normalizedUrl, {
       waitUntil,
@@ -410,17 +431,18 @@ export class BrowserPlaywright {
   // High-level automation: perform a task on a page
   async automate({ url, actions, sessionId }) {
     const sid = sessionId || this.defaultSessionId;
-    
-    // Open page
-    const openResult = await this.open({ url, sessionId: sid });
-    if (openResult.error) {
-      return openResult;
+
+    if (url) {
+      const openResult = await this.open({ url, sessionId: sid });
+      if (openResult.error) {
+        return openResult;
+      }
     }
-    
+
     const results = [];
-    
-    // Execute actions
-    for (const action of actions) {
+    const actionList = Array.isArray(actions) ? actions : [];
+
+    for (const action of actionList) {
       let result;
       
       switch (action.type) {
