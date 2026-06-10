@@ -10,6 +10,109 @@ function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
+function truncateText(value = "", maxChars = 1200) {
+  const text = String(value == null ? "" : value);
+  if (text.length <= maxChars) {
+    return text;
+  }
+  return `${text.slice(0, Math.max(0, maxChars - 32)).trimEnd()}...[truncated ${text.length - maxChars} chars]`;
+}
+
+function compactValue(value, options = {}, depth = 0) {
+  const maxString = Number(options.maxString || 1000);
+  const maxArray = Number(options.maxArray || 20);
+  const maxDepth = Number(options.maxDepth || 4);
+  if (value == null || typeof value === "number" || typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "string") {
+    return truncateText(value, maxString);
+  }
+  if (Array.isArray(value)) {
+    const items = value.slice(0, maxArray).map((item) => compactValue(item, options, depth + 1));
+    if (value.length > maxArray) {
+      items.push({ omittedItems: value.length - maxArray });
+    }
+    return items;
+  }
+  if (typeof value === "object") {
+    if (depth >= maxDepth) {
+      return truncateText(JSON.stringify(value), maxString);
+    }
+    const out = {};
+    for (const [key, item] of Object.entries(value)) {
+      if (/^(promptTrace|contextBundle|nativeMessages|messages)$/i.test(key)) {
+        out[key] = "[omitted-large-runtime-context]";
+      } else if (/^(content|text|stdout|stderr|reply|message|answer)$/i.test(key)) {
+        out[key] = truncateText(item, maxString);
+      } else {
+        out[key] = compactValue(item, options, depth + 1);
+      }
+    }
+    return out;
+  }
+  return truncateText(String(value), maxString);
+}
+
+function compactToolOutput(item = {}) {
+  const output = item.output || {};
+  let compactOutput = compactValue(output, { maxString: 700, maxArray: 5, maxDepth: 3 });
+  if (/memory_search|semantic_memory_search/i.test(item.tool || "")) {
+    compactOutput = {
+      agentId: output.agentId || "",
+      query: truncateText(output.query || "", 400),
+      scope: output.scope || "",
+      mode: output.mode || "",
+      count: output.count ?? (Array.isArray(output.results) ? output.results.length : 0),
+      results: (output.results || []).slice(0, 5).map((result) => ({
+        title: truncateText(result.title || result.id || result.sourceRef || "", 180),
+        text: truncateText(result.text || result.content || result.preview || "", 500),
+        score: result.score,
+        sourceRef: result.sourceRef || "",
+      })),
+      omittedResults: Math.max(0, (output.results || []).length - 5),
+    };
+  } else if (/web_research|web_search|read_url|web_fetch/i.test(item.tool || "")) {
+    compactOutput = {
+      agentId: output.agentId || "",
+      query: truncateText(output.query || "", 400),
+      url: output.url || "",
+      provider: output.provider || "",
+      status: output.status || "",
+      error: truncateText(output.error || "", 500),
+      results: (output.results || output.result?.results || []).slice(0, 5).map((result) => ({
+        title: truncateText(result.title || "", 220),
+        url: result.url || "",
+        snippet: truncateText(result.snippet || result.description || "", 500),
+      })),
+      content: truncateText(output.content || output.fetchedContent || output.result?.content || "", 1200),
+      contentFetched: Boolean(output.contentFetched || output.fetchedContent || output.content),
+    };
+  } else if (/list_files|list_computer_directory|search_computer_files/i.test(item.tool || "")) {
+    const entries = output.entries || output.results || [];
+    compactOutput = {
+      path: output.path || "",
+      query: output.query || "",
+      count: entries.length,
+      entries: entries.slice(0, 40).map((entry) => ({
+        name: entry.name || "",
+        path: entry.path || "",
+        type: entry.type || "",
+      })),
+      omittedEntries: Math.max(0, entries.length - 40),
+    };
+  }
+  return {
+    tool: item.tool || "",
+    input: compactValue(item.input || {}, { maxString: 500, maxArray: 8, maxDepth: 3 }),
+    reason: truncateText(item.reason || "", 400),
+    source: item.source || "",
+    round: item.round,
+    output: compactOutput,
+    toolSummary: compactValue(item.toolSummary || {}, { maxString: 500, maxArray: 6, maxDepth: 3 }),
+  };
+}
+
 function compactRun(run = {}) {
   const compactPlan = run.plan
     ? {
@@ -31,10 +134,73 @@ function compactRun(run = {}) {
       }
     : run.plan;
 
+  const context = run.context
+    ? {
+        profileId: run.context.profileId,
+        maxChars: run.context.maxChars,
+        usedChars: run.context.usedChars,
+        utilization: run.context.utilization,
+        omittedItems: run.context.omittedItems,
+        summary: truncateText(run.context.summary || "", 600),
+        contextManifest: compactValue(run.context.contextManifest || {}, { maxString: 700, maxArray: 20, maxDepth: 4 }),
+      }
+    : undefined;
+
+  const promptTrace = run.promptTrace
+    ? {
+        version: run.promptTrace.version,
+        runId: run.promptTrace.runId,
+        sessionId: run.promptTrace.sessionId,
+        agentId: run.promptTrace.agentId,
+        createdAt: run.promptTrace.createdAt,
+        report: compactValue(run.promptTrace.report || {}, { maxString: 700, maxArray: 16, maxDepth: 4 }),
+        workspace: compactValue(run.promptTrace.workspace || {}, { maxString: 500, maxArray: 20, maxDepth: 3 }),
+        tools: compactValue(run.promptTrace.tools || [], { maxString: 350, maxArray: 40, maxDepth: 3 }),
+        skills: compactValue(run.promptTrace.skills || [], { maxString: 500, maxArray: 20, maxDepth: 3 }),
+        harness: compactValue(run.promptTrace.harness || {}, { maxString: 600, maxArray: 10, maxDepth: 3 }),
+        mcp: compactValue(run.promptTrace.mcp || {}, { maxString: 600, maxArray: 10, maxDepth: 3 }),
+      }
+    : undefined;
+
   return {
-    ...run,
+    id: run.id,
+    status: run.status,
+    createdAt: run.createdAt,
+    updatedAt: run.updatedAt,
+    completedAt: run.completedAt,
+    startedAt: run.startedAt,
+    acceptedAt: run.acceptedAt,
+    enqueuedAt: run.enqueuedAt,
+    sessionId: run.sessionId,
+    sessionKey: run.sessionKey,
+    agentId: run.agentId,
+    channel: run.channel,
+    label: run.label,
+    source: run.source,
+    parentRunId: run.parentRunId,
+    parentSessionId: run.parentSessionId,
+    delegationId: run.delegationId,
+    queuePosition: run.queuePosition,
+    waitedMs: run.waitedMs,
+    blockedByRunId: run.blockedByRunId,
+    stopReason: run.stopReason,
+    error: truncateText(run.error || "", 1000),
+    message: truncateText(run.message || "", 1200),
+    reply: truncateText(run.reply || "", 1800),
     plan: compactPlan,
-    toolOutputs: Array.isArray(run.toolOutputs) ? run.toolOutputs.slice(-12) : run.toolOutputs,
+    context,
+    promptTrace,
+    providerDiagnostics: compactValue(run.providerDiagnostics || null, { maxString: 900, maxArray: 8, maxDepth: 4 }),
+    finalMetadata: compactValue(run.finalMetadata || null, { maxString: 800, maxArray: 12, maxDepth: 4 }),
+    shellExecutions: compactValue((run.shellExecutions || []).slice(-6), { maxString: 700, maxArray: 6, maxDepth: 4 }),
+    toolOutputs: Array.isArray(run.toolOutputs) ? run.toolOutputs.slice(-12).map(compactToolOutput) : run.toolOutputs,
+  };
+}
+
+function compactEvent(event = {}) {
+  return {
+    ...event,
+    payload: compactValue(event.payload || {}, { maxString: 900, maxArray: 20, maxDepth: 4 }),
   };
 }
 
@@ -42,7 +208,7 @@ function normalizeGatewayData(parsed = {}) {
   const runs = Array.isArray(parsed.runs) ? parsed.runs.slice(-120).map(compactRun) : [];
   return {
     seq: Number(parsed.seq || 0),
-    events: Array.isArray(parsed.events) ? parsed.events.slice(-200) : [],
+    events: Array.isArray(parsed.events) ? parsed.events.slice(-200).map(compactEvent) : [],
     runs,
     approvals: Array.isArray(parsed.approvals) ? parsed.approvals.slice(-200) : [],
     delegations: Array.isArray(parsed.delegations) ? parsed.delegations.slice(-120) : [],
@@ -307,6 +473,8 @@ export class GatewayStore {
 
   getOverview() {
     const data = this.read();
+    const now = Date.now();
+    const activeDelegationCutoffMs = 3_600_000;
     return {
       eventCount: data.events.length,
       runCount: data.runs.length,
@@ -314,7 +482,11 @@ export class GatewayStore {
       runningRuns: data.runs.filter((run) => run.status === "running").length,
       pendingApprovals: data.approvals.filter((item) => item.status === "pending").length,
       delegationCount: data.delegations.length,
-      activeDelegations: data.delegations.filter((item) => ["queued", "running"].includes(item.status)).length,
+      activeDelegations: data.delegations.filter((item) => {
+        if (!["queued", "running"].includes(item.status)) return false;
+        const at = new Date(item.updatedAt || item.createdAt || 0).getTime();
+        return Number.isFinite(at) && now - at <= activeDelegationCutoffMs;
+      }).length,
       failedDelegations: data.delegations.filter((item) => item.status === "failed").length,
       lastEvent: data.events[data.events.length - 1] || null,
     };

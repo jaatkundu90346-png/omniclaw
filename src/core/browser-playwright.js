@@ -1,10 +1,21 @@
-import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
 const BROWSER_SESSIONS = new Map();
 const SESSION_TIMEOUT_MS = 5 * 60 * 1000; // 5 min idle timeout
+let chromiumLoader = null;
+
+async function getChromium() {
+  if (!chromiumLoader) {
+    chromiumLoader = import("playwright")
+      .then((mod) => mod.chromium)
+      .catch((error) => {
+        throw new Error(`Playwright browser automation is not available: ${error.message}`);
+      });
+  }
+  return chromiumLoader;
+}
 
 function createSessionId() {
   return `browser_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -32,6 +43,7 @@ async function ensureBrowser(sessionId, options = {}) {
   }
   
   const executablePath = findChromiumExecutable();
+  const chromium = await getChromium();
   const browser = await chromium.launch({
     headless: options.headless !== false,
     ...(executablePath ? { executablePath } : {}),
@@ -293,6 +305,28 @@ export class BrowserPlaywright {
     }
   }
 
+  async press({ sessionId, selector = "body", key = "Enter" }) {
+    const sid = sessionId || this.defaultSessionId;
+    const session = BROWSER_SESSIONS.get(sid);
+
+    if (!session || !session.page) {
+      return { error: "No active browser session. Use browser_open first." };
+    }
+
+    session.lastUsed = Date.now();
+
+    try {
+      await session.page.press(selector || "body", key || "Enter");
+      return {
+        success: true,
+        sessionId: sid,
+        message: `Pressed ${key || "Enter"} on ${selector || "body"}`,
+      };
+    } catch (error) {
+      return { error: error.message };
+    }
+  }
+
   async scroll({ sessionId, direction = "down", amount = 500 }) {
     const sid = sessionId || this.defaultSessionId;
     const session = BROWSER_SESSIONS.get(sid);
@@ -342,7 +376,7 @@ export class BrowserPlaywright {
     }
   }
 
-  async evaluate({ sessionId, script }) {
+  async evaluate({ sessionId, script, args = [] }) {
     const sid = sessionId || this.defaultSessionId;
     const session = BROWSER_SESSIONS.get(sid);
     
@@ -353,7 +387,7 @@ export class BrowserPlaywright {
     session.lastUsed = Date.now();
     
     try {
-      const result = await session.page.evaluate(script);
+      const result = await session.page.evaluate(script, ...(Array.isArray(args) ? args : [args]));
       return {
         success: true,
         sessionId: sid,
@@ -431,9 +465,10 @@ export class BrowserPlaywright {
   // High-level automation: perform a task on a page
   async automate({ url, actions, sessionId }) {
     const sid = sessionId || this.defaultSessionId;
+    let openResult = null;
 
     if (url) {
-      const openResult = await this.open({ url, sessionId: sid });
+      openResult = await this.open({ url, sessionId: sid });
       if (openResult.error) {
         return openResult;
       }
@@ -451,6 +486,9 @@ export class BrowserPlaywright {
           break;
         case "type":
           result = await this.type({ sessionId: sid, selector: action.selector, text: action.text, pressEnter: action.pressEnter });
+          break;
+        case "press":
+          result = await this.press({ sessionId: sid, selector: action.selector, key: action.key });
           break;
         case "scroll":
           result = await this.scroll({ sessionId: sid, direction: action.direction, amount: action.amount });
@@ -478,7 +516,7 @@ export class BrowserPlaywright {
     return {
       success: !results.some((r) => r.error),
       sessionId: sid,
-      url: openResult.url,
+      url: openResult?.url || BROWSER_SESSIONS.get(sid)?.currentUrl || "",
       actions: results,
     };
   }

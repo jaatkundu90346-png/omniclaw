@@ -17,14 +17,16 @@ export class VisualBrowserOperator {
    */
   async analyzeCurrentPage() {
     try {
-      const screenshot = await this.browser.takeScreenshot();
+      const screenshot = await this.browser.screenshot({ fullPage: false });
       this.lastScreenshot = screenshot;
+
+      const domElements = await this.extractDomElements();
 
       if (!this.visionProvider) {
         return {
           screenshot,
-          elements: [],
-          analysis: "Vision provider not configured",
+          elements: domElements,
+          analysis: "Vision provider not configured; using DOM-derived interactive elements.",
         };
       }
 
@@ -34,7 +36,7 @@ export class VisualBrowserOperator {
 
       return {
         screenshot,
-        elements: this.parseElementsFromAnalysis(analysis),
+        elements: [...domElements, ...this.parseElementsFromAnalysis(analysis)],
         analysis,
       };
     } catch (error) {
@@ -64,7 +66,15 @@ export class VisualBrowserOperator {
         };
       }
 
-      await this.browser.click(element.selector);
+      if (!element.selector) {
+        return {
+          success: false,
+          error: `Matched element has no selector: ${description}`,
+          element,
+        };
+      }
+
+      await this.browser.click({ selector: element.selector });
 
       return {
         success: true,
@@ -97,7 +107,15 @@ export class VisualBrowserOperator {
         };
       }
 
-      await this.browser.type(element.selector, text);
+      if (!element.selector) {
+        return {
+          success: false,
+          error: `Matched input has no selector: ${description}`,
+          element,
+        };
+      }
+
+      await this.browser.type({ selector: element.selector, text });
 
       return {
         success: true,
@@ -127,8 +145,11 @@ export class VisualBrowserOperator {
         return `Could not find element matching: ${description}`;
       }
 
-      const text = await this.browser.getText(element.selector);
-      return text;
+      const result = await this.browser.evaluate({
+        script: (selector) => document.querySelector(selector)?.innerText || document.querySelector(selector)?.textContent || "",
+        args: [element.selector],
+      });
+      return result?.result || "";
     } catch (error) {
       return `Error extracting text: ${error.message}`;
     }
@@ -154,6 +175,34 @@ export class VisualBrowserOperator {
     }
 
     return null;
+  }
+
+  async extractDomElements() {
+    const result = await this.browser.evaluate({
+      script: () => {
+        const selectorFor = (element) => {
+          if (element.id) return `#${CSS.escape(element.id)}`;
+          const attr = ["aria-label", "name", "placeholder", "title"].find((key) => element.getAttribute(key));
+          if (attr) {
+            return `${element.tagName.toLowerCase()}[${attr}="${CSS.escape(element.getAttribute(attr))}"]`;
+          }
+          const text = (element.innerText || element.textContent || "").trim();
+          if (text && text.length < 60) {
+            return `${element.tagName.toLowerCase()}:has-text("${text.replace(/"/g, '\\"')}")`;
+          }
+          return element.tagName.toLowerCase();
+        };
+        return Array.from(document.querySelectorAll("button,a,input,textarea,select,[role='button'],[contenteditable='true']"))
+          .slice(0, 80)
+          .map((element) => ({
+            type: element.tagName.toLowerCase(),
+            label: element.getAttribute("aria-label") || element.getAttribute("name") || element.getAttribute("placeholder") || "",
+            text: (element.innerText || element.value || element.textContent || "").trim().slice(0, 120),
+            selector: selectorFor(element),
+          }));
+      },
+    });
+    return Array.isArray(result?.result) ? result.result : [];
   }
 
   /**

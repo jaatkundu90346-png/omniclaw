@@ -33,14 +33,18 @@ export class IntentEngine {
       intents.push("greeting");
     }
 
-    if (
+    const setupUiOnly =
+      /\bsetup\s+(screen|panel|page|ui|view|card|section)\b/i.test(lowered) &&
+      !/\b(api\s*key|apikey|byok|base\s*url|endpoint|token|save\s+brain|configure\s+provider|model\s*(?:is|=|:))\b/i.test(lowered);
+    if (!setupUiOnly && (
       lowered.includes("api key") ||
       lowered.includes("apikey") ||
       lowered.includes("byok") ||
       lowered.includes("brain") ||
       lowered.includes("mind") ||
-      lowered.includes("setup")
-    ) {
+      /\b(provider|model|openrouter|nvidia|openai|anthropic|minimax|glm|codex)\b.*\b(setup|configure|save|key)\b/i.test(lowered) ||
+      /\b(setup|configure|save)\b.*\b(provider|model|api key|apikey|byok|base url|endpoint)\b/i.test(lowered)
+    )) {
       intents.push("api-setup");
     }
 
@@ -243,12 +247,27 @@ export class IntentEngine {
 
     if (
       lowered.includes("what can hermes do") ||
-      lowered.includes("use cases") ||
-      lowered.includes("software engineering") ||
-      lowered.includes("devops") ||
-      lowered.includes("ml research") ||
-      lowered.includes("team workflows") ||
-      lowered.includes("personal assistant")
+      (
+        lowered.includes("use cases") &&
+        (
+          lowered.includes("trajectory generation") ||
+          lowered.includes("rl training") ||
+          lowered.includes("closed learning loop") ||
+          lowered.includes("design principles") ||
+          lowered.includes("architecture")
+        )
+      ) ||
+      (
+        lowered.includes("hermes") &&
+        (
+          lowered.includes("use cases") ||
+          lowered.includes("software engineering") ||
+          lowered.includes("devops") ||
+          lowered.includes("ml research") ||
+          lowered.includes("team workflows") ||
+          lowered.includes("personal assistant")
+        )
+      )
     ) {
       intents.push("hermes-use-cases");
     }
@@ -563,9 +582,15 @@ export class IntentEngine {
     }
 
     const mentionsPackageJson = /\bpackage\.json\b/i.test(lowered);
-    const asksProductBuild = /\bbuild\b[\s\S]{0,80}\b(?:website|web app|app|clone|application|platform|calculator|todo)\b/i.test(lowered);
+    const asksProductBuild =
+      /\b(?:build|create|make|develop|generate|implement)\b[\s\S]{0,120}\b(?:website|web app|app|clone|application|platform|calculator|todo|prototype|frontend|dashboard)\b/i.test(lowered) ||
+      /\b(?:prototype|frontend|dashboard)\b[\s\S]{0,80}\b(?:build|create|make|develop|generate|implement)\b/i.test(lowered);
     const asksOmniBuild =
-      /\b(?:omniclaw|repo|repository|project|portable|installer|windows app|release zip|exe)\b/i.test(lowered) ||
+      (
+        /\b(?:repo|repository|project|portable|installer|windows app|release zip|exe)\b/i.test(lowered) ||
+        /\b(?:build|rebuild|package)\b[\s\S]{0,80}\bomniclaw\b/i.test(lowered) ||
+        /\bomniclaw\b[\s\S]{0,80}\b(?:build|rebuild|package|exe|installer|portable|release)\b/i.test(lowered)
+      ) ||
       /^(?:build|rebuild|package|portable build|exe|release zip)\s*(?:karo|kar|bana|bna)?$/i.test(lowered.trim());
     if (!mentionsPackageJson && !asksProductBuild && asksOmniBuild && (
       /\b(build|rebuild|package|portable build|exe|release zip)\b/i.test(lowered) ||
@@ -574,8 +599,31 @@ export class IntentEngine {
       intents.push("project-build");
     }
 
-    const looksLikeFileCreation = /\b(?:create|write|save)\s+(?:a\s+)?file\b/i.test(lowered) || /\bsave\s+.*\.\w+\b/i.test(lowered);
-    if (!looksLikeFileCreation && (/\b(test|verify|check)\b(?!\s*\.)\s*(karo|kar|run)?\b/i.test(lowered) || lowered.includes("smoke test"))) {
+    const looksLikeFileCreation =
+      /\b(?:create|write|save)\s+(?:a\s+)?(?:workspace\s+|project\s+)?file\b/i.test(lowered) ||
+      /\bsave\s+.*\.\w+\b/i.test(lowered) ||
+      /\b(?:file|folder)\b[\s\S]{0,80}\b(?:bna|bana|banao|bnana|banana|create|write|save)\b/i.test(lowered) ||
+      /\b(?:bna|bana|banao|bnana|banana|create|write|save)\b[\s\S]{0,80}\b(?:file|folder)\b/i.test(lowered);
+    const looksLikeFileOperation =
+      looksLikeFileCreation ||
+      /\b(?:read|open|show|delete|remove)\s+(?:a\s+)?(?:workspace\s+|project\s+)?file\b/i.test(lowered) ||
+      /\b[A-Za-z0-9._\/\\-]+\.(?:txt|html|js|css|json|md|py|ts|csv)\b/i.test(message);
+    const looksLikeShellAction =
+      lowered.includes("run command") ||
+      lowered.includes("run shell") ||
+      lowered.includes("run terminal") ||
+      lowered.includes("terminal command") ||
+      lowered.includes("powershell command") ||
+      lowered.includes("command chala") ||
+      lowered.includes("cmd chala");
+    const artifactVerificationOnly =
+      /\b(?:verify_html_artifact|html artifact|artifact)\b/i.test(lowered) ||
+      /\b(?:prototype|frontend|clone|web prototype)\b/i.test(lowered);
+    const browserOnlyCheck =
+      intents.includes("browser-observe") ||
+      intents.includes("browser-navigate") ||
+      /\bbrowser\b[\s\S]{0,80}\b(?:status|doctor|health|ready|available|snapshot|inspect|observe|open|navigate)\b/i.test(lowered);
+    if (!browserOnlyCheck && !looksLikeFileOperation && !looksLikeShellAction && !asksProductBuild && !artifactVerificationOnly && (/\b(test|verify|check)\b(?!\s*\.)\s*(karo|kar|run)?\b/i.test(lowered) || lowered.includes("smoke test"))) {
       intents.push("project-test");
     }
 
@@ -583,7 +631,7 @@ export class IntentEngine {
       intents.push("project-release");
     }
 
-    if (lowered.includes("time")) {
+    if (/\btime\b/i.test(lowered)) {
       intents.push("time");
     }
 
@@ -615,18 +663,30 @@ export class IntentEngine {
       }
     }
 
+    const workspacePathHint =
+      /\bdata[\\/]+generated\b/i.test(message) ||
+      /\b(?:workspace|repo|repository|project folder|under\s+data|inside\s+data)\b/i.test(lowered);
+    const explicitComputerScope = !workspacePathHint && (
+      /\b(?:laptop|computer|pc|downloads|documents|home folder)\b/i.test(lowered) ||
+      /\bdesktop\s+(?:folder|directory|file|path)\b/i.test(lowered) ||
+      /[a-z]:[\\/]/i.test(message)
+    );
+
     if (
+      looksLikeFileCreation ||
       lowered.includes("write file") ||
       lowered.includes("create file") ||
       /create\s+a\s+file/i.test(lowered) ||
       /create\s+(?:a\s+)?(?:computer|laptop|pc|desktop)\s+file/i.test(lowered) ||
       /(?:computer|laptop|pc|desktop)\s+file\s+(?:banao|bnao|create|write|save)/i.test(lowered) ||
+      /\b(?:file|folder)\b[\s\S]{0,80}\b(?:bna|bana|banao|bnana|banana|create|write|save)\b/i.test(lowered) ||
+      /\b(?:bna|bana|banao|bnana|banana|create|write|save)\b[\s\S]{0,80}\b(?:file|folder)\b/i.test(lowered) ||
       /save\s+(it\s+)?(as|to)\s+\S+\.\w+/i.test(lowered) ||
       lowered.includes("save file") ||
       lowered.includes("append file") ||
       /\bsave\s+.*\.(txt|html|js|css|json|md|py|ts|csv)\b/i.test(lowered)
     ) {
-      if (/\b(?:laptop|computer|pc|desktop|downloads|documents|home folder)\b/i.test(lowered) || /[a-z]:[\\/]/i.test(message)) {
+      if (explicitComputerScope) {
         intents.push("computer-file-write");
       } else {
         intents.push("file-write");
@@ -636,6 +696,7 @@ export class IntentEngine {
     if (
       lowered.includes("research") ||
       lowered.includes("reasearch") ||
+      lowered.includes("reaserach") ||
       lowered.includes("search web") ||
       lowered.includes("look up") ||
       lowered.includes("find on web")
@@ -644,7 +705,8 @@ export class IntentEngine {
     }
 
     if (
-      /build.*(?:website|app|system|clone|application|platform)/i.test(lowered) ||
+      /build[\s\S]{0,180}(?:website|app|system|clone|application|platform|prototype|frontend|dashboard)/i.test(lowered) ||
+      /(?:prototype|frontend|dashboard)[\s\S]{0,120}(?:build|create|make|develop|generate|implement)/i.test(lowered) ||
       /create.*(?:full.*stack|complete|entire|web.*app|mobile.*app)/i.test(lowered) ||
       /create.*(?:html page|website|web page)/i.test(lowered) ||
       /develop.*(?:application|platform|service|system)/i.test(lowered) ||
@@ -661,12 +723,10 @@ export class IntentEngine {
 
     if (
       (lowered.includes("research") && (
-        lowered.includes("then") ||
-        lowered.includes("and") ||
-        lowered.includes("build") ||
-        lowered.includes("create") ||
-        lowered.includes("phir") ||
-        lowered.includes("uske baad")
+        /\bthen\s+(?:build|create|make|develop|generate|implement)\b/i.test(lowered) ||
+        /\band\s+(?:build|create|make|develop|generate|implement)\b/i.test(lowered) ||
+        /\b(?:build|create|make|develop|generate|implement)\b/i.test(lowered) ||
+        /\b(?:phir|uske baad)\s+(?:build|create|make|develop|generate|implement|bna|banao)\b/i.test(lowered)
       )) ||
       lowered.includes("research and build") ||
       lowered.includes("research then build")
@@ -717,13 +777,7 @@ export class IntentEngine {
     }
 
     if (
-      lowered.includes("run command") ||
-      lowered.includes("run shell") ||
-      lowered.includes("run terminal") ||
-      lowered.includes("terminal command") ||
-      lowered.includes("powershell command") ||
-      lowered.includes("command chala") ||
-      lowered.includes("cmd chala")
+      looksLikeShellAction
     ) {
       intents.push("shell-plan");
     }

@@ -1,8 +1,16 @@
-# HEARTBEAT
+---
+summary: "Workspace template for HEARTBEAT.md"
+title: "HEARTBEAT.md template"
+read_when:
+  - Bootstrapping a workspace manually
+---
 
-If this is a heartbeat turn:
-- Check pending approvals, tasks, schedules, connector health, and memory candidates.
-- Surface only useful updates.
-- If nothing needs attention, reply HEARTBEAT_OK.
+```markdown
+# Keep this file empty (or with only comments) to skip heartbeat API calls.
 
-Keep heartbeat replies short and operational.
+# Add tasks below when you want the agent to check something periodically.
+```
+
+## Related
+
+- [Heartbeat config](/gateway/config-agents)

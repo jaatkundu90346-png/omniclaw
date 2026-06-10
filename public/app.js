@@ -262,6 +262,7 @@ let activeLiveEvidence = {
   providerDiagnostics: null,
   plan: { summary: "Waiting for runtime events..." },
   run: {},
+  activity: [],
 };
 const providerFetchedModelCache = new Map();
 
@@ -315,12 +316,157 @@ function normalizeAgentId(value) {
   return text || "main";
 }
 
+function isSessionRunActive(session = {}) {
+  if (session.status) {
+    return String(session.status).toLowerCase() === "running";
+  }
+  return Boolean(session.activeRunId || session.hasActiveRun);
+}
+
+function getSessionRunStatus(session = {}) {
+  if (isSessionRunActive(session)) {
+    return "running";
+  }
+  if (Number(session.queueDepth || 0) > 0 || String(session.status || "").toLowerCase() === "queued") {
+    return "queued";
+  }
+  if (session.lifecycleState === "archived") {
+    return "archived";
+  }
+  return session.status || session.lifecycleState || "idle";
+}
+
+function formatSessionRunMeta(session = {}) {
+  const parts = [
+    `${session.agentId || "main"} agent`,
+    session.channel || "webchat",
+    `${session.messageCount || 0} msg`,
+    `${session.runCount || 0} run`,
+  ];
+  if (isSessionRunActive(session) && session.activeRunId) {
+    parts.push(`active ${session.activeRunId}`);
+  }
+  if (Number(session.queueDepth || 0) > 0) {
+    parts.push(`${session.queueDepth} queued`);
+  }
+  return parts.join(" | ");
+}
+
 function truncate(value, max = 120) {
   const text = String(value == null ? "" : value).trim();
   if (!text) {
     return "";
   }
   return text.length > max ? `${text.slice(0, Math.max(0, max - 3)).trimEnd()}...` : text;
+}
+
+function normalizeLowercaseStringOrEmpty(value) {
+  return String(value == null ? "" : value).trim().toLowerCase();
+}
+
+function normalizeThinkingOptionValue(value) {
+  const raw = normalizeLowercaseStringOrEmpty(value).replace(/[\s_-]+/g, "-");
+  if (!raw) {
+    return "";
+  }
+  if (["off", "none", "false", "disabled"].includes(raw)) {
+    return "off";
+  }
+  if (["on", "true", "enable", "enabled"].includes(raw)) {
+    return "on";
+  }
+  if (["extra-high", "x-high", "xhigh"].includes(raw)) {
+    return "xhigh";
+  }
+  if (["adaptive", "minimal", "low", "medium", "high", "max"].includes(raw)) {
+    return raw;
+  }
+  return raw;
+}
+
+function formatThinkingLevelDisplayLabel(value) {
+  const normalized = normalizeThinkingOptionValue(value);
+  switch (normalized) {
+    case "on":
+      return "On";
+    case "off":
+      return "Off";
+    case "adaptive":
+      return "Adaptive";
+    case "minimal":
+      return "Minimal";
+    case "low":
+      return "Low";
+    case "medium":
+      return "Medium";
+    case "high":
+      return "High";
+    case "xhigh":
+      return "Extra high";
+    case "max":
+      return "Maximum";
+    default:
+      return value ? `${String(value).charAt(0).toUpperCase()}${String(value).slice(1)}` : "";
+  }
+}
+
+function formatThinkingPhaseLabel(phase) {
+  const normalized = normalizeLowercaseStringOrEmpty(phase);
+  switch (normalized) {
+    case "plan-tools":
+      return "Planning tool steps";
+    case "model-tool-loop":
+      return "Choosing tools";
+    case "auto-verification":
+      return "Verifying work";
+    case "self-correction":
+      return "Self-correcting";
+    default:
+      return normalized ? `${normalized.charAt(0).toUpperCase()}${normalized.slice(1).replace(/-/g, " ")}` : "Thinking";
+  }
+}
+
+function formatLiveRunEventLabel(record = {}) {
+  const name = String(record.event || record.type || "");
+  const payload = record.payload || {};
+  const tool = payload.tool || "tool";
+  const thinkingLevel = payload.thinkingLevel || payload.effectiveThinkingLevel || payload.thinking || payload.reasoningEffort || "";
+  const thinkingSuffix = thinkingLevel ? ` (${formatThinkingLevelDisplayLabel(thinkingLevel)})` : "";
+
+  if (name === "agent.thinking") {
+    const phase = formatThinkingPhaseLabel(payload.phase);
+    return payload.round ? `${phase} round ${payload.round}${thinkingSuffix}` : `${phase}${thinkingSuffix}`;
+  }
+  if (name === "agent.started") return `Agent started: ${payload.agentId || "main"}`;
+  if (name === "agent.reviewing") return "Reviewing result";
+  if (name === "agent.done") return "Final metadata saved";
+  if (name === "agent.completed") return payload.directLocalReply ? "Answered from local memory" : "Task completed";
+  if (name === "agent.failed") return `Task failed${payload.reason ? `: ${payload.reason}` : ""}`;
+  if (name === "provider.started") return `Brain running ${payload.model || payload.providerId || "provider"}`.trim();
+  if (name === "provider.completed") return "Brain reply complete";
+  if (name === "provider.failed") return `Brain failed: ${payload.reason || "provider error"}`;
+  if (name === "model_tool_loop.round_started") return `Choosing tools round ${payload.round || ""}`.trim();
+  if (name === "model_tool_loop.self_correction_started") return "Self-correction started";
+  if (name === "model_tool_loop.native_fallback") return "Native tools fallback";
+  if (name === "model_tool_loop.tool_started" || name === "tool.started") return `Running ${tool}`;
+  if (name === "tool.output") return `Observed output: ${tool}`;
+  if (name === "model_tool_loop.tool_completed" || name === "tool.completed") return `Tool done: ${tool}`;
+  if (name === "auto_verification.tool_started") return `Verifying ${tool || "artifact"}`;
+  if (name === "auto_verification.tool_completed") return `Verification done: ${tool || "artifact"}`;
+  if (name === "tool.failed") return `Tool failed: ${tool}`;
+  if (name === "context.compacted") return "Building context";
+  return name || "Working";
+}
+
+function formatLiveRunEventLine(record = {}) {
+  const payload = record.payload || {};
+  const time = record.at ? formatDate(record.at) : "now";
+  const label = formatLiveRunEventLabel(record);
+  const provider = payload.providerId ? ` | ${payload.providerId}${payload.model ? `/${payload.model}` : ""}` : "";
+  const status = payload.status ? ` | ${payload.status}` : "";
+  const reason = payload.reason ? ` | ${payload.reason}` : "";
+  const direct = payload.directLocalReply ? " | local reply" : "";
+  return `${time}  ${label}${provider}${status}${reason}${direct}`;
 }
 
 function formatDate(value) {
@@ -339,6 +485,97 @@ function formatDate(value) {
     hour: "numeric",
     minute: "2-digit",
   });
+}
+
+function normalizeResetTimestamp(value) {
+  if (value == null || value === "") {
+    return null;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value < 10_000_000_000 ? value * 1000 : value;
+  }
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+function formatQuotaReset(resetAt) {
+  const timestamp = normalizeResetTimestamp(resetAt);
+  if (!timestamp) {
+    return null;
+  }
+  const diffMs = timestamp - Date.now();
+  if (diffMs <= 0) {
+    return "now";
+  }
+  const minutes = Math.floor(diffMs / 60_000);
+  if (minutes < 60) {
+    return `${minutes}m`;
+  }
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  if (hours < 24) {
+    return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
+  }
+  const days = Math.floor(hours / 24);
+  if (days < 7) {
+    const remainingHours = hours % 24;
+    return remainingHours > 0 ? `${days}d ${remainingHours}h` : `${days}d`;
+  }
+  return new Date(timestamp).toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+function collectQuotaWindows(provider = {}) {
+  const sourceWindows = [
+    ...(Array.isArray(provider.usage?.windows) ? provider.usage.windows : []),
+    ...(Array.isArray(provider.quota?.windows) ? provider.quota.windows : []),
+    ...(Array.isArray(provider.rateLimits?.windows) ? provider.rateLimits.windows : []),
+  ];
+  return sourceWindows
+    .map((window) => {
+      const usedPercent = Number(window.usedPercent ?? window.used ?? 0);
+      const remaining = Number.isFinite(window.remaining)
+        ? Math.max(0, Math.round(window.remaining))
+        : Math.max(0, Math.min(100, Math.round(100 - usedPercent)));
+      return {
+        displayName: provider.displayName || provider.name || provider.id || "provider",
+        label: String(window.label || window.name || window.window || "quota").trim(),
+        remaining,
+        resetAt: window.resetAt || window.reset || window.resetsAt,
+      };
+    })
+    .filter((window) => window.label || Number.isFinite(window.remaining))
+    .sort((left, right) => left.remaining - right.remaining || left.displayName.localeCompare(right.displayName));
+}
+
+function renderQuotaWindows(windows = []) {
+  if (!windows.length) {
+    return "";
+  }
+  return windows.slice(0, 4).map((window) => {
+    const reset = formatQuotaReset(window.resetAt);
+    const tone = window.remaining <= 10 ? "danger" : window.remaining <= 30 ? "warn" : "ok";
+    const detail = reset ? `${window.remaining}% remaining | resets in ${reset}` : `${window.remaining}% remaining`;
+    return stackItem(`${window.displayName} ${window.label}`.trim(), detail, "Provider usage window", tone);
+  }).join("");
+}
+
+function summarizeProviderResult(data = {}) {
+  const message = data.message || data.reason || data.error || "";
+  const windows = collectQuotaWindows(data.provider || data);
+  const quota = windows[0];
+  if (quota && quota.remaining <= 10) {
+    const reset = formatQuotaReset(quota.resetAt);
+    return reset
+      ? `Provider quota is low: ${quota.remaining}% remaining, resets in ${reset}.`
+      : `Provider quota is low: ${quota.remaining}% remaining.`;
+  }
+  if (/429|rate.?limit|quota|exhausted/i.test(String(message))) {
+    return message ? `Provider limit reported: ${truncate(message, 140)}` : "Provider limit reported. Check output below.";
+  }
+  if (data?.ok || data?.ready) {
+    return "Provider test passed. Save brain if you have changed settings.";
+  }
+  return "Provider test finished. Check output below for details.";
 }
 
 function timeAgo(value) {
@@ -481,18 +718,23 @@ function stackItem(title, detail = "", meta = "", tone = "muted") {
 
 function sessionButton(session, selected) {
   const preview = truncate(session.lastAssistantPreview || session.lastUserMessagePreview || "No preview yet.", 120);
-  const meta = `${session.agentId || "main"} | ${session.channel} | ${session.messageCount} msg | ${session.runCount} run`;
-  const queueMeta = session.queueDepth ? ` | ${session.queueDepth} queued` : "";
-  const tone = toneForStatus(session.status || session.lifecycleState || "idle");
-  const className = selected ? "list-button is-selected" : "list-button";
+  const runStatus = getSessionRunStatus(session);
+  const meta = formatSessionRunMeta(session);
+  const tone = toneForStatus(runStatus);
+  const stateClass = isSessionRunActive(session)
+    ? " is-running"
+    : runStatus === "queued"
+      ? " is-queued"
+      : "";
+  const className = `${selected ? "list-button is-selected" : "list-button"}${stateClass}`;
 
   return [
     `<button type="button" class="${className}" data-session-id="${escapeHtml(session.id)}" data-session-label="${escapeHtml(session.label)}" data-agent-id="${escapeHtml(session.agentId || "main")}">`,
     `<div class="row-top">`,
     `<strong>${escapeHtml(session.label)}</strong>`,
-    statusPill(session.status || session.lifecycleState || "idle", tone),
+    statusPill(runStatus, tone),
     `</div>`,
-    `<span>${escapeHtml(meta + queueMeta)}</span>`,
+    `<span>${escapeHtml(meta)}</span>`,
     `<small>${escapeHtml(preview)}</small>`,
     `</button>`,
   ].join("");
@@ -730,6 +972,12 @@ function summarizeToolOutput(item = {}) {
   if (item.toolSummary?.summary) {
     return item.toolSummary.summary;
   }
+  if (isBrowserToolOutput(item)) {
+    const browser = browserTraceDetails(item);
+    const label = [browser.action, browser.title || browser.url || browser.sessionId].filter(Boolean).join(" | ");
+    const result = browser.resultPreview ? `: ${browser.resultPreview}` : "";
+    return `Browser ${label || "action"}${result}`;
+  }
   if (output.error || output.blocked) {
     return output.message || output.reason || output.stderr || "Tool was blocked or failed.";
   }
@@ -738,7 +986,12 @@ function summarizeToolOutput(item = {}) {
   }
   if (Array.isArray(output.results)) {
     const first = output.results[0] || {};
-    return `${output.results.length} result(s)${first.title ? `: ${first.title}` : ""}`;
+    const fetched = Array.isArray(output.fetchedContent)
+      ? output.fetchedContent.filter((page) => (page.text || page.markdown) && !page.error).length
+      : 0;
+    const query = output.query ? `Query "${output.query}"` : "Search";
+    const source = first.title || first.url || "";
+    return `${query}: ${output.results.length} result(s), ${fetched} page(s) read${source ? `. Top: ${source}` : ""}`;
   }
   if (Array.isArray(output.links)) {
     return `Found ${output.links.length} link(s)${output.url ? ` at ${output.url}` : ""}.`;
@@ -755,7 +1008,18 @@ function summarizeToolOutput(item = {}) {
     return output.stdout || output.stderr;
   }
   if (output.path || output.file) {
-    return `${output.path || output.file}${output.bytesWritten ? ` | ${output.bytesWritten} bytes` : ""}`;
+    const path = output.path || output.file;
+    if (output.bytesWritten != null) {
+      return `Wrote ${output.bytesWritten} byte(s) to ${path}.`;
+    }
+    if (output.bytesRead != null) {
+      const preview = output.content ? ` Preview: ${String(output.content).replace(/\s+/g, " ").slice(0, 140)}` : "";
+      return `Read ${output.bytesRead}/${output.totalBytes || output.bytesRead} byte(s) from ${path}.${preview}`;
+    }
+    if (output.deleted || output.movedTo || output.trashPath) {
+      return `Deleted ${path}${output.movedTo || output.trashPath ? ` -> ${output.movedTo || output.trashPath}` : ""}.`;
+    }
+    return `${path}`;
   }
   if (output.content) {
     return output.content;
@@ -785,11 +1049,98 @@ function toolOutputNextFix(item = {}) {
   return item.toolSummary?.nextFix || item.output?.nextFix || "";
 }
 
+function isBrowserToolOutput(item = {}) {
+  const tool = String(item.tool || "");
+  const output = item.output || {};
+  return tool === "browser"
+    || tool.startsWith("browser_")
+    || String(output.tool || "").startsWith("browser_")
+    || String(output.action || "").toLowerCase().startsWith("browser");
+}
+
+function compactBrowserValue(value) {
+  if (value == null) return "";
+  if (typeof value === "string") return truncate(value, 180);
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return truncate(formatJson(value), 180);
+}
+
+function browserTraceDetails(item = {}) {
+  const output = item.output || {};
+  const inner = output.result && typeof output.result === "object" ? output.result : output;
+  const action = output.action || item.action || String(item.tool || "").replace(/^browser_?/, "") || "browser";
+  const sessionId = output.sessionId || inner.sessionId || item.sessionId || "";
+  const url = output.url || inner.url || inner.finalUrl || inner.currentUrl || "";
+  const title = output.title || inner.title || "";
+  const screenshotPath = output.screenshotPath || inner.screenshotPath || inner.imagePath || "";
+  const statusProof = inner.operator
+    ? `ready=${inner.operator.ready !== false}; path=${inner.operator.browserPath || "unknown"}; playwright=${inner.playwrightReady !== false}`
+    : "";
+  const resultValue = inner.result ?? inner.message ?? inner.content ?? inner.text ?? statusProof ?? output.message ?? "";
+  return {
+    action,
+    sessionId,
+    url,
+    title,
+    screenshotPath,
+    resultPreview: compactBrowserValue(resultValue),
+  };
+}
+
+function renderBrowserToolDetails(item = {}) {
+  if (!isBrowserToolOutput(item)) return "";
+  const details = browserTraceDetails(item);
+  const rows = [
+    ["Action", details.action],
+    ["Session", details.sessionId],
+    ["URL", details.url],
+    ["Title", details.title],
+    ["Screenshot", details.screenshotPath],
+    ["Result", details.resultPreview],
+  ].filter(([, value]) => value);
+  if (!rows.length) return "";
+  return `<div class="browser-proof-grid">${rows.map(([label, value]) => [
+    `<span>${escapeHtml(label)}</span>`,
+    `<strong title="${escapeHtml(value)}">${escapeHtml(truncate(value, label === "Screenshot" ? 180 : 110))}</strong>`,
+  ].join("")).join("")}</div>`;
+}
+
 function renderChatToolTrace(entry = {}) {
   const toolOutputs = Array.isArray(entry.toolOutputs) ? entry.toolOutputs : [];
   const loop = entry.modelToolLoop && typeof entry.modelToolLoop === "object" ? entry.modelToolLoop : null;
   const provider = entry.providerDiagnostics && typeof entry.providerDiagnostics === "object" ? entry.providerDiagnostics : null;
+  const activity = Array.isArray(entry.activity) ? entry.activity : [];
   const blocks = [];
+  const timeline = [];
+
+  if (entry.planSummary) timeline.push("planned");
+  if (provider?.status) timeline.push(provider.status === "completed" ? "provider answered" : provider.status === "failed" ? "provider failed" : "provider running");
+  if (loop?.attempted || loop?.toolCallCount) timeline.push(`${loop?.rounds || 0} brain round(s)`);
+  if (toolOutputs.length) timeline.push(`${toolOutputs.filter((item) => toolOutputStatus(item) === "completed").length}/${toolOutputs.length} tool(s) done`);
+  if (entry.finalMetadata?.workspaceFileCount || entry.context?.workspaceFileCount) timeline.push(`${entry.finalMetadata?.workspaceFileCount || entry.context?.workspaceFileCount} context file(s)`);
+
+  if (timeline.length > 0) {
+    blocks.push([
+      `<div class="chat-trace-card chat-trace-card-brain">`,
+      `<div class="chat-trace-head"><strong>Timeline</strong>${statusPill("trace", "muted")}</div>`,
+      `<p>${escapeHtml(timeline.join(" -> "))}</p>`,
+      `</div>`,
+    ].join(""));
+  }
+
+  if (activity.length > 0) {
+    blocks.push([
+      `<div class="chat-trace-card chat-trace-card-brain">`,
+      `<div class="chat-trace-head"><strong>Working log</strong>${statusPill("live", "ok")}</div>`,
+      `<div class="chat-activity-list">`,
+      activity.slice(-8).map((item) => {
+        const tone = item.tone || "muted";
+        return `<div class="chat-activity-row">${statusPill(item.label || "step", tone)}<span>${escapeHtml(truncate(item.text || "", 240))}</span></div>`;
+      }).join(""),
+      `</div>`,
+      `</div>`,
+    ].join(""));
+  }
 
   if (provider?.status || entry.planSummary) {
     const routeLabel = provider?.status ? "Provider" : "Route";
@@ -809,6 +1160,9 @@ function renderChatToolTrace(entry = {}) {
     const details = [
       `${loop.rounds || 0} round(s)`,
       `${loop.toolCallCount || 0} tool(s)`,
+      loop.autoVerificationCount ? `${loop.autoVerificationCount} verified` : "",
+      loop.autoRepairAttempted ? `repair ${loop.autoRepairReport?.toolCallCount || 0} tool(s)` : "",
+      loop.nativeTranscriptTurns ? `${loop.nativeTranscriptTurns} native turn(s)` : "",
       loop.recoveredToolCalls ? `${loop.recoveredToolCalls} recovered` : "",
       loop.repeatedToolCallsSkipped ? `${loop.repeatedToolCallsSkipped} repeat skipped` : "",
       loop.rejectedToolCalls?.length ? `${loop.rejectedToolCalls.length} rejected` : "",
@@ -832,14 +1186,16 @@ function renderChatToolTrace(entry = {}) {
         const failed = ["failed", "blocked"].includes(toolStatus);
         const pending = toolStatus === "pending-approval";
         const label = toolStatus === "completed"
-          ? (item.source === "model-tool-loop" ? "brain" : "plan")
+          ? (item.source === "model-tool-loop" ? "brain" : item.source === "auto-verification" ? "verify" : "plan")
           : toolStatus;
         const nextFix = toolOutputNextFix(item);
+        const browserClass = isBrowserToolOutput(item) ? " chat-tool-card-browser" : "";
         return [
-          `<div class="chat-tool-card">`,
+          `<div class="chat-tool-card${browserClass}">`,
           `<div class="chat-trace-head"><strong>${escapeHtml(item.tool || "tool")}</strong>${statusPill(label, failed ? "danger" : pending ? "warn" : "ok")}</div>`,
           item.reason ? `<small>${escapeHtml(item.reason)}</small>` : "",
           `<p>${escapeHtml(truncate(summarizeToolOutput(item), 220))}</p>`,
+          renderBrowserToolDetails(item),
           nextFix ? `<small class="chat-tool-nextfix">Next: ${escapeHtml(nextFix)}</small>` : "",
           `</div>`,
         ].join("");
@@ -866,10 +1222,95 @@ function eventStatusForTool(record = {}) {
   return "";
 }
 
+function liveActivityForEvent(record = {}) {
+  const name = String(record.event || "");
+  const payload = record.payload || {};
+  const tool = payload.tool || "tool";
+  if (name === "agent.thinking") {
+    return {
+      label: "thinking",
+      tone: "muted",
+      text: payload.message || formatLiveRunEventLabel(record),
+    };
+  }
+  if (name === "context.compacted") {
+    return {
+      label: "context",
+      tone: "muted",
+      text: `Context assembled: ${payload.usedChars || 0}/${payload.maxChars || 0} chars${payload.omittedItems ? `, ${payload.omittedItems} omitted` : ""}.`,
+    };
+  }
+  if (name === "provider.started") {
+    return {
+      label: "brain",
+      tone: "muted",
+      text: `Brain started: ${payload.providerId || "provider"}${payload.model ? ` / ${payload.model}` : ""}.`,
+    };
+  }
+  if (name === "provider.completed") {
+    return {
+      label: "brain",
+      tone: "ok",
+      text: `Brain reply completed${payload.durationMs ? ` in ${payload.durationMs}ms` : ""}.`,
+    };
+  }
+  if (name === "provider.failed") {
+    return {
+      label: "brain",
+      tone: "danger",
+      text: `Brain failed: ${payload.reason || payload.message || "provider error"}.`,
+    };
+  }
+  if (name.endsWith(".tool_started") || name === "tool.started") {
+    return {
+      label: "tool",
+      tone: "muted",
+      text: `Running ${tool}${payload.reason ? `: ${payload.reason}` : ""}.`,
+    };
+  }
+  if (name.endsWith(".tool_completed") || name === "tool.completed") {
+    const status = payload.error ? "failed" : payload.blocked ? "blocked" : "completed";
+    return {
+      label: status === "completed" ? "output" : "tool",
+      tone: status === "completed" ? "ok" : "danger",
+      text: `${tool} ${status}: ${payload.outputSummary || payload.resultPreview || "observation saved"}.`,
+    };
+  }
+  if (name === "tool.output") {
+    return {
+      label: "output",
+      tone: "muted",
+      text: `${tool} output: ${payload.outputSummary || payload.resultPreview || payload.preview || "observation captured"}.`,
+    };
+  }
+  if (name === "tool.failed") {
+    return {
+      label: "tool",
+      tone: "danger",
+      text: `${tool} failed: ${payload.outputSummary || payload.reason || payload.message || "see trace"}.`,
+    };
+  }
+  if (name === "agent.completed" || name === "agent.done") {
+    return {
+      label: "final",
+      tone: "ok",
+      text: name === "agent.completed" ? "Final answer saved." : "Run metadata saved.",
+    };
+  }
+  return null;
+}
+
 function mergeLiveEvidenceEvent(record = {}) {
   const name = String(record.event || "");
   const payload = record.payload || {};
   const runId = payload.runId || activeRunId || "";
+  const activity = liveActivityForEvent(record);
+  if (activity) {
+    const current = Array.isArray(activeLiveEvidence.activity) ? activeLiveEvidence.activity : [];
+    const key = `${record.event}:${payload.tool || ""}:${payload.round || ""}:${activity.text}`;
+    const exists = current.some((item) => item.key === key);
+    activeLiveEvidence.activity = exists ? current : [...current, { ...activity, key }].slice(-16);
+  }
   activeLiveEvidence.run = {
     ...(activeLiveEvidence.run || {}),
     id: runId,
@@ -883,6 +1324,30 @@ function mergeLiveEvidenceEvent(record = {}) {
       reason: "Provider request started.",
     };
     activeLiveEvidence.plan = { summary: "Provider brain is thinking with runtime context." };
+  }
+  if (name === "agent.thinking") {
+    activeLiveEvidence.plan = {
+      summary: payload.message || "Agent manager is thinking through the next runtime step.",
+    };
+    activeLiveEvidence.modelToolLoop = {
+      ...(activeLiveEvidence.modelToolLoop || {}),
+      attempted: payload.phase === "model-tool-loop" || Boolean(activeLiveEvidence.modelToolLoop?.attempted),
+      rounds: Math.max(Number(activeLiveEvidence.modelToolLoop?.rounds || 0), Number(payload.round || 0)),
+      maxRounds: payload.maxRounds || activeLiveEvidence.modelToolLoop?.maxRounds,
+    };
+  }
+  if (name === "model_tool_loop.self_correction_started") {
+    activeLiveEvidence.modelToolLoop = {
+      ...(activeLiveEvidence.modelToolLoop || {}),
+      attempted: true,
+      selfCorrectionTriggered: true,
+      failedObservationCount: payload.failedObservationCount || 0,
+      maxRounds: payload.maxRounds || activeLiveEvidence.modelToolLoop?.maxRounds,
+      stoppedReason: "self-correcting",
+    };
+    activeLiveEvidence.plan = {
+      summary: `Self-correction started after ${payload.failedObservationCount || 0} failed tool observation(s).`,
+    };
   }
   if (name === "provider.completed" || name === "provider.failed") {
     activeLiveEvidence.providerDiagnostics = {
@@ -899,6 +1364,8 @@ function mergeLiveEvidenceEvent(record = {}) {
       ...(activeLiveEvidence.modelToolLoop || {}),
       attempted: true,
       rounds: Math.max(Number(activeLiveEvidence.modelToolLoop?.rounds || 0), Number(payload.round || 0)),
+      maxRounds: payload.maxRounds || activeLiveEvidence.modelToolLoop?.maxRounds,
+      maxToolCallsPerRound: payload.maxToolCallsPerRound || activeLiveEvidence.modelToolLoop?.maxToolCallsPerRound,
       stoppedReason: "running",
       roundDetails: [
         ...((activeLiveEvidence.modelToolLoop?.roundDetails || []).filter((item) => item.round !== payload.round)),
@@ -915,7 +1382,11 @@ function mergeLiveEvidenceEvent(record = {}) {
   }
   const toolStatus = eventStatusForTool(record);
   if (toolStatus && payload.tool) {
-    const source = name.startsWith("model_tool_loop") ? "model-tool-loop" : "runtime-plan";
+    const source = name.startsWith("model_tool_loop")
+      ? "model-tool-loop"
+      : name.startsWith("auto_verification")
+        ? "auto-verification"
+        : "runtime-plan";
     const existing = activeLiveEvidence.toolOutputs.find((item) => item.tool === payload.tool && item.source === source && item.round === payload.round);
     const liveTool = {
       tool: payload.tool,
@@ -928,7 +1399,14 @@ function mergeLiveEvidenceEvent(record = {}) {
       output: {
         status: toolStatus,
         ok: toolStatus === "completed",
-        message: toolStatus === "running" ? "Running now..." : toolStatus,
+        message: payload.outputSummary || (toolStatus === "running" ? "Running now..." : toolStatus),
+        action: payload.action || "",
+        tool: payload.toolAdapter || "",
+        sessionId: String(payload.tool || "").startsWith("browser") ? (payload.browserSessionId || "") : (payload.sessionId || ""),
+        url: payload.url || "",
+        title: payload.title || "",
+        screenshotPath: payload.screenshotPath || "",
+        result: payload.resultPreview || "",
       },
     };
     if (existing) {
@@ -1118,6 +1596,9 @@ function renderComputerEvidence(data = {}) {
     `<small>${escapeHtml([
       stats.loop.nativeToolsUsed ? "native tools" : "",
       stats.loop.toolCallCount ? `${stats.loop.toolCallCount} tool call(s)` : "no extra tool calls",
+      stats.loop.autoVerificationCount ? `${stats.loop.autoVerificationCount} verified` : "",
+      stats.loop.autoRepairAttempted ? `repair ${stats.loop.autoRepairReport?.toolCallCount || 0} tool(s)` : "",
+      stats.loop.nativeTranscriptTurns ? `${stats.loop.nativeTranscriptTurns} native turn(s)` : "",
       stats.loop.recoveredToolCalls ? `${stats.loop.recoveredToolCalls} recovered` : "",
       stats.loop.errors?.length ? `${stats.loop.errors.length} error(s)` : "",
     ].filter(Boolean).join(" | "))}</small>`,
@@ -1143,51 +1624,28 @@ function formatChatResponse(data) {
     return `Error: ${data.error}`;
   }
 
+  const reply = String(data.reply || "").trim();
+  if (reply) {
+    return reply;
+  }
+
   const run = data.run || {};
   const session = data.session || {};
   const agent = data.agent || {};
-  const plan = data.plan || {};
   const toolOutputs = Array.isArray(data.toolOutputs) ? data.toolOutputs : [];
   const diagnostics = data.providerDiagnostics || null;
-  const route =
-    diagnostics?.status
-      ? `provider ${diagnostics.status}${diagnostics.durationMs ? ` (${diagnostics.durationMs}ms)` : ""}`
-      : toolOutputs.length
-        ? "local tools"
-        : "local runtime";
-  const lines = [
-    data.reply || "(no reply)",
-    "",
-    `Run: ${run.status || "unknown"} | Agent: ${agent.id || session.agentId || "main"}${agent.profileId ? `/${agent.profileId}` : ""} | Route: ${route}`,
-  ];
+  const lines = ["No final answer was generated for this run."];
 
   if (diagnostics?.message && diagnostics.status !== "completed") {
-    lines.push(`Provider detail: ${diagnostics.message}`);
-  }
-
-  if (Array.isArray(data.intents) && data.intents.length > 0) {
-    lines.push(`Intent: ${data.intents.join(", ")}`);
-  }
-
-  if (plan.summary) {
-    lines.push(`Plan: ${plan.summary}`);
+    lines.push(`Provider issue: ${diagnostics.message}`);
   }
 
   if (toolOutputs.length > 0) {
     const completed = toolOutputs.filter((item) => toolOutputStatus(item) === "completed").length;
     const attention = toolOutputs.length - completed;
-    lines.push(`Tools: ${completed}/${toolOutputs.length} completed${attention ? `, ${attention} need attention` : ""}.`);
+    lines.push(`Tool proof is available in the trace panel: ${completed}/${toolOutputs.length} completed${attention ? `, ${attention} need attention` : ""}.`);
   } else if (run.id) {
-    lines.push("Tools: none needed.");
-  }
-
-  if (Array.isArray(plan.steps) && plan.steps.length > 0 && toolOutputs.length === 0) {
-    lines.push(
-      ...plan.steps.map((step, index) => {
-        const tool = step.tool ? ` | ${step.tool}` : "";
-        return `Step ${index + 1}: ${step.type}${tool} - ${step.reason || "no reason"}`;
-      }),
-    );
+    lines.push(`Run ${run.status || "finished"} for ${agent.id || session.agentId || "main"}.`);
   }
 
   if (Array.isArray(data.approvals) && data.approvals.length > 0) {
@@ -1207,6 +1665,7 @@ function resetLiveRunTimeline(message = "Starting gateway run...") {
     providerDiagnostics: null,
     plan: { summary: message },
     run: {},
+    activity: [{ label: "start", tone: "muted", text: message }],
   };
   renderLiveRunTimeline(message);
 }
@@ -1218,32 +1677,11 @@ function renderLiveRunTimeline(fallback = "No active run.") {
   const elapsed = activeRunStartedAt ? Math.max(0, Math.round((Date.now() - activeRunStartedAt) / 1000)) : 0;
   const header = activeRunId ? `Live run ${activeRunId} | ${elapsed}s` : fallback;
   const lastEvent = activeRunEvents.at(-1);
-  const lastPayload = lastEvent?.payload || {};
   const liveMode = (() => {
-    const name = String(lastEvent?.event || "");
     if (!activeRunId) return fallback;
-    if (name === "provider.started") return `Brain running ${lastPayload.model || ""}`.trim();
-    if (name === "provider.completed") return "Brain reply complete";
-    if (name === "provider.failed") return `Brain failed: ${lastPayload.reason || "provider error"}`;
-    if (name === "model_tool_loop.round_started") return `Choosing tools round ${lastPayload.round || ""}`.trim();
-    if (name === "model_tool_loop.tool_started" || name === "tool.started") return `Running ${lastPayload.tool || "tool"}`;
-    if (name === "model_tool_loop.tool_completed" || name === "tool.completed") return `Tool done: ${lastPayload.tool || "tool"}`;
-    if (name === "tool.failed") return `Tool failed: ${lastPayload.tool || "tool"}`;
-    if (name === "context.compacted") return "Building context";
-    if (name === "agent.completed") return lastPayload.directLocalReply ? "Answered from local memory" : "Task completed";
-    if (name === "agent.failed") return "Task failed";
-    return "Working";
+    return formatLiveRunEventLabel(lastEvent) || "Working";
   })();
-  const items = activeRunEvents.slice(-12).map((record) => {
-    const payload = record.payload || {};
-    const tool = payload.tool ? ` | ${payload.tool}` : "";
-    const provider = payload.providerId ? ` | ${payload.providerId}${payload.model ? `/${payload.model}` : ""}` : "";
-    const status = payload.status ? ` | ${payload.status}` : "";
-    const reason = payload.reason ? ` | ${payload.reason}` : "";
-    const direct = payload.directLocalReply ? " | local reply" : "";
-    const time = record.at ? formatDate(record.at) : "now";
-    return `${time}  ${record.event || record.type}${tool}${provider}${status}${reason}${direct}`;
-  });
+  const items = activeRunEvents.slice(-12).map((record) => formatLiveRunEventLine(record));
   liveRunOutput.innerHTML = [
     `<div class="live-run-header">${escapeHtml(header)}</div>`,
     `<div class="live-run-list">${items.length ? items.map((item) => `<div>${escapeHtml(item)}</div>`).join("") : `<div>${escapeHtml(fallback)}</div>`}</div>`,
@@ -1265,7 +1703,7 @@ function trackLiveRunEvent(record) {
   }
   const payload = record.payload || {};
   const runId = payload.runId || "";
-  const interesting = /^(agent|tool|model_tool_loop|provider|context|shell|terminal|approval|run)\./.test(record.event || "");
+  const interesting = /^(agent|tool|model_tool_loop|auto_verification|provider|context|shell|terminal|approval|run)\./.test(record.event || "");
   if (!interesting) {
     return;
   }
@@ -1510,6 +1948,23 @@ function populateProviderModelPicker(models = null, { preserve = true, preferFet
   }
 }
 
+function summarizeProviderModelsFetch(data = {}, fetchedModels = []) {
+  const models = Array.isArray(fetchedModels) ? fetchedModels : [];
+  const sample = models.slice(0, 20).map(modelIdFromItem).filter(Boolean);
+  return formatJson({
+    ok: data.ok !== false,
+    endpoint: data.endpoint || "",
+    count: data.count || models.length,
+    shownInPicker: models.length,
+    selected: providerModelSetupInput?.value || "",
+    sample,
+    note: models.length > sample.length
+      ? `Showing first ${sample.length} model ids here; full list is loaded into the model picker and datalist.`
+      : "Full returned list is loaded into the model picker and datalist.",
+    error: data.error || "",
+  });
+}
+
 function updateProviderProfileControls() {
   const removeKeyInput = document.querySelector("#provider-remove-key");
   const profileId = providerProfileInput?.value || "openai";
@@ -1615,6 +2070,12 @@ function parseJsonInput(value, fallback = {}) {
 function pickSessionForAgent(agentId, sessions = []) {
   const normalized = normalizeAgentId(agentId);
   return (
+    sessions.find(
+      (session) => normalizeAgentId(session.agentId) === normalized && session.lifecycleState !== "archived" && isSessionRunActive(session),
+    ) ||
+    sessions.find(
+      (session) => normalizeAgentId(session.agentId) === normalized && session.lifecycleState !== "archived" && getSessionRunStatus(session) === "queued",
+    ) ||
     sessions.find(
       (session) => normalizeAgentId(session.agentId) === normalized && session.lifecycleState !== "archived",
     ) ||
@@ -1910,6 +2371,7 @@ function renderProviderStatus(state) {
   const ready = provider.ready !== false && provider.apiKeySource !== "missing";
   const tone = ready ? "ok" : "warn";
   const isCodexCli = provider.id === "codex-cli" || provider.mode === "account-bridge";
+  const quotaRows = renderQuotaWindows(collectQuotaWindows(provider));
   const secretRows = (state.providerSecrets || [])
     .map((secret) =>
       stackItem(
@@ -1933,6 +2395,7 @@ function renderProviderStatus(state) {
     `<p>${escapeHtml(provider.message || `${provider.mode || "mode"} provider using ${keySource}.`)}</p>`,
     `<small>${escapeHtml(`${provider.model || "no model"} | ${provider.baseUrl || provider.mode || "local"} | key source ${keySource}`)}</small>`,
     `</div>`,
+    quotaRows,
     isCodexCli
       ? emptyState("No API key is needed for the Codex CLI account bridge.")
       : secretRows || emptyState("No stored BYOK keys. Add one below, or switch runtime to mock for offline tests."),
@@ -3660,13 +4123,17 @@ async function postJson(url, payload, options = {}) {
     if (error.name === "AbortError") {
       return { ok: false, error: `Request timed out after ${Math.round(timeoutMs / 1000)}s.` };
     }
-    throw error;
+    return { ok: false, error: "Failed to fetch. OmniClaw gateway is offline or restarting." };
   } finally {
     if (timer) {
       clearTimeout(timer);
     }
   }
-  return response.json();
+  try {
+    return await response.json();
+  } catch {
+    return { ok: false, error: `Invalid JSON response (HTTP ${response.status}).` };
+  }
 }
 
 async function loadDesignBridge({ force = false } = {}) {
@@ -4239,9 +4706,7 @@ async function testProviderReadiness() {
   }, { timeoutMs: 25000 });
   providerOutput.textContent = formatJson(data);
   if (providerQuickStatus) {
-    providerQuickStatus.textContent = data?.ok || data?.ready
-      ? "Provider test passed. Save brain if you have changed settings."
-      : "Provider test finished. Check output below for details.";
+    providerQuickStatus.textContent = summarizeProviderResult(data);
   }
   await loadState();
 }
@@ -4578,6 +5043,24 @@ form.addEventListener("submit", async (event) => {
           if (event.type === "token") {
             fullReply += event.content;
             updateChatBubble(assistantBubble, fullReply);
+          } else if (event.type === "event" && event.record) {
+            trackLiveRunEvent(event.record);
+          } else if (event.type === "final") {
+            const data = event.data || {};
+            fullReply = event.content || data.reply || fullReply;
+            updateChatBubble(assistantBubble, formatChatResponse(data || { reply: fullReply }));
+            if (data && Object.keys(data).length) {
+              updateChatBubbleTrace(assistantBubble, data);
+              renderComputerEvidence(data);
+              activeLiveEvidence = {
+                toolOutputs: Array.isArray(data.toolOutputs) ? data.toolOutputs : [],
+                modelToolLoop: data.modelToolLoop || event.metadata || null,
+                providerDiagnostics: data.providerDiagnostics || null,
+                plan: data.plan || {},
+                run: data.run || {},
+                activity: activeLiveEvidence.activity || [],
+              };
+            }
           } else if (event.type === "done" && event.data) {
             const data = event.data || {};
             runId = data.run?.id || event.runId || "";
@@ -4593,6 +5076,7 @@ form.addEventListener("submit", async (event) => {
               providerDiagnostics: data.providerDiagnostics || null,
               plan: data.plan || {},
               run: data.run || {},
+              activity: activeLiveEvidence.activity || [],
             };
           } else if (event.type === "done") {
             runId = event.runId || "";
@@ -5255,17 +5739,23 @@ async function fetchProviderModels() {
   const preset = PROVIDER_PRESETS[profileId] || PROVIDER_PRESETS.openai;
   const providerId = providerKeyIdInput?.value.trim() || preset.providerId;
   providerOutput.textContent = "Fetching provider models...";
+  if (providerQuickStatus) {
+    providerQuickStatus.textContent = `Fetching models from ${providerDisplayName(profileId)}...`;
+  }
   const data = await postJson("/api/provider/models", {
     profileId,
     baseUrl: providerBaseUrlInput?.value.trim() || preset.baseUrl || "",
     apiKeyProviderId: providerId,
     apiKey: providerKeyInput?.value.trim() || "",
-    timeoutMs: 30000,
-  }, { timeoutMs: 35000 });
+    timeoutMs: 60000,
+  }, { timeoutMs: 65000 });
+  if (data.error || data.ok === false) {
+    throw new Error(data.error || data.message || "Model fetch failed.");
+  }
   const fetchedModels = (data.models || []).slice(0, 1000);
   setCachedProviderModels(fetchedModels);
   populateProviderModelPicker(fetchedModels, { preserve: false, preferFetched: true });
-  providerOutput.textContent = formatJson(data);
+  providerOutput.textContent = summarizeProviderModelsFetch(data, fetchedModels);
   if (providerQuickStatus) {
     providerQuickStatus.textContent = fetchedModels.length
       ? `Fetched ${data.count || fetchedModels.length} real model(s). Selected ${providerModelSetupInput?.value || "first model"}; click Save brain.`
@@ -5280,6 +5770,9 @@ providerFetchModelsButton?.addEventListener("click", async () => {
     await fetchProviderModels();
   } catch (error) {
     providerOutput.textContent = error.message;
+    if (providerQuickStatus) {
+      providerQuickStatus.textContent = "Model fetch failed. Check output below or type model id manually.";
+    }
   } finally {
     updateProviderProfileControls();
   }
@@ -6021,6 +6514,11 @@ async function sendStreamingChat(message, sessionId, label, agentId) {
             const event = JSON.parse(line.slice(6));
             if (event.type === "token") {
               fullText += event.content;
+              updateStreamingBubble(fullText);
+            } else if (event.type === "event" && event.record) {
+              trackLiveRunEvent(event.record);
+            } else if (event.type === "final") {
+              fullText = event.content || fullText;
               updateStreamingBubble(fullText);
             } else if (event.type === "done") {
               finalizeStreamingBubble(fullText, event);

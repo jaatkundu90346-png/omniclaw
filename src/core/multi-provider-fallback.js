@@ -4,9 +4,10 @@
  */
 
 export class MultiProviderFallback {
-  constructor({ providers = [], configStore }) {
+  constructor({ providers = [], configStore, secretStore = null }) {
     this.providers = providers;
     this.configStore = configStore;
+    this.secretStore = secretStore;
     this.healthChecks = new Map();
     this.fallbackChain = [];
     this.buildFallbackChain();
@@ -50,10 +51,14 @@ export class MultiProviderFallback {
 
     try {
       const start = Date.now();
-      const response = await fetch(provider.baseUrl + "/health", {
-        timeout: 5000,
-        headers: { Authorization: `Bearer ${provider.apiKey}` },
-      });
+      const baseUrl = String(provider.baseUrl || "").replace(/\/+$/, "");
+      const apiKey = provider.apiKey || this.secretStore?.getProviderKey?.(provider.apiKeyProviderId || provider.id || "");
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+      const response = await fetch(`${baseUrl}/models`, {
+        signal: controller.signal,
+        headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
+      }).finally(() => clearTimeout(timeout));
       result.latency = Date.now() - start;
       result.healthy = response.ok;
     } catch (error) {
@@ -146,6 +151,8 @@ export class MultiProviderFallback {
       status.providers.push({
         id,
         name: profile.name || id,
+        model: profile.model || "",
+        configured: Boolean(this.secretStore?.getProviderKey?.(profile.apiKeyProviderId || id)),
         healthy: health.healthy,
         latency: health.latency,
         error: health.error,

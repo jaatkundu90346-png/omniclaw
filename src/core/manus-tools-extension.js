@@ -3,7 +3,7 @@
  * This module adds new tools that leverage the enhanced modules.
  */
 
-export function createManusTooIsExtension(runtime) {
+export function createManusToolsExtension(runtime) {
   return {
     semantic_memory_search: {
       description: "Search long-term memory using semantic similarity, not just keywords.",
@@ -14,12 +14,7 @@ export function createManusTooIsExtension(runtime) {
         }
 
         try {
-          const embedding = await runtime.embedder?.embed(query);
-          if (!embedding) {
-            return { error: "Could not generate embedding for query" };
-          }
-
-          const results = runtime.semanticMemory.search(embedding, limit, threshold);
+          const results = await runtime.semanticMemory.searchText(query, limit, threshold);
           return {
             query,
             results,
@@ -187,5 +182,41 @@ export function createManusTooIsExtension(runtime) {
         }
       },
     },
+
+    autonomous_task: {
+      description: "Run a bounded Think-Act-Observe-Reflect autonomous task loop with tool execution and reflection.",
+      permission: "allowTaskRunner",
+      group: "autonomy",
+      run: async ({ objective, task, maxIterations = 200, daemonMode = false, checkpointEnabled = true }, context = {}) => {
+        if (!runtime.autonomousRuntime) {
+          return { error: "Autonomous runtime not initialized" };
+        }
+
+        const request = String(objective || task || "").trim();
+        if (!request) {
+          return { error: "objective is required" };
+        }
+
+        const previousMax = runtime.autonomousRuntime.executionState.maxIterations;
+        runtime.autonomousRuntime.executionState.maxIterations = Math.max(1, Math.min(10000, Number(maxIterations || 200)));
+        runtime.autonomousRuntime.executionState.currentIteration = 0;
+        try {
+          return await runtime.autonomousRuntime.executeTask(request, {
+            ...context,
+            daemonMode: Boolean(daemonMode),
+            checkpointEnabled: checkpointEnabled !== false,
+            maxIterations: Math.max(1, Math.min(10000, Number(maxIterations || 200))),
+            tools: runtime.tools?.getAll?.({ agentId: context.agentId || "main", modelCallableOnly: true }) || [],
+            skills: runtime.skills?.list?.() || [],
+          });
+        } catch (error) {
+          return { error: error.message };
+        } finally {
+          runtime.autonomousRuntime.executionState.maxIterations = previousMax;
+        }
+      },
+    },
   };
 }
+
+export const createManusTooIsExtension = createManusToolsExtension;

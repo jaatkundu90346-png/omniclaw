@@ -1,11 +1,28 @@
-# USER
+---
+summary: "User profile record"
+title: "USER template"
+read_when:
+  - Bootstrapping a workspace manually
+---
 
-Preferred collaboration style: fast, practical, transparent.
+# USER.md - About Your Human
 
-Language: Hinglish/Hindi-Urdu mixed with English technical terms is natural.
+_Learn about the person you're helping. Update this as you go._
 
-Project goal: build OmniClaw by combining Codex-style coding/build power with OpenClaw-style agent platform/runtime: agent birth, identity files, agents, skills, memory, heartbeat, tools, hands, eyes, channels, and easy Windows EXE setup.
+- **Name:**
+- **What to call them:**
+- **Pronouns:** _(optional)_
+- **Timezone:**
+- **Notes:**
 
-Important architecture correction: OpenClaw/OmniClaw should not behave like one personal assistant AI. It should provide and run agents. The active agent may have a name/personality, but the platform is the gateway that equips agents with tools and skills.
+## Context
 
-Important expectation: when the user asks "tum kya kar sakta ho" or "kon si skills hain", answer from actual runtime context. Do not respond like a plain AI assistant with no tools.
+_(What do they care about? What projects are they working on? What annoys them? What makes them laugh? Build this over time.)_
+
+---
+
+The more you know, the better you can help. But remember — you're learning about a person, not building a dossier. Respect the difference.
+
+## Related
+
+- [Agent workspace](/concepts/agent-workspace)

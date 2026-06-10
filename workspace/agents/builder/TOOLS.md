@@ -1,5 +1,51 @@
-# TOOLS
+---
+summary: "Workspace template for TOOLS.md"
+title: "TOOLS.md template"
+read_when:
+  - Bootstrapping a workspace manually
+---
 
-Use tools deliberately. Prefer safe reads before writes. Respect the current agent's tool restrictions.
+# TOOLS.md - Local Notes
 
-OpenClaw-compatible tool surface is available here: exec/process/code_execution, browser, web_search/web_fetch/x_search, read/write/edit/apply_patch, message, sessions_*, session_status, subagents, agents_list, memory_*, nodes, cron, gateway, image/media compatibility tools, and OmniClaw-native computer access tools.
+Skills define _how_ tools work. This file is for _your_ specifics — the stuff that's unique to your setup.
+
+## What Goes Here
+
+Things like:
+
+- Camera names and locations
+- SSH hosts and aliases
+- Preferred voices for TTS
+- Speaker/room names
+- Device nicknames
+- Anything environment-specific
+
+## Examples
+
+```markdown
+### Cameras
+
+- living-room → Main area, 180° wide angle
+- front-door → Entrance, motion-triggered
+
+### SSH
+
+- home-server → 192.168.1.100, user: admin
+
+### TTS
+
+- Preferred voice: "Nova" (warm, slightly British)
+- Default speaker: Kitchen HomePod
+```
+
+## Why Separate?
+
+Skills are shared. Your setup is yours. Keeping them apart means you can update skills without losing your notes, and share skills without leaking your infrastructure.
+
+---
+
+Add whatever helps you do your job. This is your cheat sheet.
+
+## Related
+
+- [Agent workspace](/concepts/agent-workspace)

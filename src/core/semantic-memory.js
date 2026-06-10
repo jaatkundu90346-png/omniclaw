@@ -1,6 +1,31 @@
 import fs from "node:fs";
 import path from "node:path";
 
+export class SimpleTextEmbedder {
+  constructor({ dimensions = 256 } = {}) {
+    this.dimensions = dimensions;
+  }
+
+  async embed(text = "") {
+    const vector = new Array(this.dimensions).fill(0);
+    const tokens = String(text || "")
+      .toLowerCase()
+      .match(/[a-z0-9_]{2,}/g) || [];
+
+    for (const token of tokens) {
+      let hash = 2166136261;
+      for (let i = 0; i < token.length; i += 1) {
+        hash ^= token.charCodeAt(i);
+        hash = Math.imul(hash, 16777619);
+      }
+      vector[Math.abs(hash) % this.dimensions] += 1;
+    }
+
+    const norm = Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0));
+    return norm > 0 ? vector.map((value) => value / norm) : vector;
+  }
+}
+
 /**
  * SemanticMemory - A vector-based memory system for OmniClaw.
  * This module provides semantic search capabilities using embeddings.
@@ -61,6 +86,15 @@ export class SemanticMemory {
     this.save();
   }
 
+  async addText(id, text, metadata = {}) {
+    const embedding = await this.embedder?.embed?.(text);
+    if (!embedding) {
+      throw new Error("Semantic memory embedder is not configured.");
+    }
+    this.addMemory(id, text, embedding, metadata);
+    return this.embeddings.get(id);
+  }
+
   /**
    * Compute cosine similarity between two vectors.
    * @param {Array<number>} vec1 - First vector.
@@ -110,6 +144,14 @@ export class SemanticMemory {
     }
 
     return results.sort((a, b) => b.similarity - a.similarity).slice(0, limit);
+  }
+
+  async searchText(query, limit = 10, threshold = 0.35) {
+    const embedding = await this.embedder?.embed?.(query);
+    if (!embedding) {
+      throw new Error("Semantic memory embedder is not configured.");
+    }
+    return this.search(embedding, limit, threshold);
   }
 
   /**

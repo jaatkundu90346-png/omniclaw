@@ -286,7 +286,12 @@ export class CustomizationEngine {
 
     if (candidate.mode === "codex-cli") {
       const provider = new CodexCliProvider(this.configStore);
-      const live = await provider.testConnection(candidate);
+      const live = await provider.testConnection({
+        ...candidate,
+        verifyAuth: input.verifyAuth === true,
+        prompt: input.prompt || "",
+        timeoutMs: input.timeoutMs || candidate.timeoutMs,
+      });
       return {
         ok: Boolean(live.ok),
         liveOk: Boolean(live.ok),
@@ -390,11 +395,15 @@ export class CustomizationEngine {
       return;
     }
     if (mode === "openai-compatible") {
+      const model = String(profile?.model || "").trim();
       if (!String(profile?.baseUrl || "").trim()) {
         throw new Error(`Profile ${profileId} requires baseUrl.`);
       }
-      if (!String(profile?.model || "").trim()) {
+      if (!model) {
         throw new Error(`Profile ${profileId} requires model.`);
+      }
+      if (model.startsWith("/") || model.includes(" ")) {
+        throw new Error(`Profile ${profileId} has invalid model "${model}".`);
       }
       if (!String(profile?.apiKeyProviderId || "").trim()) {
         throw new Error(`Profile ${profileId} requires apiKeyProviderId.`);

@@ -1,6 +1,7 @@
 /**
  * AutonomousRuntime - Orchestrates the Think-Act-Observe-Reflect (TAOR) loop.
  * Manages the autonomous execution of tasks with self-correction and adaptation.
+ * Supports checkpointing, daemon mode, and resumable execution.
  */
 
 export class AutonomousRuntime {
@@ -11,6 +12,7 @@ export class AutonomousRuntime {
     toolRegistry,
     semanticMemory,
     provider,
+    checkpointStore,
   }) {
     this.goalManager = goalManager;
     this.planner = planner;
@@ -18,15 +20,97 @@ export class AutonomousRuntime {
     this.toolRegistry = toolRegistry;
     this.semanticMemory = semanticMemory;
     this.provider = provider;
+    this.checkpointStore = checkpointStore;
 
     this.executionState = {
       currentGoal: null,
       currentPlan: null,
       executionHistory: [],
       reflectionLog: [],
-      maxIterations: 10,
+      maxIterations: 50,
       currentIteration: 0,
+      daemonMode: false,
+      checkpointEnabled: true,
     };
+
+    this.lastCheckpointAt = null;
+    this.checkpointIntervalMs = 60000; // Save checkpoint every 60 seconds
+  }
+
+  /**
+   * Set runtime parameters.
+   * @param {Object} params - Parameters to set
+   */
+  setParams(params = {}) {
+    if (params.maxIterations !== undefined) {
+      this.executionState.maxIterations = Math.max(1, Math.min(10000, Number(params.maxIterations)));
+    }
+    if (params.daemonMode !== undefined) {
+      this.executionState.daemonMode = Boolean(params.daemonMode);
+    }
+    if (params.checkpointEnabled !== undefined) {
+      this.executionState.checkpointEnabled = Boolean(params.checkpointEnabled);
+    }
+    if (params.checkpointIntervalMs !== undefined) {
+      this.checkpointIntervalMs = Math.max(10000, Number(params.checkpointIntervalMs));
+    }
+  }
+
+  /**
+   * Save current state to checkpoint.
+   * @param {string} taskId - Task identifier
+   * @param {Object} metadata - Additional metadata
+   */
+  saveCheckpoint(taskId, metadata = {}) {
+    if (!this.checkpointStore || !this.executionState.checkpointEnabled) {
+      return null;
+    }
+
+    const result = this.checkpointStore.saveCheckpoint(taskId, this.executionState, {
+      goalTitle: this.executionState.currentGoal?.title,
+      currentIteration: this.executionState.currentIteration,
+      maxIterations: this.executionState.maxIterations,
+      ...metadata,
+    });
+
+    this.lastCheckpointAt = new Date().toISOString();
+    return result;
+  }
+
+  /**
+   * Load state from checkpoint.
+   * @param {string} taskId - Task identifier
+   * @returns {boolean} Success
+   */
+  loadCheckpoint(taskId) {
+    if (!this.checkpointStore) {
+      return false;
+    }
+
+    const checkpoint = this.checkpointStore.loadCheckpoint(taskId);
+    if (!checkpoint) {
+      return false;
+    }
+
+    // Restore state
+    if (checkpoint.state) {
+      this.executionState.currentGoal = checkpoint.state.currentGoal;
+      this.executionState.currentPlan = checkpoint.state.currentPlan;
+      this.executionState.currentIteration = checkpoint.state.currentIteration || 0;
+      this.executionState.executionHistory = checkpoint.state.executionHistory || [];
+      this.executionState.reflectionLog = checkpoint.state.reflectionLog || [];
+    }
+
+    return true;
+  }
+
+  /**
+   * Check if should save checkpoint based on interval.
+   */
+  shouldCheckpoint() {
+    if (!this.lastCheckpointAt) return true;
+    const elapsed = Date.now() - new Date(this.lastCheckpointAt).getTime();
+    return elapsed >= this.checkpointIntervalMs;
   }
 
   /**
@@ -36,6 +120,16 @@ export class AutonomousRuntime {
    * @returns {Promise<Object>} Final result of the task.
    */
   async executeTask(userRequest, context = {}) {
+    const startTime = Date.now();
+    const taskId = context.taskId || `autonomous_${Date.now()}`;
+
+    // Apply runtime parameters from context
+    this.setParams({
+      maxIterations: context.maxIterations || 50,
+      daemonMode: context.daemonMode || false,
+      checkpointEnabled: context.checkpointEnabled !== false,
+    });
+
     try {
       // Phase 1: THINK - Initialize goal and plan
       const rootGoal = this.goalManager.createRootGoal(userRequest, context);
@@ -49,6 +143,11 @@ export class AutonomousRuntime {
       const results = [];
       while (this.executionState.currentIteration < this.executionState.maxIterations) {
         this.executionState.currentIteration += 1;
+
+        // Auto-checkpoint every interval
+        if (this.shouldCheckpoint()) {
+          this.saveCheckpoint(taskId, { progress: this.calculateProgress(results, subGoals) });
+        }
 
         // Get the next pending sub-goal
         const nextSubGoal = this.goalManager.getNextSubGoal();
@@ -64,6 +163,15 @@ export class AutonomousRuntime {
         if (!cycleResult.success && cycleResult.shouldAbort) {
           break;
         }
+
+        // In daemon mode, continue even after completion
+        if (this.executionState.daemonMode && cycleResult.success) {
+          // Check for new goals or continue monitoring
+          const newGoals = await this.checkForNewGoals(context);
+          if (newGoals.length > 0) {
+            this.goalManager.addGoals(newGoals);
+          }
+        }
       }
 
       // Mark root goal as completed
@@ -72,19 +180,48 @@ export class AutonomousRuntime {
         results,
       });
 
+      const totalDurationMs = Date.now() - startTime;
+
       return {
         success: true,
         goal: rootGoal,
         results,
-        executionStats: this.getExecutionStats(),
+        executionStats: {
+          ...this.getExecutionStats(),
+          totalDurationMs,
+        },
       };
     } catch (error) {
+      // Save checkpoint on error
+      this.saveCheckpoint(taskId, { error: error.message });
+      
       return {
         success: false,
         error: error.message,
-        executionStats: this.getExecutionStats(),
+        executionStats: {
+          ...this.getExecutionStats(),
+          totalDurationMs: Date.now() - startTime,
+        },
       };
     }
+  }
+
+  /**
+   * Calculate progress percentage.
+   */
+  calculateProgress(results, subGoals) {
+    if (!subGoals || subGoals.length === 0) return 0;
+    const completed = results.filter(r => r.success).length;
+    return Math.round((completed / subGoals.length) * 100);
+  }
+
+  /**
+   * Check for new goals in daemon mode.
+   */
+  async checkForNewGoals(context) {
+    // In daemon mode, this would check for new tasks/goals from a queue
+    // For now, return empty
+    return [];
   }
 
   /**

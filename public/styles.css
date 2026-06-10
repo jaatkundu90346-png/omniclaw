@@ -1169,6 +1169,16 @@ h3 {
   background: rgba(255, 241, 234, 0.86);
 }
 
+.list-button.is-running {
+  border-color: rgba(31, 143, 103, 0.48);
+  box-shadow: inset 3px 0 0 rgba(31, 143, 103, 0.82);
+}
+
+.list-button.is-queued {
+  border-color: rgba(183, 121, 31, 0.46);
+  box-shadow: inset 3px 0 0 rgba(183, 121, 31, 0.76);
+}
+
 .stack-item strong,
 .list-button strong {
   color: var(--text-strong);
@@ -1444,6 +1454,48 @@ h3 {
   }
 }
 
+.chat-tool-card-browser {
+  border-color: rgba(20, 184, 166, 0.32);
+  background:
+    linear-gradient(135deg, rgba(20, 184, 166, 0.09), rgba(13, 17, 23, 0.72)),
+    rgba(13, 17, 23, 0.72);
+}
+
+.chat-tool-card-browser .chat-trace-head strong::before {
+  content: "browser ";
+  color: #5eead4;
+  font-family: var(--sans);
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.browser-proof-grid {
+  display: grid;
+  grid-template-columns: minmax(72px, max-content) minmax(0, 1fr);
+  gap: 5px 10px;
+  padding: 8px;
+  border: 1px solid rgba(94, 234, 212, 0.18);
+  border-radius: 8px;
+  background: rgba(2, 6, 23, 0.34);
+}
+
+.browser-proof-grid span {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+}
+
+.browser-proof-grid strong {
+  min-width: 0;
+  color: var(--text-strong);
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
 .chat-trace-head {
   display: flex;
   align-items: center;
@@ -1466,6 +1518,25 @@ h3 {
   color: var(--text);
   font-size: 0.86rem;
   line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.chat-activity-list {
+  display: grid;
+  gap: 6px;
+}
+
+.chat-activity-row {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  color: var(--text);
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.chat-activity-row span:last-child {
   overflow-wrap: anywhere;
 }
 
