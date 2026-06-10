@@ -83,6 +83,7 @@ function runProcess(command, args, options = {}) {
   return new Promise((resolve) => {
     const wrapped = wrapCommandForSpawn(command, args);
     let settled = false;
+    let outputPoll = null;
     const child = spawn(wrapped.command, wrapped.args, {
       cwd: options.cwd || process.cwd(),
       shell: false,
@@ -99,6 +100,9 @@ function runProcess(command, args, options = {}) {
       }
       settled = true;
       clearTimeout(timer);
+      if (outputPoll) {
+        clearInterval(outputPoll);
+      }
       resolve(result);
     };
     const killTree = () => {
@@ -129,6 +133,35 @@ function runProcess(command, args, options = {}) {
         error: `Codex CLI provider timed out after ${timeoutMs}ms.`,
       });
     }, timeoutMs);
+
+    if (options.outputPath) {
+      let stableHits = 0;
+      let lastSize = -1;
+      outputPoll = setInterval(() => {
+        try {
+          const stat = fs.statSync(options.outputPath);
+          if (stat.size <= 0) {
+            stableHits = 0;
+            lastSize = stat.size;
+            return;
+          }
+          stableHits = stat.size === lastSize ? stableHits + 1 : 0;
+          lastSize = stat.size;
+          if (stableHits >= 1) {
+            killTree();
+            finish({
+              ok: true,
+              exitCode: 0,
+              stdout,
+              stderr,
+              completedFromOutputFile: true,
+            });
+          }
+        } catch {
+          // Output file has not been written yet.
+        }
+      }, 1000);
+    }
 
     child.stdout.on("data", (chunk) => {
       stdout = truncateText(stdout + chunk.toString("utf8"), maxOutput);
@@ -296,6 +329,7 @@ export class CodexCliProvider {
         stdin: input.prompt || "Reply with exactly: ok",
         timeoutMs: Number(input.timeoutMs || 30000),
         maxOutputBytes: 12000,
+        outputPath,
       });
       const fileText = fs.existsSync(outputPath) ? fs.readFileSync(outputPath, "utf8").trim() : "";
       fs.rmSync(outputPath, { force: true });
@@ -364,6 +398,7 @@ export class CodexCliProvider {
       cwd: options.cwd,
       stdin: this.buildPrompt(context),
       timeoutMs: options.timeoutMs,
+      outputPath,
     });
     const fileText = fs.existsSync(outputPath) ? fs.readFileSync(outputPath, "utf8").trim() : "";
     fs.rmSync(outputPath, { force: true });
