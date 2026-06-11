@@ -6560,3 +6560,114 @@ function finalizeStreamingBubble(text, meta) {
     bubble.classList.remove("streaming");
   }
 }
+
+// ─── Embedded Preview Browser ──────────────────────────────────────────────
+// Opens agent-built artifacts (HTML/images) inside the Live workspace panel
+// via the server's /preview/ route, instead of the OS browser. Includes a
+// one-line "Edit with OmniClaw" box that sends an edit task for the open file.
+(() => {
+  const frame = document.querySelector("#preview-frame");
+  const pathInput = document.querySelector("#preview-path");
+  const openButton = document.querySelector("#preview-open");
+  const refreshButton = document.querySelector("#preview-refresh");
+  const closeButton = document.querySelector("#preview-close");
+  const editRow = document.querySelector("#preview-edit-row");
+  const editInput = document.querySelector("#preview-edit-instruction");
+  const editButton = document.querySelector("#preview-edit-send");
+  const panel = document.querySelector(".manus-computer-panel");
+  if (!frame || !pathInput || !openButton) {
+    return;
+  }
+
+  let currentPath = "";
+
+  function normalizePreviewPath(value) {
+    let text = String(value || "").trim().replace(/\\/g, "/");
+    if (!text) return "";
+    text = text.replace(/^https?:\/\/[^/]+\/preview\//i, "");
+    text = text.replace(/^file:\/\/\/?.*?(output|scratch|public|workspace|docs|data)\//i, "$1/");
+    return text.replace(/^\/+/, "");
+  }
+
+  function openPreview(relPath) {
+    const normalized = normalizePreviewPath(relPath);
+    if (!normalized) return;
+    currentPath = normalized;
+    pathInput.value = normalized;
+    frame.src = `/preview/${normalized.split("/").map(encodeURIComponent).join("/")}?t=${Date.now()}`;
+    frame.hidden = false;
+    editRow.hidden = false;
+    closeButton.hidden = false;
+    panel?.classList.add("preview-active");
+  }
+
+  function closePreview() {
+    frame.src = "about:blank";
+    frame.hidden = true;
+    editRow.hidden = true;
+    closeButton.hidden = true;
+    panel?.classList.remove("preview-active");
+    currentPath = "";
+  }
+
+  openButton.addEventListener("click", () => openPreview(pathInput.value));
+  pathInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      openPreview(pathInput.value);
+    }
+  });
+  refreshButton?.addEventListener("click", () => {
+    if (currentPath) openPreview(currentPath);
+  });
+  closeButton?.addEventListener("click", closePreview);
+
+  editButton?.addEventListener("click", async () => {
+    const instruction = String(editInput?.value || "").trim();
+    if (!instruction || !currentPath) return;
+    editButton.disabled = true;
+    editButton.textContent = "Editing...";
+    try {
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: `${currentPath} file ko edit karo: ${instruction}. Edit ke baad read_file se verify karo. Koi aur file mat chhedna.`,
+          label: "preview-edit",
+          agentId: "main",
+        }),
+      });
+      await response.json().catch(() => null);
+    } catch {
+      // Edit run may outlive this request; the refresh below still helps.
+    }
+    editButton.disabled = false;
+    editButton.textContent = "Edit";
+    if (editInput) editInput.value = "";
+    if (currentPath) openPreview(currentPath);
+  });
+
+  // Auto-open the last HTML artifact the agent wrote when a run finishes.
+  function previewPathFromToolOutputs(toolOutputs = []) {
+    for (let i = toolOutputs.length - 1; i >= 0; i -= 1) {
+      const item = toolOutputs[i] || {};
+      const output = item.output || {};
+      const candidate = String(output.path || (item.input && item.input.path) || "").replace(/\\/g, "/");
+      if (/\.html?$/i.test(candidate) && /^(output|scratch|public|workspace|docs|data)\//i.test(candidate)) {
+        return candidate;
+      }
+    }
+    return "";
+  }
+
+  if (typeof renderComputerEvidence === "function") {
+    const originalRender = renderComputerEvidence;
+    renderComputerEvidence = function patchedRenderComputerEvidence(data = {}) {
+      originalRender(data);
+      const artifactPath = previewPathFromToolOutputs(Array.isArray(data.toolOutputs) ? data.toolOutputs : []);
+      if (artifactPath) {
+        openPreview(artifactPath);
+      }
+    };
+  }
+})();

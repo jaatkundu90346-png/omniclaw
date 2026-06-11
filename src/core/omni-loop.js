@@ -61,6 +61,49 @@ function parseToolArguments(raw) {
   }
 }
 
+// Some models drift out of native function calling and write tool calls as
+// JSON text instead. Scan the text for {"type":"tool_call",...} (or
+// {"tool":...,"args":...}) objects with a brace-matching pass so those calls
+// still execute instead of being mistaken for a final answer.
+function extractTextModeToolCalls(text = "", allowedToolIds = new Set(), maxCalls = 5) {
+  const source = String(text || "");
+  const calls = [];
+  let searchFrom = 0;
+  while (calls.length < maxCalls) {
+    const start = source.indexOf("{", searchFrom);
+    if (start === -1) break;
+    let depth = 0;
+    let end = -1;
+    let inString = false;
+    let escaped = false;
+    for (let i = start; i < source.length && i < start + 20000; i += 1) {
+      const ch = source[i];
+      if (escaped) { escaped = false; continue; }
+      if (ch === "\\") { escaped = true; continue; }
+      if (ch === '"') { inString = !inString; continue; }
+      if (inString) continue;
+      if (ch === "{") depth += 1;
+      if (ch === "}") {
+        depth -= 1;
+        if (depth === 0) { end = i; break; }
+      }
+    }
+    if (end === -1) break;
+    searchFrom = end + 1;
+    try {
+      const parsed = JSON.parse(source.slice(start, end + 1));
+      const tool = String(parsed.tool || parsed.name || "").trim();
+      const looksLikeCall = parsed.type === "tool_call" || (tool && (parsed.args !== undefined || parsed.input !== undefined || parsed.arguments !== undefined));
+      if (looksLikeCall && tool && allowedToolIds.has(tool)) {
+        calls.push({ tool, input: parsed.args || parsed.input || parsed.arguments || {} });
+      }
+    } catch {
+      // Not valid JSON; keep scanning from the next brace.
+    }
+  }
+  return calls;
+}
+
 // Tools the model sees first; everything else follows in registry order.
 const CORE_TOOL_ORDER = [
   "read_file",
@@ -210,6 +253,7 @@ export class OmniLoop {
         "## Agent Loop Contract (OmniLoop)",
         "",
         "You are running inside a persistent transcript loop with native function tools.",
+        `- Workspace file tools (read_file, write_file, list_files, edit, apply_patch) resolve relative paths from the PROJECT ROOT: ${this.runtime.rootDir}. Build absolute paths and file:// URLs from that root, not from the agent workspace folder.`,
         "- Work in small verifiable steps: inspect -> act -> observe -> verify -> finish.",
         "- Call tools directly through the function-calling interface. Never describe a tool call in prose.",
         "- You may request multiple independent tool calls in one turn when they do not depend on each other.",
@@ -426,7 +470,32 @@ export class OmniLoop {
         break;
       }
 
-      const toolCalls = Array.isArray(completion?.toolCalls) ? completion.toolCalls : [];
+      let toolCalls = Array.isArray(completion?.toolCalls) ? completion.toolCalls : [];
+      let recoveredFromText = false;
+
+      if (toolCalls.length === 0) {
+        // Model drifted out of native function calling? Recover tool calls
+        // written as JSON text instead of finalizing on them.
+        const textCalls = extractTextModeToolCalls(completion?.text || "", allowedToolIds, 5);
+        if (textCalls.length > 0) {
+          toolCalls = textCalls.map((call, index) => ({
+            id: `recovered_${round}_${index}`,
+            tool: call.tool,
+            input: call.input,
+          }));
+          recoveredFromText = true;
+          report.recoveredToolCalls += textCalls.length;
+          report.roundDetails.push({ round, status: "text-mode-tool-calls-recovered", count: textCalls.length, tools: textCalls.map((c) => c.tool) });
+          gateway?.addEvent?.("model_tool_loop.missing_tool_call_recovered", {
+            runId: run.id,
+            sessionId: session.id,
+            agentId: agent.id,
+            round,
+            engine: "omni-loop",
+            tools: textCalls.map((c) => c.tool),
+          });
+        }
+      }
 
       if (toolCalls.length === 0) {
         report.finalAnswer = String(completion?.text || "").trim();
@@ -436,28 +505,27 @@ export class OmniLoop {
         break;
       }
 
-      // Preserve the provider's own assistant message shape when available so
-      // the native tool-call transcript stays exactly spec-compliant.
-      const assistantMessage = completion.assistantMessage && completion.assistantMessage.tool_calls
-        ? completion.assistantMessage
-        : {
-            role: "assistant",
-            content: completion?.text || null,
-            tool_calls: toolCalls.map((call, index) => ({
-              id: call.id || `call_${round}_${index}`,
-              type: "function",
-              function: { name: call.tool, arguments: typeof call.input === "string" ? call.input : JSON.stringify(call.input || {}) },
-            })),
-          };
+      // Always rebuild the assistant message with re-serialized arguments.
+      // Models sometimes emit malformed JSON in function.arguments; echoing
+      // that raw string back into the transcript makes the next provider
+      // request fail with a 400, killing the whole run.
+      const normalizedCalls = toolCalls.map((call, index) => ({
+        id: call.id || `call_${round}_${index}`,
+        tool: String(call.tool || call.function?.name || "").trim(),
+        input: parseToolArguments(call.input ?? call.function?.arguments),
+      }));
+      const assistantMessage = {
+        role: "assistant",
+        content: completion?.text || null,
+        tool_calls: normalizedCalls.map((call) => ({
+          id: call.id,
+          type: "function",
+          function: { name: call.tool, arguments: JSON.stringify(call.input) },
+        })),
+      };
       messages.push(assistantMessage);
       report.nativeTranscriptTurns = messages.length;
       report.maxToolCallsPerRound = Math.max(report.maxToolCallsPerRound, toolCalls.length);
-
-      const normalizedCalls = (assistantMessage.tool_calls || []).map((call) => ({
-        id: call.id,
-        tool: call.function?.name || "",
-        input: parseToolArguments(call.function?.arguments),
-      }));
 
       for (const call of normalizedCalls) {
         let output;

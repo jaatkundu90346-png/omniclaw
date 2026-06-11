@@ -2305,6 +2305,29 @@ if (req.method === "POST" && pathname === "/api/chat") {
     return;
   }
 
+  // Embedded preview browser: serve agent-built artifacts (workspace-relative)
+  // so the dashboard can open them in an iframe instead of the OS browser.
+  if ((req.method === "GET" || req.method === "HEAD") && pathname.startsWith("/preview/")) {
+    const previewRoots = ["output", "scratch", "public", "workspace", "docs", "data/generated", "data/browser-screenshots"];
+    const relative = decodeURIComponent(pathname.slice("/preview/".length)).replace(/\\/g, "/").replace(/^\/+/, "");
+    const target = path.resolve(runtimeDir, relative);
+    const insideRoot = previewRoots.some((root) => {
+      const resolvedRoot = path.resolve(runtimeDir, root);
+      const rel = path.relative(resolvedRoot, target);
+      return rel === "" || (rel && !rel.startsWith("..") && !path.isAbsolute(rel));
+    });
+    if (!insideRoot || relative.includes("..")) {
+      sendJson(res, 403, { error: "Preview path is outside allowed roots." });
+      return;
+    }
+    if (fs.existsSync(target) && fs.statSync(target).isFile()) {
+      sendFile(res, target);
+      return;
+    }
+    sendJson(res, 404, { error: "Preview file not found." });
+    return;
+  }
+
 if ((req.method === "GET" || req.method === "HEAD") && pathname === "/") {
     sendFile(res, path.join(publicDir, "index.html"));
     return;

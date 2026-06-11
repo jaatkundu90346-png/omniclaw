@@ -356,6 +356,15 @@
                     <div class="browser-bar">
                       <span></span>
                       <p id="computer-url-status">local://omniclaw/task</p>
+                      <input id="preview-path" class="preview-path-input" type="text" placeholder="output/watch-store/index.html" spellcheck="false" />
+                      <button type="button" class="button button-ghost button-small" id="preview-open">Open</button>
+                      <button type="button" class="button button-ghost button-small" id="preview-refresh" title="Reload preview">&#8635;</button>
+                      <button type="button" class="button button-ghost button-small" id="preview-close" title="Close preview" hidden>&#10005;</button>
+                    </div>
+                    <iframe id="preview-frame" class="preview-frame" title="OmniClaw artifact preview" hidden></iframe>
+                    <div class="preview-edit-row" id="preview-edit-row" hidden>
+                      <input id="preview-edit-instruction" type="text" placeholder="Is page me kya change karna hai? (OmniClaw edit karega)" />
+                      <button type="button" class="button button-primary button-small" id="preview-edit-send">Edit</button>
                     </div>
                     <div class="computer-stage">
                       <span class="stage-orb"></span>
