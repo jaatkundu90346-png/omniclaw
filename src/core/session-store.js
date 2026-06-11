@@ -286,6 +286,17 @@ export class SessionStore {
     return sessions.map((session) => this.summarizeSession(session));
   }
 
+  listSessionSummariesFast(limit = 50) {
+    const max = Math.max(1, Math.min(200, Number(limit || 50)));
+    const parsed = this.readRaw();
+    const sessions = Array.isArray(parsed.sessions) ? parsed.sessions : [];
+    return sessions
+      .map((session) => this.normalizeSession(session))
+      .sort(sortByUpdatedAtDesc)
+      .slice(0, max)
+      .map((session) => this.summarizeSession(session));
+  }
+
   findSessionIndex(data, sessionId) {
     return data.sessions.findIndex((session) => session.id === sessionId);
   }

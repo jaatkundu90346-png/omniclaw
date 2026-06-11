@@ -1,1466 +1,162 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>OmniClaw Gateway Control</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300..800&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet" />
-    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet" />
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23151617'/%3E%3Ctext x='32' y='41' text-anchor='middle' font-family='Arial' font-size='24' font-weight='700' fill='%23f6f0e8'%3EOC%3C/text%3E%3C/svg%3E" />
-    <link rel="stylesheet" href="/styles.css" />
+    <title>OmniClaw</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23171a20'/%3E%3Ctext x='32' y='41' text-anchor='middle' font-family='Segoe UI' font-size='22' font-weight='700' fill='%23ffffff'%3EOC%3C/text%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="/neo.css" />
   </head>
   <body>
-<div class="toast-container" id="toast-container"></div>
-<div id="boot-screen" class="gateway-overlay">
-      <div class="gateway-card">
-        <div class="gateway-header">
-          <div class="brand-mark-large">OC</div>
-          <h2>OmniClaw</h2>
-          <p class="gateway-subtitle">Gateway Dashboard</p>
-          <span class="version-badge">v2026.4.28</span>
-        </div>
-        <form id="first-launch-form" class="gateway-form first-launch-form">
-          <div class="setup-intro">
-            <p class="instructions-title">First launch setup</p>
-            <p>Pick a starter mode. You can change this later from BYOK and Runtime settings.</p>
-          </div>
-          <div class="setup-choice-grid" role="radiogroup" aria-label="Startup mode">
-            <label class="setup-choice">
-              <input type="radio" name="setup-mode" value="offline" checked />
-              <span>
-                <strong>Local task-only mode</strong>
-                <small>Runs tools and memory locally, but will not fake model replies.</small>
-              </span>
-            </label>
-            <label class="setup-choice">
-              <input type="radio" name="setup-mode" value="openai" />
-              <span>
-                <strong>Connect real brain</strong>
-                <small>Store a provider key locally, fetch models, then save a real model.</small>
-              </span>
-            </label>
-          </div>
-          <div id="first-launch-provider-fields" class="setup-provider-fields" hidden>
-            <div class="form-group">
-              <label for="first-provider-profile">Provider</label>
-              <select id="first-provider-profile">
-                <option value="openai">OpenAI</option>
-                <option value="anthropic">Anthropic</option>
-                <option value="gemini">Gemini</option>
-                <option value="groq">Groq</option>
-                <option value="openrouter">OpenRouter</option>
-                <option value="nvidia">NVIDIA NIM</option>
-                <option value="minimax">MiniMax</option>
-                <option value="mistral">Mistral</option>
-                <option value="deepseek">DeepSeek</option>
-                <option value="together">Together</option>
-                <option value="fireworks">Fireworks</option>
-                <option value="codex-cli">OpenAI account (Codex CLI)</option>
-                <option value="local-compatible">Local compatible</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label for="first-provider-base-url">Base URL</label>
-              <input id="first-provider-base-url" type="url" placeholder="https://api.openai.com/v1" autocomplete="off" />
-            </div>
-            <div class="form-group">
-              <label for="first-provider-model">Model</label>
-              <div class="input-with-action">
-                <input id="first-provider-model" list="first-provider-model-list" type="text" placeholder="Fetch models or type model id" autocomplete="off" />
-                <button id="first-provider-fetch-models" type="button" class="btn-icon-text">Fetch</button>
-              </div>
-              <datalist id="first-provider-model-list"></datalist>
-            </div>
-            <div class="form-group">
-              <label for="first-provider-key">API key</label>
-              <input id="first-provider-key" type="password" placeholder="Paste key here" autocomplete="off" />
-            </div>
-          </div>
-          <label class="setup-choice setup-choice-wide">
-            <input type="checkbox" id="first-owner-mode" checked />
-            <span>
-              <strong>Owner mode</strong>
-              <small>Give OmniClaw laptop file search, browser, terminal, and governed write/delete access.</small>
-            </span>
-          </label>
-          <div class="form-group">
-            <label for="first-runtime-profile">Runtime profile</label>
-            <select id="first-runtime-profile">
-              <option value="lite">Lite</option>
-              <option value="balanced" selected>Balanced</option>
-              <option value="power">Power</option>
-            </select>
-          </div>
-          <button type="submit" class="btn-connect">Start OmniClaw</button>
-          <button id="skip-first-launch" type="button" class="setup-skip">Skip setup</button>
-          <p id="first-launch-status" class="setup-status">Ready for first run.</p>
-        </form>
-        <form id="gateway-connect-form" class="gateway-form">
-          <div class="form-group">
-            <label for="ws-url">WebSocket URL</label>
-            <input type="text" id="ws-url" value="ws://localhost:3147" />
-          </div>
-          <div class="form-group">
-            <label for="gw-token">Gateway Token</label>
-            <div class="input-with-toggle">
-              <input type="password" id="gw-token" placeholder="Auto-connect enabled" />
-              <button type="button" class="toggle-visibility" onclick="toggleTokenVisibility()">👁</button>
-            </div>
-          </div>
-          <div class="form-group">
-            <label for="gw-password">Password <span class="label-hint">(not stored)</span></label>
-            <input type="password" id="gw-password" placeholder="optional" />
-          </div>
-          <button type="submit" class="btn-connect">Connect</button>
-        </form>
-        <div class="gateway-instructions">
-          <p class="instructions-title">How to connect</p>
-          <ol>
-            <li>Start the gateway on your host machine:<br><code>node server.js</code></li>
-            <li>Get a tokenized dashboard URL or use default port.</li>
-            <li>Paste the WebSocket URL and token above.</li>
-          </ol>
-          <a href="#" class="docs-link">Read the docs →</a>
-        </div>
-      </div>
-    </div>
-    <div class="shell">
-      <aside class="rail" aria-label="Primary navigation">
-        <div class="rail-header">
-          <div class="brand-mark"><span class="material-symbols-rounded" style="font-size:22px">auto_awesome</span></div>
-          <div>
-            <p class="eyebrow">Gateway control</p>
-            <h1>OmniClaw</h1>
-          </div>
-          <button id="rail-toggle" type="button" class="icon-button rail-toggle" aria-label="Collapse sidebar" aria-pressed="false">
-            <span class="material-symbols-rounded">dock_to_right</span>
-          </button>
-        </div>
-
-        <div class="rail-status">
-          <div>
-            <strong id="nav-provider">mock provider</strong>
-            <span id="nav-profile">balanced profile</span>
-          </div>
-          <span class="status-lamp" aria-hidden="true"></span>
-        </div>
-
-        <div id="rail-health" class="rail-health">Loading gateway status...</div>
-
-        <div class="nav-scroll">
-        <div class="nav-group">
-          <p class="nav-group-title">WORK</p>
-          <a href="#chat-panel" class="nav-link active">
-            <span class="material-symbols-rounded nav-icon">chat_bubble</span> Chat
-          </a>
-        </div>
-
-        <div class="nav-group">
-          <p class="nav-group-title">CONTROL CENTER</p>
-          <a href="#overview-panel" class="nav-link"><span class="material-symbols-rounded nav-icon">dashboard</span> Dashboard</a>
-          <a href="#sessions-panel" class="nav-link"><span class="material-symbols-rounded nav-icon">history</span> Task history</a>
-          <a href="#execution-panel" class="nav-link"><span class="material-symbols-rounded nav-icon">terminal</span> Terminal</a>
-          <a href="#scheduler-panel" class="nav-link"><span class="material-symbols-rounded nav-icon">schedule</span> Scheduled</a>
-          <a href="#connectors-panel" class="nav-link"><span class="material-symbols-rounded nav-icon">cable</span> Channels</a>
-        </div>
-
-        <div class="nav-group">
-          <p class="nav-group-title">AGENT</p>
-          <a href="#agents-panel" class="nav-link">
-            <span class="material-symbols-rounded nav-icon">smart_toy</span> Agents
-          </a>
-          <a href="#skill-panel" class="nav-link">
-            <span class="material-symbols-rounded nav-icon">bolt</span> Skills
-          </a>
-          <a href="#trust-panel" class="nav-link"><span class="material-symbols-rounded nav-icon">devices</span> Devices</a>
-          <a href="#memory-panel" class="nav-link"><span class="material-symbols-rounded nav-icon">psychology</span> Memory</a>
-          <a href="#research-panel" class="nav-link"><span class="material-symbols-rounded nav-icon">travel_explore</span> Research</a>
-        </div>
-
-        <div class="nav-group">
-          <p class="nav-group-title">SETTINGS</p>
-          <a href="#runtime-panel" class="nav-link"><span class="material-symbols-rounded nav-icon">admin_panel_settings</span> Permissions</a>
-          <a href="#provider-panel" class="nav-link"><span class="material-symbols-rounded nav-icon">neurology</span> Brain setup</a>
-          <a href="#design-panel" class="nav-link"><span class="material-symbols-rounded nav-icon">palette</span> Design system</a>
-          <a href="#plugin-panel" class="nav-link"><span class="material-symbols-rounded nav-icon">extension</span> Plugins</a>
-        </div>
-        </div>
-
-        <div class="rail-footer">
-          <div class="rail-footer-user">
-            <div class="user-avatar"><span class="material-symbols-rounded">person</span></div>
+    <div class="app-shell">
+      <!-- Sidebar -->
+      <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+          <div class="brand">
+            <span class="brand-mark">OC</span>
             <div>
-              <strong>Operator</strong>
-              <span>Local session</span>
+              <strong>OmniClaw</strong>
+              <small>Agent workspace</small>
             </div>
           </div>
-          <a href="#" class="nav-link nav-link-docs"><span class="material-symbols-rounded nav-icon">menu_book</span> Docs</a>
+          <button class="icon-button" id="theme-toggle" title="Toggle theme"><span class="icon-sun"></span></button>
+        </div>
+
+        <button class="new-chat-button" id="new-chat"><span class="line-icon plus"></span>New session</button>
+
+        <nav class="main-nav">
+          <button class="nav-item active" data-view="chat"><span class="line-icon chat"></span>Chat</button>
+          <button class="nav-item" data-view="skills"><span class="line-icon spark"></span>Skills &amp; Tools</button>
+          <button class="nav-item" data-view="plugins"><span class="line-icon grid"></span>Plugins</button>
+          <button class="nav-item" data-view="agents"><span class="line-icon agent"></span>Agents</button>
+          <button class="nav-item" data-view="messaging"><span class="line-icon inbox"></span>Messaging</button>
+          <button class="nav-item" data-view="automations"><span class="line-icon clock"></span>Automations</button>
+          <button class="nav-item" data-view="memory"><span class="line-icon memory"></span>Memory</button>
+          <button class="nav-item" data-view="settings"><span class="line-icon settings"></span>Settings</button>
+        </nav>
+
+        <div class="session-pane">
+          <label class="search-field">
+            <span class="line-icon search"></span>
+            <input id="sidebar-search" type="text" placeholder="Search sessions" spellcheck="false" />
+          </label>
+          <p class="section-title">Sessions</p>
+          <div id="session-list" class="session-list"></div>
+        </div>
+
+        <div class="sidebar-footer">
+          <a href="/classic/index.html" target="_blank" rel="noopener">Classic dashboard</a>
+          <div id="provider-pill" class="provider-pill">
+            <span class="status-dot"></span>
+            <span id="provider-pill-text" class="grow">Checking provider</span>
+          </div>
         </div>
       </aside>
 
-      <div class="workspace">
-        <div class="topbar">
-          <div class="breadcrumb">
-            <span>OmniClaw</span>
-            <span aria-hidden="true">›</span>
-            <strong id="route-crumb">Chat</strong>
+      <!-- Main -->
+      <main class="main">
+        <header class="topbar">
+          <button class="icon-button" id="sidebar-toggle" title="Toggle sidebar"><span class="line-icon menu"></span></button>
+          <div class="title-stack">
+            <strong id="main-title-text">New session</strong>
+            <small id="main-subtitle">Local-first agent runtime</small>
           </div>
           <div class="topbar-actions">
-            <button id="topbar-rail-toggle" type="button" class="icon-button" aria-label="Toggle sidebar">
-              <span class="material-symbols-rounded">menu_open</span>
-            </button>
-            <label class="topbar-search" for="global-search">
-              <input id="global-search" type="search" placeholder="Search" />
-              <span>Ctrl K</span>
-            </label>
-            <button id="topbar-overview" type="button" class="icon-button is-active" aria-label="Gateway screen"><span class="material-symbols-rounded">dashboard</span></button>
-            <button id="topbar-density" type="button" class="icon-button" aria-label="Compact density"><span class="material-symbols-rounded">density_medium</span></button>
-            <button id="topbar-theme" type="button" class="icon-button" aria-label="Dark mode"><span class="material-symbols-rounded">dark_mode</span></button>
-          </div>
-        </div>
-        <div class="main-content" id="main-content">
-<header class="hero">
-          <div class="hero-copy">
-            <p class="eyebrow">Gateway control</p>
-            <h2>OmniClaw Control</h2>
-            <p class="hero-body">
-              Gateway status, sessions, tools, approvals, agents, and local runtime controls in one focused operator shell.
-            </p>
-            <div class="hero-actions">
-              <button id="refresh-state" type="button" class="button button-primary">Refresh state</button>
-              <button id="refresh-inspector" type="button" class="button button-ghost">Refresh live feed</button>
-            </div>
-          </div>
-
-          <div class="hero-panel">
-            <div class="hero-panel-heading">
-              <span>Gateway overview</span>
-              <strong>Live local runtime</strong>
-            </div>
-            <div id="hero-metrics" class="hero-metrics">Loading metrics...</div>
-          </div>
-
-          <div class="hero-panel hero-panel-secondary">
-            <div class="hero-panel-heading">
-              <span>Focus</span>
-              <strong>Selected lane</strong>
-            </div>
-            <div id="hero-focus" class="hero-note">Waiting for gateway state...</div>
-            <div class="hero-divider"></div>
-            <div id="hero-last-event" class="hero-note hero-note-compact">No gateway events yet.</div>
+            <select id="agent-select" class="agent-select" title="Active agent"></select>
+            <button class="icon-button" id="dock-toggle" title="Browser and activity panel"><span class="line-icon panel"></span></button>
           </div>
         </header>
 
-        <main class="dashboard">
-          <section id="overview-panel" class="surface surface-overview">
-            <div class="surface-header">
-              <div>
-                <p class="section-kicker">Overview</p>
-                <h3>Gateway and runtime snapshot</h3>
-              </div>
-              <span class="status-chip">SSE + HTTP</span>
-            </div>
-            <div class="surface-body">
-              <div id="event-log" class="event-log">
-                <h3 class="event-log-title">Live Events</h3>
-                <div id="event-log-entries" class="event-log-entries"></div>
-              </div>
-              <div id="inspector-output" class="overview-output">Loading...</div>
-              <div class="split-columns">
-                <div>
-                  <div class="mini-header">
-                    <span>Gateway feed</span>
-                  </div>
-                  <div id="gateway-output" class="stack-list">Loading...</div>
-                </div>
-                <div>
-                  <div class="mini-header">
-                    <span>Recent runs</span>
-                  </div>
-                  <div id="run-output" class="stack-list">Loading...</div>
-                </div>
-              </div>
-              <div class="mini-header">
-                <span>Prompt trace</span>
-              </div>
-              <pre id="prompt-trace-output" class="console-output console-output-compact">Select a recent run or send a chat message to inspect its sanitized prompt trace.</pre>
-              <div class="mini-header">
-                <span>Tool trace</span>
-              </div>
-              <pre id="tool-trace-output" class="console-output console-output-compact">Run a tool-capable request to inspect execution status, timing, inputs, and outputs.</pre>
-            </div>
-          </section>
-
-          <section id="chat-panel" class="surface surface-chat">
-            <div class="manus-command">
-              <div class="manus-command-copy">
-                <p class="section-kicker">Agent workspace</p>
-                <h3>OmniClaw</h3>
-                <p>One task thread with chat, tools, terminal, browser, memory, and progress in the same place.</p>
-              </div>
-              <div class="manus-status-grid" aria-label="Runtime capability status">
-                <span><strong id="manus-provider-status">Brain</strong><small>provider</small></span>
-                <span><strong id="manus-agent-status">main</strong><small>agent</small></span>
-                <span><strong id="manus-tool-status">tools</strong><small>hands</small></span>
-              </div>
-            </div>
-            <div class="surface-header">
-              <div>
-                <p class="section-kicker">Task lane</p>
-                <h3>Agent run</h3>
-              </div>
-              <span id="session-context" class="status-chip status-chip-muted">No session selected</span>
-            </div>
-            <div class="surface-body">
-              <form id="chat-form" class="chat-form">
-                <div class="field-grid">
-                  <div>
-                    <label for="session-label">Session label</label>
-                    <input id="session-label" type="text" placeholder="main" />
-                  </div>
-                  <div>
-                    <label for="agent-select">Agent</label>
-                    <select id="agent-select">
-                      <option value="main">main</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label for="message-intent-hint">Intent</label>
-                    <input id="message-intent-hint" type="text" value="gateway / tools / memory" disabled />
-                  </div>
-                </div>
-                <div class="chat-output-container">
-                  <div class="output-header">
-                    <span>Task conversation</span>
-                    <div class="output-actions">
-                      <button type="button" class="button button-ghost button-small" id="clear-output">Clear chat</button>
-                    </div>
-                  </div>
-                  <div id="chat-transcript" class="chat-transcript">No conversation loaded yet.</div>
-                  <pre id="chat-output" class="console-output chat-output">Waiting for input...</pre>
-                </div>
-                <aside class="manus-computer-panel" aria-label="OmniClaw live workspace">
-                  <div class="computer-panel-head">
-                    <div class="computer-thumb" aria-hidden="true">
-                      <span></span>
-                    </div>
-                    <div>
-                      <strong>Live workspace</strong>
-                      <small id="computer-mode-status">Waiting for a task</small>
-                    </div>
-                    <button type="button" class="icon-button" id="computer-panel-toggle" aria-label="Focus live workspace">▣</button>
-                  </div>
-                  <div class="computer-screen">
-                    <div class="browser-bar">
-                      <span></span>
-                      <p id="computer-url-status">local://omniclaw/task</p>
-                      <input id="preview-path" class="preview-path-input" type="text" placeholder="output/watch-store/index.html" spellcheck="false" />
-                      <button type="button" class="button button-ghost button-small" id="preview-open">Open</button>
-                      <button type="button" class="button button-ghost button-small" id="preview-refresh" title="Reload preview">&#8635;</button>
-                      <button type="button" class="button button-ghost button-small" id="preview-close" title="Close preview" hidden>&#10005;</button>
-                    </div>
-                    <iframe id="preview-frame" class="preview-frame" title="OmniClaw artifact preview" hidden></iframe>
-                    <div class="preview-edit-row" id="preview-edit-row" hidden>
-                      <input id="preview-edit-instruction" type="text" placeholder="Is page me kya change karna hai? (OmniClaw edit karega)" />
-                      <button type="button" class="button button-primary button-small" id="preview-edit-send">Edit</button>
-                    </div>
-                    <div class="computer-stage">
-                      <span class="stage-orb"></span>
-                      <strong>Browser, files, terminal, and memory show up here.</strong>
-                      <p>When a task is running, this area becomes the agent's visible work log.</p>
-                    </div>
-                  </div>
-                  <div class="computer-progress-card">
-                    <div class="progress-title">
-                      <strong>Task progress</strong>
-                      <span id="computer-progress-count">0/0</span>
-                    </div>
-                    <div id="live-run-output" class="live-run-output">No active run.</div>
-                  </div>
-                </aside>
-                <div class="message-composer">
-                  <label for="message">Message</label>
-                  <textarea
-                    id="message"
-                    rows="4"
-                    placeholder="Ask OmniClaw to research, build, inspect files, run a command, browse a page, or automate a workflow..."
-                  ></textarea>
-                </div>
-                <div class="manus-prompt-row" aria-label="Quick task prompts">
-                  <button type="button" class="prompt-chip" data-prompt="create a short slide outline for OmniClaw v2 architecture">Create slides</button>
-                  <button type="button" class="prompt-chip" data-prompt="build and test the current OmniClaw project">Build website</button>
-                  <button type="button" class="prompt-chip" data-prompt="develop desktop app packaging plan for OmniClaw Windows exe">Develop desktop apps</button>
-                  <button type="button" class="prompt-chip" data-prompt="redesign OmniClaw UI like Manus with a task lane and computer panel">Design</button>
-                  <button type="button" class="prompt-chip" data-prompt="show all OmniClaw tools, skills, memory, browser, terminal, scheduler, and gateway status">More</button>
-                </div>
-                <div class="chat-actions">
-                  <button type="submit" class="button button-primary">Start task</button>
-                  <button type="button" class="button button-ghost" id="abort-run" disabled title="Stop the currently running task only. It does not delete chat history.">Stop task</button>
-                  <small class="stop-help">Stops only the active run. Chat history stays saved.</small>
-                </div>
-              </form>
-            </div>
-          </section>
-
-          <section id="sessions-panel" class="surface surface-sessions">
-            <div class="surface-header">
-              <div>
-                <p class="section-kicker">Sessions</p>
-                <h3>Active and archived lanes</h3>
-              </div>
-              <div class="hero-actions">
-                <button id="cleanup-history" type="button" class="button button-ghost button-small">Clean old bad chats</button>
-                <button id="reset-session" type="button" class="button button-ghost button-small">Reset selected</button>
-              </div>
-            </div>
-            <div class="surface-body">
-              <div id="session-output" class="stack-list">Loading...</div>
-            </div>
-          </section>
-
-          <section id="system-panel" class="surface">
-            <div class="surface-header">
-              <div>
-                <p class="section-kicker">System</p>
-                <h3>Host Monitor</h3>
-              </div>
-              <button id="refresh-system-button" class="button button-muted">Refresh</button>
-            </div>
-            <div class="surface-body">
-              <div id="system-stats-output" class="metric-strip">Loading system stats...</div>
-              <div id="process-list-output" class="detail-pane" style="max-height: 200px; font-size: 0.8rem; overflow-y: auto;">Loading processes...</div>
-            </div>
-          </section>
-          <section id="worker-panel" class="surface">
-            <div class="surface-header">
-              <div>
-                <p class="section-kicker">Automation</p>
-                <h3>Background Jobs</h3>
-              </div>
-              <div id="job-worker-status" class="status-chip status-chip-muted">Idle</div>
-            </div>
-            <div class="surface-body">
-              <div id="active-jobs-output" class="stack-list">
-                <div class="empty-state">No active background jobs.</div>
-              </div>
-            </div>
-          </section>
-          <section id="channel-summary-panel" class="surface">
-            <div class="surface-header">
-              <div>
-                <p class="section-kicker">Connectors</p>
-                <h3>Messaging Channels</h3>
-              </div>
-            </div>
-            <div class="surface-body">
-              <div id="connector-status-output" class="stack-list">
-                <div class="empty-state">Loading channels...</div>
-              </div>
-            </div>
-          </section>
-
-          <section id="delegations-panel" class="surface surface-delegations">
-            <div class="surface-header">
-              <div>
-                <p class="section-kicker">Delegation</p>
-                <h3>Multi-agent task inbox</h3>
-              </div>
-              <span id="delegation-context" class="status-chip status-chip-muted">No delegation state loaded</span>
-            </div>
-            <div class="surface-body">
-              <form id="delegation-form" class="stack-form">
-                <div class="field-grid">
-                  <div>
-                    <label for="delegation-agent">Target agent</label>
-                    <select id="delegation-agent">
-                      <option value="research">Research</option>
-                      <option value="builder">Builder</option>
-                      <option value="ops">Ops</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label for="delegation-source">Source context</label>
-                    <input id="delegation-source" type="text" value="Selected session" disabled />
-                  </div>
-                  <div>
-                    <label for="delegation-mode">Mode</label>
-                    <input id="delegation-mode" type="text" value="Fire-and-track" disabled />
-                  </div>
-                </div>
-                <label for="delegation-instruction">Task for sub-agent</label>
-                <textarea id="delegation-instruction" rows="3" placeholder="Research OpenClaw gateway auth and summarize risks"></textarea>
-                <button type="submit" class="button button-primary">Delegate task</button>
-              </form>
-              <pre id="delegation-feedback" class="console-output console-output-compact">No manual delegation yet.</pre>
-              <div id="delegation-output" class="stack-list">Loading...</div>
-            </div>
-          </section>
-
-          <section class="surface surface-session-detail">
-            <div class="surface-header">
-              <div>
-                <p class="section-kicker">Transcript</p>
-                <h3>Selected session detail</h3>
-              </div>
-              <div id="session-summary-pill" class="status-chip status-chip-muted" style="display:none;">Summary available</div>
-            </div>
-            <div class="surface-body">
-              <div id="session-summary-box" class="summary-card" style="display:none; margin-bottom: 16px; border-left: 4px solid var(--accent);">
-                <h4>Rolling Summary</h4>
-                <p id="session-summary-text"></p>
-              </div>
-              <div id="session-detail-output" class="detail-pane">Select a session to inspect its transcript.</div>
-            </div>
-          </section>
-
-          <section id="agents-panel" class="surface surface-agents">
-            <div class="surface-header">
-              <div>
-                <p class="section-kicker">Agents</p>
-                <h3>Routed lanes and restrictions</h3>
-              </div>
-              <span class="status-chip status-chip-muted">Profile + tools + workspace</span>
-            </div>
-            <div class="surface-body surface-body-split">
-              <div>
-                <div class="mini-header">
-                  <span>Available agents</span>
-                </div>
-                <div id="agent-output" class="stack-list">Loading...</div>
-              </div>
-              <div>
-                <div class="mini-header">
-                  <span>Selected agent detail</span>
-                </div>
-                <div id="agent-detail-output" class="detail-pane">Select an agent to inspect its lane.</div>
-              </div>
-            </div>
-          </section>
-
-          <section id="approvals-panel" class="surface surface-approvals">
-            <div class="surface-header">
-              <div>
-                <p class="section-kicker">Approvals</p>
-                <h3>Pending review items</h3>
-              </div>
-              <button id="approve-latest" type="button" class="button button-ghost button-small">Approve latest</button>
-            </div>
-            <div class="surface-body">
-              <div id="approval-output" class="stack-list">Loading...</div>
-            </div>
-          </section>
-
-          <section id="execution-panel" class="surface surface-execution">
-            <div class="surface-header">
-              <div>
-                <p class="section-kicker">Execution</p>
-                <h3>Shell policy and audit</h3>
-              </div>
-              <span id="shell-audit-context" class="status-chip status-chip-muted">No shell audit loaded</span>
-            </div>
-            <div class="surface-body surface-body-split">
-              <div>
-                <form id="shell-audit-form" class="stack-form">
-                  <div class="field-grid">
-                    <div>
-                      <label for="shell-audit-risk">Risk</label>
-                      <select id="shell-audit-risk">
-                        <option value="">all</option>
-                        <option value="low">low</option>
-                        <option value="medium">medium</option>
-                        <option value="high">high</option>
-                        <option value="blocked">blocked</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label for="shell-audit-status">Status</label>
-                      <select id="shell-audit-status">
-                        <option value="">all</option>
-                        <option value="pending">pending</option>
-                        <option value="completed">completed</option>
-                        <option value="failed">failed</option>
-                        <option value="blocked">blocked</option>
-                        <option value="timeout">timeout</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label for="shell-audit-query">Search</label>
-                      <input id="shell-audit-query" type="text" placeholder="command, run, approval" />
-                    </div>
-                  </div>
-                  <button type="submit" class="button button-primary">Filter audit</button>
-                </form>
-                <div id="shell-policy-output" class="detail-pane">Loading shell policy...</div>
-                <form id="shell-policy-form" class="stack-form plugin-config-form">
-                  <div class="field-grid">
-                    <div class="form-row">
-              <label for="policy-trust-level">Trust Level</label>
-              <select id="policy-trust-level">
-                <option value="protected">Protected (Always ask)</option>
-                <option value="balanced">Balanced (Auto-approve Low Risk)</option>
-                <option value="full">Full Access (Auto-approve All)</option>
-              </select>
-            </div>
-            <div class="form-row">
-              <label for="policy-allowlist-mode">Allowlist Mode</label>
-                      <select id="shell-policy-mode">
-                        <option value="advisory">advisory</option>
-                        <option value="enforce">enforce</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label for="shell-policy-timeout">Timeout ms</label>
-                      <input id="shell-policy-timeout" type="number" min="1000" max="120000" step="1000" />
-                    </div>
-                    <div>
-                      <label for="shell-policy-output-limit">Output bytes</label>
-                      <input id="shell-policy-output-limit" type="number" min="1024" max="256000" step="1024" />
-                    </div>
-                  </div>
-                  <label for="shell-policy-allowlist">Allowlist regex patterns</label>
-                  <textarea id="shell-policy-allowlist" rows="7" placeholder="One regex per line"></textarea>
-                  <label for="shell-policy-blocked">Blocked regex patterns</label>
-                  <textarea id="shell-policy-blocked" rows="7" placeholder="One regex per line"></textarea>
-                  <button type="submit" class="button button-primary">Save shell policy</button>
-                  <pre id="shell-policy-feedback" class="console-output console-output-compact">No policy changes yet.</pre>
-                </form>
-              </div>
-              <div>
-                <div class="mini-header">
-                  <span>Audit records</span>
-                </div>
-                <div id="shell-audit-output" class="stack-list">Loading...</div>
-                <div class="mini-header mini-header-spaced">
-                  <span>Selected record</span>
-                </div>
-                <div id="shell-audit-detail-output" class="detail-pane">Select an audit record.</div>
-              </div>
-            </div>
-          </section>
-
-          <section id="connectors-panel" class="surface surface-connectors">
-            <div class="surface-header">
-              <div>
-                <p class="section-kicker">Connectors</p>
-                <h3>Webhook and file-drop intake</h3>
-              </div>
-              <div class="hero-actions">
-                <span id="connectors-context" class="status-chip status-chip-muted">No connectors loaded</span>
-                <button id="scan-file-drop" type="button" class="button button-ghost button-small">Scan inbox</button>
-              </div>
-            </div>
-            <div class="surface-body surface-body-split">
-              <div>
-                <div class="connector-security-card">
-                  <div class="mini-header">
-                    <span>Connector security</span>
-                  </div>
-                  <div id="connector-security-output" class="stack-list">Loading connector policy...</div>
-                  <div class="check-grid">
-                    <label class="check-row" for="webhook-enabled">
-                      <input id="webhook-enabled" type="checkbox" checked />
-                      <span>Webhook enabled</span>
-                    </label>
-                    <label class="check-row" for="webhook-require-token">
-                      <input id="webhook-require-token" type="checkbox" />
-                      <span>Require webhook token</span>
-                    </label>
-                    <label class="check-row" for="file-drop-enabled">
-                      <input id="file-drop-enabled" type="checkbox" checked />
-                      <span>File-drop enabled</span>
-                    </label>
-                    <label class="check-row" for="webhook-allow-payload-agent">
-                      <input id="webhook-allow-payload-agent" type="checkbox" checked />
-                      <span>Allow payload route</span>
-                    </label>
-                    <label class="check-row" for="file-drop-archive-processed">
-                      <input id="file-drop-archive-processed" type="checkbox" />
-                      <span>Archive processed files</span>
-                    </label>
-                    <label class="check-row" for="attachment-ingestion-enabled">
-                      <input id="attachment-ingestion-enabled" type="checkbox" checked />
-                      <span>Auto attachment ingest</span>
-                    </label>
-                    <label class="check-row" for="attachment-auto-cache">
-                      <input id="attachment-auto-cache" type="checkbox" checked />
-                      <span>Auto cache files</span>
-                    </label>
-                    <label class="check-row" for="attachment-auto-extract">
-                      <input id="attachment-auto-extract" type="checkbox" checked />
-                      <span>Auto extract text</span>
-                    </label>
-                    <label class="check-row" for="attachment-auto-inject">
-                      <input id="attachment-auto-inject" type="checkbox" />
-                      <span>Auto send extracts to session</span>
-                    </label>
-                    <label class="check-row" for="attachment-retention-enabled">
-                      <input id="attachment-retention-enabled" type="checkbox" checked />
-                      <span>Attachment retention</span>
-                    </label>
-                    <label class="check-row" for="attachment-media-analysis-enabled">
-                      <input id="attachment-media-analysis-enabled" type="checkbox" />
-                      <span>Media analysis</span>
-                    </label>
-                    <label class="check-row" for="attachment-media-auto-analyze">
-                      <input id="attachment-media-auto-analyze" type="checkbox" />
-                      <span>Auto analyze media</span>
-                    </label>
-                  </div>
-                  <div class="field-grid">
-                    <div>
-                      <label for="webhook-default-agent">Webhook route agent</label>
-                      <input id="webhook-default-agent" type="text" placeholder="main" />
-                    </div>
-                    <div>
-                      <label for="file-drop-default-agent">File-drop route agent</label>
-                      <input id="file-drop-default-agent" type="text" placeholder="main" />
-                    </div>
-                    <div>
-                      <label for="attachment-max-count">Max attachments</label>
-                      <input id="attachment-max-count" type="number" min="1" max="10" value="3" />
-                    </div>
-                    <div>
-                      <label for="attachment-max-cache-bytes">Max cache bytes</label>
-                      <input id="attachment-max-cache-bytes" type="number" min="1024" value="5000000" />
-                    </div>
-                    <div>
-                      <label for="attachment-retention-days">Retention days</label>
-                      <input id="attachment-retention-days" type="number" min="1" max="365" value="14" />
-                    </div>
-                    <div>
-                      <label for="attachment-retention-bytes">Retention bytes</label>
-                      <input id="attachment-retention-bytes" type="number" min="1024" value="100000000" />
-                    </div>
-                    <div>
-                      <label for="attachment-media-preset">Media preset</label>
-                      <select id="attachment-media-preset">
-                        <option value="">custom</option>
-                        <option value="mock">mock offline</option>
-                        <option value="local-tesseract">local tesseract OCR</option>
-                        <option value="local-whisper">local whisper CLI</option>
-                        <option value="local-command">local command</option>
-                        <option value="http-json">http-json endpoint</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label for="attachment-media-provider">Media provider</label>
-                      <select id="attachment-media-provider">
-                        <option value="mock">mock</option>
-                        <option value="http-json">http-json</option>
-                        <option value="local-command">local-command</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label for="attachment-media-model">Media model</label>
-                      <input id="attachment-media-model" type="text" placeholder="optional" />
-                    </div>
-                    <div>
-                      <label for="attachment-media-endpoint">Media endpoint</label>
-                      <input id="attachment-media-endpoint" type="text" placeholder="https://.../analyze" />
-                    </div>
-                    <div>
-                      <label for="attachment-media-api-key">Media API key</label>
-                      <input id="attachment-media-api-key" type="password" placeholder="optional, shown once" />
-                    </div>
-                    <div>
-                      <label for="attachment-media-command">Local command</label>
-                      <input id="attachment-media-command" type="text" placeholder="tesseract" />
-                    </div>
-                    <div>
-                      <label for="attachment-media-args">Local args</label>
-                      <textarea id="attachment-media-args" rows="3" placeholder="{file}&#10;stdout"></textarea>
-                    </div>
-                    <div>
-                      <label for="attachment-media-test-kind">Test media kind</label>
-                      <select id="attachment-media-test-kind">
-                        <option value="">base policy</option>
-                        <option value="image">image route</option>
-                        <option value="audio">audio route</option>
-                        <option value="video">video route</option>
-                        <option value="pdf">PDF route</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label for="attachment-media-routes">Media routes JSON</label>
-                      <textarea id="attachment-media-routes" rows="6" placeholder='{"image":{"enabled":true,"provider":"local-command","command":"tesseract","args":["{file}","stdout"]}}'></textarea>
-                    </div>
-                  </div>
-                  <div class="hero-actions connector-actions">
-                    <button id="save-connector-config" type="button" class="button button-primary button-small">Save policy</button>
-                    <button id="test-media-provider" type="button" class="button button-ghost button-small">Test media provider</button>
-                    <button id="check-media-setup" type="button" class="button button-ghost button-small">Check local engines</button>
-                    <button id="build-media-install-plan" type="button" class="button button-ghost button-small">Build install plan</button>
-                    <button id="apply-media-setup" type="button" class="button button-ghost button-small">Apply detected routes</button>
-                    <button id="cleanup-attachment-cache" type="button" class="button button-ghost button-small">Clean cache</button>
-                    <button id="schedule-attachment-cleanup" type="button" class="button button-ghost button-small">Schedule daily cleanup</button>
-                    <button id="rotate-webhook-token" type="button" class="button button-ghost button-small">Rotate webhook token</button>
-                  </div>
-                  <div id="attachment-media-setup-output" class="stack-list">Local media engine setup has not been checked yet.</div>
-                  <p class="connector-secret">Tokens are shown once after rotation. Store the token in your external connector.</p>
-                </div>
-                <form id="webhook-test-form" class="stack-form">
-                  <label for="webhook-message">Webhook message</label>
-                  <textarea id="webhook-message" rows="5" placeholder="Message from an external connector"></textarea>
-                  <div class="field-grid">
-                    <div>
-                      <label for="webhook-label">Label</label>
-                      <input id="webhook-label" type="text" placeholder="webhook" />
-                    </div>
-                    <div>
-                      <label for="webhook-agent">Payload agent override</label>
-                      <input id="webhook-agent" type="text" placeholder="optional" />
-                    </div>
-                    <div>
-                      <label for="file-drop-agent">Scan agent override</label>
-                      <input id="file-drop-agent" type="text" placeholder="optional" />
-                    </div>
-                    <div>
-                      <label for="webhook-token">Token</label>
-                      <input id="webhook-token" type="password" placeholder="Required only when enabled" />
-                    </div>
-                  </div>
-                  <button type="submit" class="button button-primary">Send webhook test</button>
-                </form>
-                <pre id="connectors-feedback" class="console-output console-output-compact">No connector actions yet.</pre>
-                <div class="mini-header mini-header-spaced">
-                  <span>Pending file drops</span>
-                </div>
-                <div id="file-drop-pending-output" class="stack-list">Loading...</div>
-              </div>
-              <div>
-                <div class="mini-header">
-                  <span>Adapter framework</span>
-                </div>
-                <form id="adapter-config-form" class="stack-form connector-adapter-form">
-                  <div class="field-grid">
-                    <div>
-                      <label for="adapter-select">Adapter</label>
-                      <select id="adapter-select"></select>
-                    </div>
-                    <div>
-                      <label for="adapter-agent">Route agent</label>
-                      <input id="adapter-agent" type="text" placeholder="main" />
-                    </div>
-                    <div>
-                      <label for="adapter-mode">Mode</label>
-                      <select id="adapter-mode">
-                        <option value="manual">manual</option>
-                        <option value="polling">polling</option>
-                        <option value="gateway">gateway</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label for="adapter-secret">Secret/token</label>
-                      <input id="adapter-secret" type="password" placeholder="Only for Telegram/Discord" />
-                    </div>
-                  </div>
-                  <label class="check-row" for="adapter-enabled">
-                    <input id="adapter-enabled" type="checkbox" checked />
-                    <span>Adapter enabled</span>
-                  </label>
-                  <div class="hero-actions connector-actions">
-                    <button type="submit" class="button button-primary button-small">Save adapter</button>
-                    <button id="test-adapter" type="button" class="button button-ghost button-small">Test adapter</button>
-                    <button id="poll-telegram" type="button" class="button button-ghost button-small">Poll Telegram once</button>
-                    <button id="start-telegram" type="button" class="button button-ghost button-small">Start Telegram</button>
-                    <button id="stop-telegram" type="button" class="button button-ghost button-small">Stop Telegram</button>
-                    <button id="dispatch-discord" type="button" class="button button-ghost button-small">Dry-run Discord</button>
-                    <button id="start-discord" type="button" class="button button-ghost button-small">Start Discord</button>
-                    <button id="stop-discord" type="button" class="button button-ghost button-small">Stop Discord</button>
-                  </div>
-                </form>
-                <div id="connector-adapter-output" class="stack-list">Loading adapters...</div>
-                <div class="mini-header mini-header-spaced">
-                  <span>Adapter deliveries</span>
-                  <span id="adapter-delivery-summary" class="status-chip status-chip-muted">No filters</span>
-                </div>
-                <div class="field-grid connector-filter-grid">
-                  <div>
-                    <label for="adapter-delivery-adapter-filter">Adapter</label>
-                    <select id="adapter-delivery-adapter-filter">
-                      <option value="">all</option>
-                      <option value="telegram">telegram</option>
-                      <option value="discord">discord</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label for="adapter-delivery-status-filter">Status</label>
-                    <select id="adapter-delivery-status-filter">
-                      <option value="">all</option>
-                      <option value="completed">completed</option>
-                      <option value="reply_failed">reply_failed</option>
-                      <option value="failed">failed</option>
-                      <option value="cached">cached</option>
-                      <option value="injected">injected</option>
-                      <option value="sent">reply sent</option>
-                      <option value="disabled">reply disabled</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label for="adapter-delivery-query-filter">Search</label>
-                    <input id="adapter-delivery-query-filter" type="text" placeholder="message, author, run" />
-                  </div>
-                </div>
-                <div id="adapter-delivery-output" class="stack-list">Loading adapter deliveries...</div>
-                <div class="mini-header mini-header-spaced">
-                  <span>Attachment cache</span>
-                </div>
-                <div id="adapter-attachment-cache-output" class="stack-list">Loading attachment cache...</div>
-                <div class="mini-header mini-header-spaced">
-                  <span>Attachment extracts</span>
-                </div>
-                <div id="adapter-attachment-extract-output" class="stack-list">Loading attachment extracts...</div>
-                <div class="mini-header mini-header-spaced">
-                  <span>Attachment media analyses</span>
-                </div>
-                <div id="adapter-attachment-analysis-output" class="stack-list">Loading attachment media analyses...</div>
-                <div class="mini-header mini-header-spaced">
-                  <span>Attachment session injections</span>
-                </div>
-                <div id="adapter-attachment-injection-output" class="stack-list">Loading attachment injections...</div>
-                <div class="mini-header mini-header-spaced">
-                  <span>Attachment cleanup runs</span>
-                </div>
-                <div id="attachment-cleanup-output" class="stack-list">Loading attachment cleanup runs...</div>
-                <div class="mini-header mini-header-spaced">
-                  <span>Adapter retry outbox</span>
-                </div>
-                <div id="adapter-outbox-output" class="stack-list">Loading adapter retry outbox...</div>
-                <div class="mini-header">
-                  <span>Webhook deliveries</span>
-                </div>
-                <div id="webhook-output" class="stack-list">Loading...</div>
-                <div class="mini-header mini-header-spaced">
-                  <span>Processed file drops</span>
-                </div>
-                <div id="file-drop-output" class="stack-list">Loading...</div>
-              </div>
-            </div>
-          </section>
-
-          <section id="runtime-panel" class="surface surface-runtime">
-            <div class="surface-header">
-              <div>
-                <p class="section-kicker">Runtime</p>
-                <h3>Profiles and provider mode</h3>
-              </div>
-            </div>
-            <div class="surface-body">
-              <div class="settings-hub-grid" aria-label="Permissions summary">
-                <div class="settings-hub-card">
-                  <span class="material-symbols-rounded">folder_managed</span>
-                  <strong>File roots</strong>
-                  <small>Laptop search/edit roots stay visible and reversible.</small>
-                </div>
-                <div class="settings-hub-card">
-                  <span class="material-symbols-rounded">terminal</span>
-                  <strong>Terminal policy</strong>
-                  <small>Commands are grouped into allow, ask, and deny.</small>
-                </div>
-                <div class="settings-hub-card">
-                  <span class="material-symbols-rounded">screen_share</span>
-                  <strong>Browser control</strong>
-                  <small>Browser actions, screenshots, and automation status.</small>
-                </div>
-                <div class="settings-hub-card">
-                  <span class="material-symbols-rounded">shield_lock</span>
-                  <strong>Danger gates</strong>
-                  <small>Write/delete remains understandable before it runs.</small>
-                </div>
-              </div>
-              <form id="runtime-form" class="stack-form">
-                <label for="profile">Profile</label>
-                <select id="profile">
-                  <option value="lite">lite</option>
-                  <option value="balanced">balanced</option>
-                  <option value="power">power</option>
-                </select>
-                <label for="provider-mode">Provider mode</label>
-                <select id="provider-mode">
-                  <option value="mock">mock</option>
-                  <option value="openai-compatible">openai-compatible</option>
-                  <option value="codex-cli">codex-cli</option>
-                </select>
-                <label for="provider-model">Model</label>
-                <input id="provider-model" type="text" placeholder="gpt-4o-mini" />
-                <button type="submit" class="button button-primary">Apply runtime</button>
-              </form>
-              <pre id="runtime-output" class="console-output console-output-compact">No runtime changes yet.</pre>
-            </div>
-          </section>
-
-          <section id="provider-panel" class="surface surface-provider">
-            <div class="surface-header">
-              <div>
-                <p class="section-kicker">Brain setup</p>
-                <h3>Model, endpoint, and API key</h3>
-              </div>
-            </div>
-            <div class="surface-body">
-              <div class="provider-setup-hero">
-                <div>
-                  <p class="section-kicker">One-screen setup</p>
-                  <h4>Choose provider, paste key, fetch models, test, save.</h4>
-                  <p>Base URL is the provider root ending in /v1. OmniClaw builds the chat endpoint and model discovery endpoint automatically.</p>
-                </div>
-                <div class="provider-endpoints">
-                  <span><strong>Chat</strong><small id="provider-chat-endpoint">/chat/completions</small></span>
-                  <span><strong>Models</strong><small id="provider-models-endpoint">/models</small></span>
-                </div>
-              </div>
-              <div class="provider-stepper" aria-label="Brain setup steps">
-                <span class="is-done"><strong>1</strong> Provider</span>
-                <span class="is-done"><strong>2</strong> Key</span>
-                <span><strong>3</strong> Models</span>
-                <span><strong>4</strong> Test</span>
-                <span><strong>5</strong> Save</span>
-              </div>
-              <div class="provider-preset-row" aria-label="Provider presets">
-                <button type="button" class="provider-preset-button" data-provider-preset="openrouter">
-                  <strong>OpenRouter</strong>
-                  <small>200+ models</small>
+        <!-- Chat view -->
+        <section class="view active" id="view-chat">
+          <div class="chat-scroll" id="chat-scroll">
+            <div class="welcome-panel" id="chat-hero">
+              <p class="eyebrow">OmniClaw Agent</p>
+              <h1>What should we<br />work on today?</h1>
+              <p>Files, terminal, browser, web research aur memory — sab real tools ke saath. Task do, evidence ke saath complete hoga.</p>
+              <div class="starter-grid">
+                <button class="starter-card" data-prompt="workspace ki files inspect karke project ka current status aur structure batao">
+                  <span class="app-icon blue">PR</span>
+                  <strong>Inspect project</strong>
+                  <small>Workspace files aur structure ka quick audit</small>
                 </button>
-                <button type="button" class="provider-preset-button" data-provider-preset="openai">
-                  <strong>OpenAI</strong>
-                  <small>native compatible</small>
+                <button class="starter-card" data-prompt="ek modern responsive landing page banao output/landing/ me, phir verify karke preview do">
+                  <span class="app-icon green">WB</span>
+                  <strong>Build a website</strong>
+                  <small>Design, build, verify — embedded browser me preview</small>
                 </button>
-                <button type="button" class="provider-preset-button" data-provider-preset="nvidia">
-                  <strong>NVIDIA NIM</strong>
-                  <small>GLM + hosted models</small>
+                <button class="starter-card" data-prompt="web research karke latest AI agent developments ka summary do with source links">
+                  <span class="app-icon violet">RS</span>
+                  <strong>Deep research</strong>
+                  <small>Multi-source web research with citations</small>
                 </button>
-                <button type="button" class="provider-preset-button" data-provider-preset="minimax">
-                  <strong>MiniMax</strong>
-                  <small>fallback ready</small>
-                </button>
-                <button type="button" class="provider-preset-button" data-provider-preset="codex-cli">
-                  <strong>Codex CLI</strong>
-                  <small>OpenAI account</small>
+                <button class="starter-card" data-prompt="/doctor">
+                  <span class="app-icon amber">DR</span>
+                  <strong>Run diagnostics</strong>
+                  <small>Provider, tools, memory aur gateway health</small>
                 </button>
               </div>
-              <div class="provider-command-panel" aria-label="Quick provider setup">
-                <div class="provider-command-copy">
-                  <strong id="provider-selected-label">OpenAI</strong>
-                  <span id="provider-selected-meta">Choose a provider preset, paste key, choose model, then save.</span>
-                </div>
-                <label class="provider-model-picker-wrap" for="provider-model-picker">
-                  <span>Model <small id="provider-model-count">starter list</small></span>
-                  <select id="provider-model-picker">
-                    <option value="">Choose provider first</option>
-                  </select>
-                </label>
-                <div class="provider-command-actions">
-                  <button id="provider-fetch-models-quick" type="button" class="button button-ghost">Fetch models</button>
-                  <button id="provider-test-quick" type="button" class="button button-ghost">Test</button>
-                  <button id="provider-save-quick" type="submit" form="provider-form" class="button button-primary">Save brain</button>
-                </div>
-                <small id="provider-quick-status" class="provider-quick-status">No provider changes saved yet.</small>
-              </div>
-              <form id="provider-form" class="stack-form">
-                <div class="provider-grid">
-                  <div>
-                    <label for="provider-profile">Provider</label>
-                    <select id="provider-profile">
-                      <option value="openai">OpenAI</option>
-                      <option value="openrouter">OpenRouter</option>
-                      <option value="nvidia">NVIDIA NIM</option>
-                      <option value="minimax">MiniMax</option>
-                      <option value="anthropic">Anthropic</option>
-                      <option value="gemini">Gemini</option>
-                      <option value="groq">Groq</option>
-                      <option value="mistral">Mistral</option>
-                      <option value="deepseek">DeepSeek</option>
-                      <option value="together">Together</option>
-                      <option value="fireworks">Fireworks</option>
-                      <option value="ollama">Ollama</option>
-                      <option value="codex-cli">OpenAI account / Codex CLI</option>
-                      <option value="local-compatible">Local compatible</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label for="provider-key-id">Key vault ID</label>
-                    <input id="provider-key-id" type="text" value="openai" />
-                  </div>
-                  <div class="provider-wide">
-                    <label for="provider-base-url">Base URL</label>
-                    <input id="provider-base-url" type="url" placeholder="https://api.openai.com/v1" autocomplete="off" />
-                  </div>
-                  <div class="provider-wide">
-                    <label for="provider-model-setup">Model</label>
-                    <div class="input-with-action">
-                      <input id="provider-model-setup" list="provider-model-list" type="text" placeholder="Fetch models or type model id" autocomplete="off" />
-                      <button id="provider-fetch-models" type="button" class="btn-icon-text">Fetch</button>
-                    </div>
-                    <datalist id="provider-model-list"></datalist>
-                  </div>
-                </div>
-                <div id="provider-codex-help" class="provider-callout" hidden>
-                  This uses the official Codex CLI login. Install Codex, click Open Codex login, choose Sign in with ChatGPT, then save this profile.
-                </div>
-                <label for="provider-key">API key</label>
-                <input id="provider-key" type="password" placeholder="sk-..." />
-                <label class="check-row" for="provider-remove-key">
-                  <input id="provider-remove-key" type="checkbox" />
-                  Remove stored key for this Key ID
-                </label>
-                <div class="hero-actions">
-                  <button type="submit" class="button button-primary">Save and test brain</button>
-                  <button id="test-provider" type="button" class="button button-ghost">Test readiness</button>
-                  <button id="open-codex-login" type="button" class="button button-ghost">Open Codex setup</button>
-                </div>
-              </form>
-              <div id="provider-status-output" class="stack-list">
-                <div class="empty-state">Loading provider readiness...</div>
-              </div>
-              <pre id="provider-output" class="console-output console-output-compact">No provider changes yet.</pre>
             </div>
-          </section>
+            <div class="thread" id="thread"></div>
+          </div>
 
-          <section id="design-panel" class="surface surface-design">
-            <div class="surface-header">
-              <div>
-                <p class="section-kicker">Stitch Bridge</p>
-                <h3>DESIGN.md handoff</h3>
-              </div>
-              <div class="hero-actions">
-                <a class="button button-ghost button-small" href="https://stitch.withgoogle.com/" target="_blank" rel="noreferrer">Open Stitch</a>
-                <button id="refresh-design-bridge" type="button" class="button button-ghost button-small">Reload</button>
-              </div>
-            </div>
-            <div class="surface-body">
-              <div class="summary-card design-bridge-card">
-                <h4>Stitch-ready design contract</h4>
-                <p>Export this DESIGN.md into Stitch, let Stitch refine the UI, then paste the updated rules back here.</p>
-                <p>Direct Stitch SDK/MCP connection can be added when a local Stitch credential or MCP endpoint is configured.</p>
-              </div>
-              <form id="design-bridge-form" class="stack-form">
-                <label for="design-bridge-text">DESIGN.md</label>
-                <textarea id="design-bridge-text" rows="12" placeholder="Loading DESIGN.md..."></textarea>
-                <div class="hero-actions">
-                  <button type="submit" class="button button-primary">Save DESIGN.md</button>
-                  <button id="copy-design-bridge" type="button" class="button button-ghost">Copy for Stitch</button>
+          <div class="composer-wrap">
+            <div class="slash-palette" id="slash-palette" hidden></div>
+            <div class="composer">
+              <textarea id="composer-input" rows="1" placeholder="Describe a task — type / for commands" spellcheck="false"></textarea>
+              <div class="composer-bar">
+                <span class="composer-meta" id="composer-model"></span>
+                <div class="composer-actions">
+                  <button class="icon-button danger" id="stop-btn" title="Stop run" hidden><span class="line-icon stop"></span></button>
+                  <button class="send-button" id="send-btn" title="Send"><span class="line-icon send"></span></button>
                 </div>
-              </form>
-              <pre id="design-bridge-output" class="console-output console-output-compact">No Stitch bridge actions yet.</pre>
+              </div>
             </div>
-          </section>
+          </div>
+        </section>
 
-          <section id="plugin-panel" class="surface surface-plugin">
-            <div class="surface-header">
-              <div>
-                <p class="section-kicker">Plugins</p>
-                <h3>Manifest lifecycle and config</h3>
-              </div>
-              <div class="hero-actions">
-                <button id="reload-plugins" type="button" class="button button-ghost button-small">Reload</button>
-                <button id="run-plugin-job" type="button" class="button button-ghost button-small">Run test job</button>
-              </div>
-            </div>
-            <div class="surface-body surface-body-split surface-body-plugin">
-              <div>
-                <div class="mini-header">
-                  <span>Installed plugins</span>
-                </div>
-                <div id="plugin-output" class="stack-list stack-list-tight">Loading...</div>
-              </div>
-              <div class="plugin-side">
-                <div class="mini-header">
-                  <span>Selected plugin detail</span>
-                </div>
-                <div id="plugin-detail-output" class="detail-pane">Select a plugin to inspect it.</div>
-                <form id="plugin-config-form" class="stack-form plugin-config-form">
-                  <input id="plugin-config-id" type="hidden" value="" />
-                  <div id="plugin-config-fields" class="plugin-config-fields"></div>
-                  <button type="submit" class="button button-primary">Save plugin config</button>
-                </form>
-                <pre id="plugin-feedback" class="console-output console-output-compact">No plugin actions yet.</pre>
-              </div>
-            </div>
-          </section>
+        <!-- Data panel view -->
+        <section class="view" id="view-panel">
+          <div class="panel-scroll">
+            <div class="panel-layout" id="panel-content"></div>
+          </div>
+        </section>
+      </main>
 
-          <section id="trust-panel" class="surface surface-trust">
-            <div class="surface-header">
-              <div>
-                <p class="section-kicker">Trust</p>
-                <h3>Pairing and devices</h3>
-              </div>
-              <div class="hero-actions">
-                <span id="trust-context" class="status-chip status-chip-muted">No trust state loaded</span>
-                <button id="rotate-gateway-token" type="button" class="button button-ghost button-small">Rotate gateway token</button>
-                <button id="copy-gateway-token" type="button" class="button button-ghost button-small" disabled>Copy token</button>
-              </div>
-            </div>
-            <div class="surface-body surface-body-split">
-              <div>
-                <form id="pairing-form" class="stack-form">
-                  <label for="pairing-label">Device label</label>
-                  <input id="pairing-label" type="text" placeholder="Local operator laptop" />
-                  <div class="field-grid">
-                    <div>
-                      <label for="pairing-role">Role</label>
-                      <select id="pairing-role">
-                        <option value="operator">operator</option>
-                        <option value="node">node</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label for="pairing-fingerprint">Fingerprint</label>
-                      <input id="pairing-fingerprint" type="text" placeholder="device-fingerprint" />
-                    </div>
-                    <div>
-                      <label for="pairing-note">Note</label>
-                      <input id="pairing-note" type="text" placeholder="dashboard request" />
-                    </div>
-                  </div>
-                  <button type="submit" class="button button-primary">Request pairing</button>
-                </form>
-                <pre id="trust-feedback" class="console-output console-output-compact">No trust actions yet.</pre>
-              </div>
-              <div>
-                <div class="mini-header">
-                  <span>Pairing requests</span>
-                </div>
-                <div id="trust-output" class="stack-list">Loading...</div>
-                <div class="mini-header mini-header-spaced">
-                  <span>Trusted devices</span>
-                </div>
-                <div id="device-output" class="stack-list">Loading...</div>
-                <div class="mini-header mini-header-spaced">
-                  <span>Trust audit</span>
-                </div>
-                <div id="trust-audit-output" class="stack-list">Loading trust audit...</div>
-              </div>
-            </div>
-          </section>
-
-          <section id="jobs-panel" class="surface surface-jobs">
-            <div class="surface-header">
-              <div>
-                <p class="section-kicker">Jobs</p>
-                <h3>Queued background work</h3>
-              </div>
-              <button id="cancel-job" type="button" class="button button-ghost button-small">Cancel selected</button>
-            </div>
-            <div class="surface-body surface-body-split">
-              <div>
-                <div class="mini-header">
-                  <span>Recent jobs</span>
-                </div>
-                <div id="job-output" class="stack-list">Loading...</div>
-              </div>
-              <div>
-                <div class="mini-header">
-                  <span>Selected job detail</span>
-                </div>
-                <div id="job-detail-output" class="detail-pane">Select a job to inspect it.</div>
-              </div>
-            </div>
-          </section>
-
-          <section id="scheduler-panel" class="surface surface-scheduler">
-            <div class="surface-header">
-              <div>
-                <p class="section-kicker">Scheduler</p>
-                <h3>Recurring tool runs</h3>
-              </div>
-              <span id="scheduler-context" class="status-chip status-chip-muted">No schedules loaded</span>
-            </div>
-            <div class="surface-body surface-body-split">
-              <div>
-                <form id="schedule-form" class="stack-form">
-                  <label for="schedule-name">Name</label>
-                  <input id="schedule-name" type="text" placeholder="Ops status heartbeat" />
-                  <div class="field-grid">
-                    <div>
-                      <label for="schedule-tool">Tool</label>
-                      <select id="schedule-tool"></select>
-                    </div>
-                    <div>
-                      <label for="schedule-interval">Interval seconds</label>
-                      <input id="schedule-interval" type="number" min="1" value="60" />
-                    </div>
-                    <div>
-                      <label for="schedule-max-runs">Max runs</label>
-                      <input id="schedule-max-runs" type="number" min="0" value="0" />
-                    </div>
-                  </div>
-                  <div class="field-grid">
-                    <div>
-                      <label for="schedule-retries">Retries</label>
-                      <input id="schedule-retries" type="number" min="1" value="2" />
-                    </div>
-                    <div>
-                      <label for="schedule-retry-delay">Retry delay</label>
-                      <input id="schedule-retry-delay" type="number" min="1" value="5" />
-                    </div>
-                    <label class="plugin-bool">
-                      <input id="schedule-run-now" type="checkbox" checked />
-                      <span>Run now</span>
-                    </label>
-                  </div>
-                  <textarea id="schedule-input" rows="4" placeholder='{"message":"scheduled pulse"}'></textarea>
-                  <button type="submit" class="button button-primary">Create schedule</button>
-                </form>
-                <pre id="schedule-feedback" class="console-output console-output-compact">No schedule actions yet.</pre>
-              </div>
-              <div>
-                <div class="mini-header">
-                  <span>Schedules</span>
-                </div>
-                <div id="schedule-output" class="stack-list">Loading...</div>
-              </div>
-            </div>
-          </section>
-
-          <section id="skill-panel" class="surface surface-skills">
-            <div class="surface-header">
-              <div>
-                <p class="section-kicker">Skills</p>
-                <h3>Create and inspect runtime skills</h3>
-              </div>
-            </div>
-            <div class="surface-body surface-body-split">
-              <div>
-                <div class="mini-header">
-                  <span>Installed skills</span>
-                </div>
-                <div id="skill-library-output" class="stack-list">Loading...</div>
-              </div>
-              <div>
-                <form id="skill-form" class="skill-form">
-                  <input id="skill-name" type="text" placeholder="Skill name" />
-                  <input id="skill-triggers" type="text" placeholder="trigger1, trigger2" />
-                  <input id="skill-description" type="text" placeholder="Short description" />
-                  <textarea id="skill-instructions" rows="5" placeholder="Instructions for the skill"></textarea>
-                  <button type="submit" class="button button-primary">Create skill</button>
-                </form>
-                <pre id="skill-output" class="console-output console-output-compact">No custom skills created yet.</pre>
-              </div>
-            </div>
-          </section>
-
-          <section id="memory-panel" class="surface surface-memory">
-            <div class="surface-header">
-              <div>
-                <p class="section-kicker">Memory</p>
-                <h3>Long-term memory and dream sweep</h3>
-              </div>
-              <div class="hero-actions">
-                <span id="memory-context" class="status-chip status-chip-muted">No memory loaded</span>
-                <button id="run-dream-sweep" type="button" class="button button-ghost button-small">Run dream sweep</button>
-              </div>
-            </div>
-            <div class="surface-body surface-body-split">
-              <div>
-                <form id="memory-promote-form" class="stack-form">
-                  <label for="memory-title">Title</label>
-                  <input id="memory-title" type="text" placeholder="Important user preference" />
-                  <label for="memory-text">Memory text</label>
-                  <textarea id="memory-text" rows="6" placeholder="What should OmniClaw remember long-term?"></textarea>
-                  <div class="field-grid">
-                    <div>
-                      <label for="memory-importance">Importance</label>
-                      <select id="memory-importance">
-                        <option value="medium">medium</option>
-                        <option value="high">high</option>
-                        <option value="low">low</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label for="memory-tags">Tags</label>
-                      <input id="memory-tags" type="text" placeholder="user, product" />
-                    </div>
-                    <div>
-                      <label for="memory-agent">Agent</label>
-                      <input id="memory-agent" type="text" placeholder="main" />
-                    </div>
-                  </div>
-                  <button type="submit" class="button button-primary">Promote manual memory</button>
-                </form>
-                <pre id="memory-feedback" class="console-output console-output-compact">No memory actions yet.</pre>
-                <div class="mini-header mini-header-spaced">
-                  <span>Promotion candidates</span>
-                </div>
-                <div id="memory-candidate-output" class="stack-list">Loading...</div>
-              </div>
-              <div>
-                <div class="mini-header">
-                  <span>Long-term memories</span>
-                </div>
-                <div id="long-memory-output" class="stack-list">Loading...</div>
-                <div class="mini-header mini-header-spaced">
-                  <span>Dream diary</span>
-                </div>
-                <div id="dream-output" class="stack-list">Loading...</div>
-              </div>
-            </div>
-          </section>
-
-          <section id="research-panel" class="surface surface-research">
-            <div class="surface-header">
-              <div>
-                <p class="section-kicker">Research</p>
-                <h3>Saved web lookups</h3>
-              </div>
-            </div>
-            <div class="surface-body">
-              <div id="research-output" class="stack-list">Loading...</div>
-            </div>
-          </section>
-
-          <section id="artifacts-panel" class="surface surface-artifacts">
-            <div class="surface-header">
-              <div>
-                <p class="section-kicker">Artifacts</p>
-                <h3>Files generated by OmniClaw</h3>
-              </div>
-            </div>
-            <div class="surface-body">
-              <div id="artifact-output" class="stack-list">Loading...</div>
-            </div>
-          </section>
-
-          <section id="workspace-panel" class="surface surface-workspace">
-            <div class="surface-header">
-              <div>
-                <p class="section-kicker">Workspace</p>
-                <h3>Bootstrap files and roots</h3>
-              </div>
-            </div>
-            <div class="surface-body">
-              <div id="workspace-output" class="stack-list">Loading...</div>
-            </div>
-          </section>
-
-          <section id="tools-panel" class="surface surface-tools">
-            <div class="surface-header">
-              <div>
-                <p class="section-kicker">Tools</p>
-                <h3>Available tool surface</h3>
-              </div>
-            </div>
-            <div class="surface-body">
-              <div id="tool-output" class="stack-list">Loading...</div>
-            </div>
-          </section>
-
-          <section class="surface surface-state">
-            <div class="surface-header">
-              <div>
-                <p class="section-kicker">State</p>
-                <h3>Compact raw snapshot</h3>
-              </div>
-            </div>
-            <div class="surface-body">
-              <pre id="state-output" class="console-output">Loading...</pre>
-            </div>
-          </section>
-        </main>
-      </div>
+      <!-- Right dock -->
+      <aside class="dock" id="dock" hidden>
+        <div class="dock-tabs">
+          <button class="dock-tab active" data-tab="browser">Browser</button>
+          <button class="dock-tab" data-tab="activity">Activity</button>
+          <button class="icon-button dock-close" id="dock-close" title="Close panel"><span class="line-icon close"></span></button>
+        </div>
+        <div class="dock-pane active" id="pane-browser">
+          <div class="dock-urlbar">
+            <input id="dock-url" type="text" placeholder="output/watch-store/index.html" spellcheck="false" />
+            <button class="icon-button" id="dock-go" title="Open"><span class="line-icon send"></span></button>
+            <button class="icon-button" id="dock-reload" title="Reload"><span class="line-icon refresh"></span></button>
+          </div>
+          <iframe id="dock-frame" class="dock-frame" title="Artifact preview"></iframe>
+          <div class="dock-editrow">
+            <input id="dock-edit-input" type="text" placeholder="Describe a change for this page" />
+            <button class="mini-button" id="dock-edit-send">Edit</button>
+          </div>
+        </div>
+        <div class="dock-pane" id="pane-activity">
+          <div id="activity-feed" class="activity-feed"></div>
+        </div>
+      </aside>
     </div>
 
-    <script type="module" src="/app.js"></script>
-  </div><!-- /main-content -->
-</body>
+    <footer class="statusbar">
+      <span id="status-gateway"><span class="status-dot"></span>&nbsp;Gateway</span>
+      <span id="status-agents">Agents</span>
+      <span id="status-cron">Cron</span>
+      <span class="grow"></span>
+      <span id="status-model" class="mono"></span>
+      <span id="status-version" class="mono"></span>
+    </footer>
+
+    <script type="module" src="/neo.js"></script>
+  </body>
 </html>

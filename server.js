@@ -291,6 +291,44 @@ function sendFile(res, filePath) {
 // ─── Auth Middleware ──────────────────────────────────────────────
 const PUBLIC_ENDPOINTS = new Set(["/api/health", "/api/events", "/api/auth/overview", "/api/auth/pairing/request"]);
 
+function listAgentsForShell() {
+  try {
+    const agents = agent.agents?.getAll?.() || [];
+    const entries = agents.length ? agents : [{ id: "main", name: "Main agent" }];
+    return entries.map((entry) => ({
+      id: entry.id || "main",
+      name: entry.name || entry.id || "Main agent",
+      description: entry.description || entry.goal || "Local OmniClaw agent",
+      default: Boolean(entry.default),
+      workspace: entry.workspace || entry.workspacePath
+        ? { path: entry.workspacePath || entry.workspace?.path || "" }
+        : undefined,
+      status: "ready",
+    }));
+  } catch (error) {
+    return [{
+      id: "main",
+      name: "Main agent",
+      description: "Local OmniClaw agent",
+      default: true,
+      status: "fallback",
+      error: error.message,
+    }];
+  }
+}
+
+function listSessionSummariesForShell(limit) {
+  const max = Math.max(1, Math.min(200, Number(limit || 50)));
+  try {
+    const sessions = typeof agent.sessions?.listSessionSummariesFast === "function"
+      ? agent.sessions.listSessionSummariesFast(max)
+      : agent.sessions.listSessions(max);
+    return { sessions };
+  } catch (error) {
+    return { sessions: [], degraded: true, error: error.message };
+  }
+}
+
 function checkAuth(req, pathname) {
   // Public endpoints skip auth
   if (PUBLIC_ENDPOINTS.has(pathname)) return true;
@@ -450,7 +488,7 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === "GET" && pathname === "/api/agents") {
     sendJson(res, 200, {
-      agents: agent.getState().agents,
+      agents: listAgentsForShell(),
     });
     return;
   }
@@ -472,7 +510,7 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === "GET" && pathname.startsWith("/api/agents/")) {
     const agentId = pathname.slice("/api/agents/".length);
-    const item = agent.getState().agents.find((entry) => entry.id === agentId) || null;
+    const item = listAgentsForShell().find((entry) => entry.id === agentId) || null;
     if (!item) {
       sendJson(res, 404, { error: "Agent not found" });
       return;
@@ -674,9 +712,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === "GET" && pathname === "/api/sessions") {
-    sendJson(res, 200, {
-      sessions: agent.sessions.listSessions(Number(url.searchParams.get("limit") || 50)),
-    });
+    sendJson(res, 200, listSessionSummariesForShell(url.searchParams.get("limit") || 50));
     return;
   }
 
