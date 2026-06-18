@@ -135,7 +135,24 @@ export class ToolResolver {
   }
 
   getToolDefinitions() {
-    return this.listTools().map((t) => ({
+    const localTools = this.toolRegistry
+      ? this.toolRegistry.getAll({ modelCallableOnly: true }).map((tool) => ({
+          id: tool.id,
+          description: tool.description,
+          type: "local",
+          permission: tool.permission,
+          group: tool.group || "",
+        }))
+      : [];
+    const remoteTools = Array.from(this.remoteTools.values()).map((t) => ({
+      id: t.id,
+      name: t.name,
+      description: t.description,
+      type: "remote",
+      url: t.url,
+    }));
+
+    return [...localTools, ...remoteTools].map((t) => ({
       type: "function",
       function: {
         name: t.id,

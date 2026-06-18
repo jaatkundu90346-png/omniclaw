@@ -23,21 +23,109 @@ function normalizeHost(url = "") {
   }
 }
 
-function scoreSearchResult(result = {}, query = "") {
-  const text = `${result.title || ""} ${result.snippet || ""} ${result.url || ""}`.toLowerCase();
-  const queryTerms = String(query || "")
+const QUERY_STOP_WORDS = new Set([
+  "about",
+  "research",
+  "overview",
+  "explain",
+  "details",
+  "detail",
+  "what",
+  "with",
+  "from",
+  "the",
+  "and",
+  "for",
+  "hai",
+  "hain",
+  "kya",
+  "bara",
+  "baare",
+  "mein",
+  "me",
+  "par",
+  "kar",
+  "karo",
+  "bata",
+  "btaya",
+  "deep",
+  "official",
+  "sources",
+  "source",
+]);
+
+function getQueryTerms(query = "") {
+  return String(query || "")
     .toLowerCase()
     .split(/[^a-z0-9.#+-]+/i)
     .map((term) => term.trim())
-    .filter((term) => term.length >= 3 && !["about", "what", "with", "from", "the", "and", "for"].includes(term));
+    .filter((term) => term.length >= 3 && !QUERY_STOP_WORDS.has(term));
+}
+
+function isComparisonOrOpinionQuery(query = "") {
+  return /\b(alternative|alternatives|vs|versus|compare|comparison|review|reviews|opinion|reddit|youtube|best|top)\b/i.test(String(query || ""));
+}
+
+function isOfficialLikeSource(result = {}, queryTerms = []) {
+  const url = String(result.url || "").toLowerCase();
+  const host = normalizeHost(url);
+  const text = `${result.title || ""} ${result.snippet || ""} ${url}`.toLowerCase();
+  const hostMatchesEntity = queryTerms.some((term) => host.includes(term));
+  const hostOrPathMatchesEntity = queryTerms.some((term) => url.includes(term) || host.includes(term));
+  if (/^(community|forum|forums|discuss)\./i.test(host)) {
+    return false;
+  }
+  if (/^docs\.|\.docs\.|developer\.|developers\.|docs-|help\.|support\./i.test(host) && hostMatchesEntity) {
+    return true;
+  }
+  if (/\bofficial\b|\bdocs?\b|\bdocumentation\b|\bdeveloper(s)?\b/i.test(text) && hostMatchesEntity) {
+    return true;
+  }
+  if (hostOrPathMatchesEntity && !/medium\.com|reddit\.com|youtube\.com|youtu\.be|quora\.com|substack\.com/i.test(host)) {
+    const compactHost = host.replace(/\.(com|ai|io|dev|org|net|app|co|in)$/i, "");
+    return queryTerms.some((term) => compactHost.split(".").some((part) => part === term || part.includes(term)));
+  }
+  return false;
+}
+
+export function scoreSearchResult(result = {}, query = "") {
+  const text = `${result.title || ""} ${result.snippet || ""} ${result.url || ""}`.toLowerCase();
+  const queryTerms = getQueryTerms(query);
   const host = normalizeHost(result.url || "");
+  const title = String(result.title || "").toLowerCase();
+  const url = String(result.url || "").toLowerCase();
+  const comparisonQuery = isComparisonOrOpinionQuery(query);
   let score = 0;
   for (const term of queryTerms) {
     if (text.includes(term)) score += 3;
+    if (title.includes(term)) score += 3;
+    if (String(result.url || "").toLowerCase().includes(term)) score += 2;
   }
-  if (/github\.com|wikipedia\.org|docs\.|developer\.|openclaw/i.test(host)) score += 4;
+  if (isOfficialLikeSource(result, queryTerms)) score += 70;
+  if (/docs\.|developer\.|developers\./i.test(host)) score += 14;
+  if (/github\.com/i.test(host)) score += 8;
+  if (/wikipedia\.org/i.test(host)) score += comparisonQuery ? 8 : 1;
+  if (queryTerms.some((term) => host.replace(/^www\./, "").startsWith(term) || host.includes(`${term}.`))) score += 28;
+  if (/nodejs\.org/i.test(host)) score += 35;
+  if (/\/(docs|documentation|learn|guide|guides|api-reference|readme|wiki)\b/i.test(url)) score += 24;
+  if (/github\.com/i.test(host) && /\/(docs|documentation|readme|wiki)\b/i.test(url)) score += 8;
   if (result.snippet && String(result.snippet).length > 80) score += 2;
   if (result.title && String(result.title).length > 8) score += 1;
+  if (!comparisonQuery && /\b(alternative|alternatives|vs|versus|comparison|compare|review|reviews|best|top)\b/i.test(`${result.title || ""} ${result.snippet || ""}`)) score -= 45;
+  if (!comparisonQuery && /\b(unofficial|independent experimental|free interface|fan-made|third-party)\b/i.test(`${result.title || ""} ${result.snippet || ""} ${url}`)) score -= 85;
+  if (!comparisonQuery && /\b(chat|free|apps?|store)\b/i.test(host) && !/\b(chat|free|app|store)\b/i.test(String(query || ""))) score -= 35;
+  if (!comparisonQuery && /reddit\.com|youtube\.com|youtu\.be|medium\.com|quora\.com/i.test(host)) score -= 20;
+  if (!comparisonQuery && /^(community|forum|forums|discuss)\./i.test(host)) score -= 25;
+  if (!comparisonQuery && queryTerms.some((term) => host === `${term}.com` || host === `${term}.ai` || host === `${term}.io` || host === `${term}.dev`)) score += 18;
+  if (!comparisonQuery && queryTerms.some((term) => new RegExp(`/(?:${term})(?:/|$|[?#])`, "i").test(String(result.url || "")))) score += 10;
+  if (!comparisonQuery && /\bpricing\b/i.test(title) && !/\b(price|pricing|cost|plan)\b/i.test(String(query || ""))) score -= 12;
+  const broadOverviewQuery = !comparisonQuery && /\b(overview|official|models?|api|platform|products?|what|kya)\b/i.test(String(query || ""));
+  if (broadOverviewQuery && /\/(news|blog|press|release|changelog)\b/i.test(url)) score -= 18;
+  if (broadOverviewQuery && /\b(marketplace|catalog|app-store|play\.google|apps\.apple|apps\.make)\b/i.test(url)) score -= 28;
+  if (broadOverviewQuery && /\b(video|image|music|audio|speech)\b/i.test(`${title} ${url}`) && !/\b(video|image|music|audio|speech)\b/i.test(String(query || ""))) score -= 18;
+  if (broadOverviewQuery && /\/docs\/guides\/models-intro\b/i.test(url)) score += 22;
+  if (broadOverviewQuery && /\/docs\/api-reference\/api-overview\b/i.test(url)) score += 18;
+  if (broadOverviewQuery && /^https?:\/\/(?:www\.)?[^/]+\.(?:ai|io|com)\/?$/i.test(String(result.url || ""))) score += 16;
   if (/no results|error|timeout|failed/i.test(`${result.title || ""} ${result.snippet || ""}`)) score -= 20;
   return score;
 }
@@ -70,30 +158,6 @@ function mergeRankedResults(resultSets = [], query = "", maxResults = 8) {
       ...result,
       source: sources?.join(" + ") || result.source || "Search",
     }));
-}
-
-function getKnownReferenceFallback(query = "") {
-  const normalized = String(query || "").toLowerCase();
-  if (/\bnode(?:\.js|js)?\b/.test(normalized)) {
-    return {
-      provider: "known-reference",
-      results: [
-        {
-          title: "Node.js Documentation",
-          snippet: "Node.js is a JavaScript runtime built on Chrome's V8 engine. Core features include asynchronous event-driven APIs, npm ecosystem support, cross-platform runtime behavior, built-in modules, and tooling for servers, CLIs, and scripts.",
-          url: "https://nodejs.org/en/docs",
-          source: "Known official reference",
-        },
-        {
-          title: "About Node.js",
-          snippet: "Node.js is designed to build scalable network applications and can handle many connections concurrently through non-blocking operations.",
-          url: "https://nodejs.org/en/about",
-          source: "Known official reference",
-        },
-      ],
-    };
-  }
-  return null;
 }
 
 async function fetchWithTimeout(url, options = {}, timeoutMs = 10000) {
@@ -292,6 +356,157 @@ async function searchGoogle(query, apiKey, cx, maxResults = 8, timeoutMs = 10000
   }
 }
 
+function isLocalOrPrivateHttpTarget(url = "") {
+  try {
+    const hostname = new URL(url).hostname.toLowerCase();
+    if (hostname === "localhost" || hostname.endsWith(".localhost")) return true;
+    if (hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]") return true;
+    if (/^10\./.test(hostname) || /^192\.168\./.test(hostname)) return true;
+    const match = hostname.match(/^172\.(\d+)\./);
+    if (match && Number(match[1]) >= 16 && Number(match[1]) <= 31) return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+function resolveProviderEndpoint(baseUrl = "", suffix = "") {
+  const trimmed = String(baseUrl || "").trim();
+  if (!trimmed) return suffix;
+  const normalized = trimmed.replace(/\/+$/, "");
+  return normalized.endsWith(suffix) ? normalized : `${normalized}${suffix}`;
+}
+
+async function searchExa(query, apiKey, maxResults = 8, timeoutMs = 10000, attempts = [], options = {}) {
+  if (!apiKey) return [];
+  const url = resolveProviderEndpoint(options.baseUrl || "https://api.exa.ai", "/search");
+  try {
+    const contents = options.contents && typeof options.contents === "object"
+      ? options.contents
+      : { highlights: { numSentences: 3 } };
+    const body = {
+      query,
+      numResults: Math.max(1, Math.min(100, Number(maxResults) || 8)),
+      type: options.type || "auto",
+      contents,
+    };
+    if (options.date_after) body.startPublishedDate = options.date_after;
+    if (options.date_before) body.endPublishedDate = options.date_before;
+    if (options.freshness && !options.date_after && !options.date_before) {
+      const now = new Date();
+      const days = { day: 1, week: 7, month: 31, year: 366 }[String(options.freshness).toLowerCase()] || 0;
+      if (days > 0) {
+        const start = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+        body.startPublishedDate = start.toISOString().slice(0, 10);
+      }
+    }
+    const res = await fetchWithTimeout(url, {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    }, timeoutMs);
+    if (!res.ok) {
+      attempts.push({ provider: "exa", status: res.status, results: 0 });
+      return [];
+    }
+    const data = JSON.parse(res.data);
+    const results = (data.results || []).slice(0, maxResults).map((r) => {
+      const highlights = Array.isArray(r.highlights) ? r.highlights.filter(Boolean).join(" ") : "";
+      const text = typeof r.text === "string" ? r.text : "";
+      return {
+        title: r.title || r.url || "",
+        snippet: highlights || r.summary || text.slice(0, 320) || "",
+        url: r.url || "",
+        source: "Exa Search",
+        publishedDate: r.publishedDate || "",
+        author: r.author || "",
+        summary: r.summary || "",
+        highlights: Array.isArray(r.highlights) ? r.highlights : [],
+      };
+    });
+    attempts.push({ provider: "exa", status: res.status, results: results.length });
+    return results;
+  } catch (error) {
+    attempts.push({ provider: "exa", error: error.message, results: 0 });
+    return [];
+  }
+}
+
+async function searchTinyFish(query, apiKey, maxResults = 8, timeoutMs = 10000, attempts = []) {
+  if (!apiKey) return [];
+  const encoded = encodeURIComponent(query);
+  const url = `https://api.search.tinyfish.ai?query=${encoded}&location=US&language=en`;
+  try {
+    const res = await fetchWithTimeout(url, {
+      headers: {
+        "X-API-Key": apiKey,
+        Accept: "application/json",
+      },
+    }, timeoutMs);
+    if (!res.ok) {
+      attempts.push({ provider: "tinyfish-search", status: res.status, results: 0 });
+      return [];
+    }
+    const data = JSON.parse(res.data);
+    const results = (data.results || []).slice(0, maxResults).map((r) => ({
+      title: r.title || r.site_name || "",
+      snippet: r.snippet || "",
+      url: r.url || "",
+      source: "TinyFish Search",
+      position: r.position,
+      siteName: r.site_name || "",
+    }));
+    attempts.push({ provider: "tinyfish-search", status: res.status, results: results.length, totalResults: data.total_results });
+    return results;
+  } catch (error) {
+    attempts.push({ provider: "tinyfish-search", error: error.message, results: 0 });
+    return [];
+  }
+}
+
+function buildSearchQueryVariants(query = "") {
+  const base = String(query || "").replace(/\s+/g, " ").trim();
+  if (!base || isComparisonOrOpinionQuery(base)) {
+    return [base].filter(Boolean);
+  }
+  return [...new Set([
+    base,
+    `${base} official documentation`,
+    `${base} official site overview`,
+  ].map((item) => item.trim()).filter(Boolean))];
+}
+
+function withProviderTimeout(promise, { provider = "search", timeoutMs = 12000, attempts = [] } = {}) {
+  let timer;
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(() => {
+      attempts.push({ provider, error: `timeout after ${timeoutMs}ms`, results: 0 });
+      resolve([]);
+    }, timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+function withFetchTimeout(promise, { url = "", provider = "web-fetch", timeoutMs = 30000 } = {}) {
+  let timer;
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(() => resolve({
+      url,
+      provider,
+      error: `timeout after ${timeoutMs}ms`,
+      text: "",
+      markdown: "",
+      truncated: false,
+      totalChars: 0,
+    }), timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 async function searchGitHubRepos(query, maxResults = 6, timeoutMs = 10000, attempts = []) {
   const encoded = encodeURIComponent(query);
   const url = `https://api.github.com/search/repositories?q=${encoded}&per_page=${Math.min(maxResults, 10)}`;
@@ -354,26 +569,59 @@ export class WebResearch {
     this.secretStore = secretStore;
   }
 
+  getSecretKey(...ids) {
+    for (const id of ids) {
+      const key = this.secretStore?.getProviderKey?.(id);
+      if (key) return key;
+    }
+    return "";
+  }
+
+  getTinyFishKey() {
+    return this.getSecretKey("tinyfish", "tinyfish-search", "tinyfish-api", "tinyfish-fetch")
+      || process.env.TINYFISH_API_KEY
+      || "";
+  }
+
   async search(query, options = {}) {
     const config = this.configStore?.getConfig?.() || {};
     const limit = config.tools?.research?.maxResults || 8;
-    const timeoutMs = Math.max(25000, Number(config.tools?.research?.timeoutMs || 10000));
+    const timeoutMs = Math.max(5000, Math.min(15000, Number(config.tools?.research?.timeoutMs || 10000)));
     const maxResults = options.maxResults || limit;
     const attempts = [];
+    const queryVariants = buildSearchQueryVariants(query);
+    const primaryQuery = queryVariants[0] || query;
 
     // Get API keys from secrets
     const braveKey = this.secretStore?.getProviderKey?.("brave") || process.env.BRAVE_API_KEY || "";
     const bingKey = this.secretStore?.getProviderKey?.("bing") || process.env.BING_API_KEY || "";
     const googleKey = this.secretStore?.getProviderKey?.("google-search") || process.env.GOOGLE_SEARCH_API_KEY || "";
     const googleCx = config.tools?.research?.googleCx || process.env.GOOGLE_SEARCH_CX || "";
+    const tinyFishKey = this.getTinyFishKey();
+    const exaKey = this.secretStore?.getProviderKey?.("exa") || process.env.EXA_API_KEY || "";
+    const exaBaseUrl = config.tools?.research?.exaBaseUrl || process.env.EXA_BASE_URL || "";
 
     // Provider priority chain: configured provider → Brave → Bing → Google → DDG → Wikipedia
-    const configuredProvider = config.tools?.research?.provider || "";
+    const configuredProvider = String(options.provider || config.tools?.research?.provider || "").toLowerCase();
     let results = [];
 
     // If a specific provider is configured with API key, try it first
-    if (configuredProvider === "brave" && braveKey) {
+    if (configuredProvider === "tinyfish" && tinyFishKey) {
+      const tinyFishRuns = await Promise.allSettled(
+        queryVariants.map((variant) => withProviderTimeout(
+          searchTinyFish(variant, tinyFishKey, maxResults, timeoutMs, attempts),
+          { provider: "tinyfish-search", timeoutMs: timeoutMs + 2000, attempts },
+        )),
+      );
+      results = mergeRankedResults(
+        tinyFishRuns.filter((item) => item.status === "fulfilled").map((item) => item.value),
+        primaryQuery,
+        maxResults,
+      );
+    } else if (configuredProvider === "brave" && braveKey) {
       results = await searchBrave(query, braveKey, maxResults, timeoutMs, attempts);
+    } else if (configuredProvider === "exa" && exaKey) {
+      results = await searchExa(query, exaKey, maxResults, timeoutMs, attempts, { ...options, baseUrl: exaBaseUrl || options.baseUrl });
     } else if (configuredProvider === "bing" && bingKey) {
       results = await searchBing(query, bingKey, maxResults, timeoutMs, attempts);
     } else if (configuredProvider === "google" && googleKey && googleCx) {
@@ -384,25 +632,36 @@ export class WebResearch {
     if (results.length === 0) {
       const searches = [];
 
-      if (braveKey) searches.push(searchBrave(query, braveKey, maxResults, timeoutMs, attempts));
-      if (bingKey) searches.push(searchBing(query, bingKey, maxResults, timeoutMs, attempts));
-      if (googleKey && googleCx) searches.push(searchGoogle(query, googleKey, googleCx, maxResults, timeoutMs, attempts));
+      if (tinyFishKey && configuredProvider !== "tinyfish") {
+        for (const variant of queryVariants) {
+          searches.push(withProviderTimeout(
+            searchTinyFish(variant, tinyFishKey, maxResults, timeoutMs, attempts),
+            { provider: "tinyfish-search", timeoutMs: timeoutMs + 2000, attempts },
+          ));
+        }
+      }
+      if (braveKey && configuredProvider !== "brave") searches.push(withProviderTimeout(searchBrave(query, braveKey, maxResults, timeoutMs, attempts), { provider: "brave", timeoutMs: timeoutMs + 2000, attempts }));
+      if (bingKey && configuredProvider !== "bing") searches.push(withProviderTimeout(searchBing(query, bingKey, maxResults, timeoutMs, attempts), { provider: "bing-api", timeoutMs: timeoutMs + 2000, attempts }));
+      if (googleKey && googleCx && configuredProvider !== "google") searches.push(withProviderTimeout(searchGoogle(query, googleKey, googleCx, maxResults, timeoutMs, attempts), { provider: "google-api", timeoutMs: timeoutMs + 2000, attempts }));
+      if (exaKey && configuredProvider !== "exa") searches.push(withProviderTimeout(searchExa(query, exaKey, maxResults, timeoutMs, attempts, { ...options, baseUrl: exaBaseUrl || options.baseUrl }), { provider: "exa", timeoutMs: timeoutMs + 2000, attempts }));
 
       // Free fallback that keeps web search useful when BYOK search keys are not configured.
-      searches.push(searchBingRss(query, maxResults, timeoutMs, attempts));
+      searches.push(withProviderTimeout(searchBingRss(query, maxResults, timeoutMs, attempts), { provider: "bing-rss", timeoutMs: timeoutMs + 2000, attempts }));
 
       // Always try DDG (no API key needed)
-      searches.push(searchDuckDuckGo(query, maxResults, timeoutMs, attempts));
+      searches.push(withProviderTimeout(searchDuckDuckGo(query, maxResults, timeoutMs, attempts), { provider: "duckduckgo", timeoutMs: timeoutMs + 2000, attempts }));
 
       // Useful for open-source agent/tooling queries when general web search blocks scraping.
-      searches.push(searchGitHubRepos(query, maxResults, timeoutMs, attempts));
+      searches.push(withProviderTimeout(searchGitHubRepos(query, maxResults, timeoutMs, attempts), { provider: "github", timeoutMs: timeoutMs + 2000, attempts }));
 
       const allResults = await Promise.allSettled(searches);
       results = mergeRankedResults(
-        allResults
+        [
+          ...allResults
           .filter((result) => result.status === "fulfilled" && Array.isArray(result.value))
           .map((result) => result.value),
-        query,
+        ],
+        primaryQuery,
         maxResults,
       );
     }
@@ -415,25 +674,6 @@ export class WebResearch {
     const unique = mergeRankedResults([results], query, maxResults);
 
     if (unique.length === 0) {
-      const fallback = getKnownReferenceFallback(query);
-      if (fallback) {
-        return {
-          query,
-          provider: fallback.provider,
-          attempts,
-          results: fallback.results.slice(0, maxResults),
-          fetchedContent: fallback.results.slice(0, Math.min(3, maxResults)).map((item) => ({
-            url: item.url,
-            status: "known-reference-fallback",
-            contentType: "text/reference",
-            text: item.snippet,
-            truncated: false,
-            totalChars: item.snippet.length,
-            fallback: true,
-          })),
-          contentFetched: true,
-        };
-      }
       return {
         query,
         provider: "none",
@@ -447,13 +687,24 @@ export class WebResearch {
       };
     }
 
-    const fetchLimit = Math.max(0, Math.min(3, Number(options.fetchTop ?? config.tools?.research?.fetchTop ?? 3)));
+    const fetchLimit = Math.max(0, Math.min(8, Number(options.fetchTop ?? config.tools?.research?.fetchTop ?? 5)));
+    const fetchCandidates = unique
+      .filter((item) => /^https?:\/\//i.test(item.url || ""))
+      .slice(0, Math.max(fetchLimit, Math.min(8, maxResults)))
+      .map((item, index) => ({
+        rank: index + 1,
+        title: item.title || "",
+        url: item.url || "",
+        snippet: item.snippet || "",
+        source: item.source || "",
+      }));
     const fetchedContent = [];
     if (fetchLimit > 0) {
-      const targets = unique
-        .filter((item) => /^https?:\/\//i.test(item.url || ""))
-        .slice(0, fetchLimit);
-      const fetched = await Promise.allSettled(targets.map((item) => this.fetchUrl(item.url, 6000)));
+      const targets = fetchCandidates.slice(0, fetchLimit);
+      const fetched = await Promise.allSettled(targets.map((item) => withFetchTimeout(
+        this.fetchUrl(item.url, 12000),
+        { url: item.url, provider: "web-fetch", timeoutMs: Math.max(25000, timeoutMs + 15000) },
+      )));
       for (const item of fetched) {
         if (item.status === "fulfilled") {
           fetchedContent.push(item.value);
@@ -476,18 +727,43 @@ export class WebResearch {
       }
     }
 
+    const cleanContentFetched = fetchedContent.some((item) => item.text && !item.error && !item.fallback);
+
     return {
       query,
       provider: unique[0]?.source?.toLowerCase().replace(/\s+/g, "-") || "unknown",
       attempts,
       results: unique.slice(0, maxResults),
+      fetchCandidates,
       fetchedContent,
-      contentFetched: fetchedContent.some((item) => item.text && !item.error),
+      contentFetched: cleanContentFetched,
+      nextAction: cleanContentFetched
+        ? "Synthesize from fetchedContent and source URLs."
+        : "Choose the best fetchCandidates URL and call read_url or web_fetch; do not finalize from snippets only unless all fetches fail.",
     };
   }
 
   async fetchUrl(url, maxChars = 5000) {
-    const timeoutMs = Math.max(15000, Number(this.configStore?.getConfig?.()?.tools?.research?.timeoutMs || 10000));
+    const timeoutMs = Math.max(10000, Math.min(45000, Number(this.configStore?.getConfig?.()?.tools?.research?.fetchTimeoutMs || this.configStore?.getConfig?.()?.tools?.research?.timeoutMs || 30000)));
+    const tinyFishKey = this.getTinyFishKey();
+    const attempts = [];
+    if (tinyFishKey && /^https?:\/\//i.test(String(url || "")) && !isLocalOrPrivateHttpTarget(url)) {
+      const tinyFish = await this.fetchUrlWithTinyFish(url, maxChars, tinyFishKey, timeoutMs);
+      attempts.push({
+        provider: "tinyfish-fetch",
+        ok: Boolean(tinyFish.text && !tinyFish.error),
+        error: tinyFish.error || "",
+        chars: tinyFish.totalChars || 0,
+      });
+      if (tinyFish.text && !tinyFish.error) {
+        return {
+          ...tinyFish,
+          attempts,
+          markdown: tinyFish.text,
+        };
+      }
+    }
+
     try {
       const res = await fetchWithTimeout(url, {}, timeoutMs);
       if (!res.ok) return { url, error: `HTTP ${res.status}`, text: "", truncated: false, totalChars: 0 };
@@ -499,14 +775,82 @@ export class WebResearch {
         .trim();
       return {
         url,
+        finalUrl: url,
+        provider: "http-fetch",
         status: res.status,
         contentType: res.headers["content-type"] || "unknown",
         text: text.slice(0, maxChars),
+        markdown: text.slice(0, maxChars),
         truncated: text.length > maxChars,
         totalChars: text.length,
+        attempts: [
+          ...attempts,
+          { provider: "http-fetch", ok: true, status: res.status, chars: text.length },
+        ],
       };
     } catch (error) {
-      return { url, error: error.message, text: "", truncated: false, totalChars: 0 };
+      return {
+        url,
+        provider: "http-fetch",
+        error: error.message,
+        text: "",
+        markdown: "",
+        truncated: false,
+        totalChars: 0,
+        attempts: [...attempts, { provider: "http-fetch", ok: false, error: error.message }],
+      };
+    }
+  }
+
+  async fetchUrlWithTinyFish(url, maxChars = 12000, apiKey, timeoutMs = 30000) {
+    try {
+      const res = await fetchWithTimeout("https://api.fetch.tinyfish.ai", {
+        method: "POST",
+        headers: {
+          "X-API-Key": apiKey,
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          urls: [String(url || "").trim()],
+          format: "markdown",
+          links: false,
+          image_links: false,
+        }),
+      }, Math.max(10000, Math.min(45000, timeoutMs)));
+      if (!res.ok) {
+        return { url, error: `TinyFish Fetch HTTP ${res.status}`, provider: "tinyfish-fetch", text: "", truncated: false, totalChars: 0 };
+      }
+      const data = JSON.parse(res.data);
+      const page = (data.results || [])[0];
+      const pageError = (data.errors || []).find((item) => item.url === url) || (data.errors || [])[0];
+      if (!page) {
+        return {
+          url,
+          error: pageError?.error || "TinyFish Fetch returned no page content.",
+          provider: "tinyfish-fetch",
+          text: "",
+          truncated: false,
+          totalChars: 0,
+        };
+      }
+      const text = typeof page.text === "string" ? page.text : JSON.stringify(page.text || "");
+      return {
+        url: page.url || url,
+        finalUrl: page.final_url || page.url || url,
+        title: page.title || "",
+        description: page.description || "",
+        status: 200,
+        contentType: `text/${page.format || "markdown"}`,
+        provider: "tinyfish-fetch",
+        text: text.slice(0, maxChars),
+        markdown: text.slice(0, maxChars),
+        truncated: text.length > maxChars,
+        totalChars: text.length,
+        latencyMs: page.latency_ms || null,
+      };
+    } catch (error) {
+      return { url, error: `TinyFish Fetch failed: ${error.message}`, provider: "tinyfish-fetch", text: "", truncated: false, totalChars: 0 };
     }
   }
 }

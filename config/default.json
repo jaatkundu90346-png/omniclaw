@@ -5,15 +5,51 @@
   },
   "runtime": {
     "activeProfile": "balanced",
+    "agentLoop": {
+      "timeoutMs": 3600000,
+      "maxSteps": 1000,
+      "maxToolCallsPerStep": 5,
+      "maxRepeatedToolCalls": 1,
+      "outputPreviewChars": 4000
+    },
+    "omniLoop": {
+      "enabled": true,
+      "maxRounds": 60,
+      "maxTokens": 8000,
+      "roundTimeoutMs": 180000,
+      "maxToolResultChars": 10000,
+      "historyMessages": 24,
+      "contextCharBudget": 300000,
+      "maxTools": 64,
+      "temperature": 0.2,
+      "providerRetries": 1
+    },
     "modelToolLoop": {
       "enabled": true,
-      "maxRounds": 10,
+      "maxRounds": 50,
       "maxToolCallsPerRound": 5,
+      "maxParallelToolCalls": 4,
+      "providerFirst": true,
+      "roundTimeoutMs": 90000,
       "runWhenHeuristicHasTools": true,
       "recoverMissingToolCalls": true,
-      "maxRepeatedToolCalls": 2,
+      "maxRepeatedToolCalls": 1,
       "nativeToolCalling": true,
-      "nativeToolTimeoutMs": 8000
+      "nativeToolTimeoutMs": 60000
+    },
+    "activeMemory": {
+      "enabled": true,
+      "agents": [
+        "main"
+      ],
+      "allowedChatTypes": [
+        "direct"
+      ],
+      "queryMode": "recent",
+      "timeoutMs": 15000,
+      "maxSummaryChars": 900,
+      "maxHits": 8,
+      "logging": true
     },
     "profiles": {
       "lite": {
@@ -39,27 +75,126 @@
       }
     }
   },
-  "provider": {
-    "mode": "mock",
-    "baseUrl": "https://api.openai.com/v1",
-    "model": "gpt-4o-mini",
-    "mockDelayMs": 0,
-    "apiKeyEnv": "OPENAI_API_KEY",
-    "apiKeyProviderId": "openai-compatible",
-    "temperature": 0.2,
-    "maxTokens": 1200,
-    "plannerMaxTokens": 450,
-    "timeoutMs": 45000,
-    "systemPrompt": "You are OmniClaw, a practical local-first assistant focused on user needs, planning, execution, safety, and clarity.",
-    "fallbacks": [
-      "openrouter",
-      "nvidia",
-      "minimax"
-    ]
+  "acp": {
+    "enabled": true,
+    "dispatch": {
+      "enabled": true
+    },
+    "backend": "local-cli",
+    "defaultAgent": "codex",
+    "allowedAgents": [
+      "claude",
+      "codex",
+      "copilot",
+      "cursor",
+      "droid",
+      "gemini",
+      "iflow",
+      "kilocode",
+      "kimi",
+      "kiro",
+      "openclaw",
+      "opencode",
+      "pi",
+      "qwen"
+    ],
+    "maxConcurrentSessions": 8,
+    "runtime": {
+      "ttlMinutes": 120
+    }
   },
-  "fallbacks": [
-    "codex-cli"
-  ],
+  "codingHarness": {
+    "enabled": true,
+    "defaultAgent": "codex",
+    "allowedAgents": [
+      "omniclaw",
+      "codex",
+      "opencode",
+      "claude",
+      "gemini",
+      "qwen"
+    ],
+    "fallbackAgents": [
+      "omniclaw"
+    ],
+    "maxConcurrentSessions": 4,
+    "defaultMode": "run",
+    "timeoutSeconds": 180,
+    "maxPromptChars": 24000,
+    "maxOutputChars": 12000,
+    "agents": {
+      "omniclaw": {
+        "command": "omniclaw-internal",
+        "args": [],
+        "taskArg": "internal",
+        "internal": true,
+        "description": "Built-in OmniClaw coding harness using local file and shell tools."
+      },
+      "codex": {
+        "command": "codex",
+        "args": [
+          "exec",
+          "--skip-git-repo-check",
+          "-"
+        ],
+        "taskArg": "stdin",
+        "fallbackAgents": [
+          "omniclaw"
+        ],
+        "description": "OpenAI Codex CLI coding agent harness."
+      },
+      "opencode": {
+        "command": "opencode",
+        "args": [
+          "run"
+        ],
+        "taskArg": "append",
+        "description": "OpenCode coding agent harness."
+      },
+      "claude": {
+        "command": "claude",
+        "args": [
+          "-p"
+        ],
+        "taskArg": "append",
+        "description": "Claude Code prompt harness."
+      },
+      "gemini": {
+        "command": "gemini",
+        "args": [
+          "--prompt"
+        ],
+        "taskArg": "append",
+        "description": "Gemini CLI prompt harness."
+      },
+      "qwen": {
+        "command": "qwen",
+        "args": [
+          "--prompt"
+        ],
+        "taskArg": "append",
+        "description": "Qwen CLI prompt harness."
+      }
+    }
+  },
+  "provider": {
+    "mode": "codex-cli",
+    "baseUrl": "",
+    "model": "",
+    "mockDelayMs": 0,
+    "apiKeyEnv": "",
+    "apiKeyProviderId": "codex-cli",
+    "temperature": 0.2,
+    "maxTokens": 8000,
+    "plannerMaxTokens": 900,
+    "timeoutMs": 180000,
+    "codexCommand": "codex",
+    "codexSandbox": "read-only",
+    "codexLiveEnabled": false,
+    "systemPrompt": "You are OmniClaw, a practical local-first assistant focused on user needs, planning, execution, safety, and clarity.",
+    "fallbacks": []
+  },
+  "fallbacks": [],
   "providerProfiles": {
     "openai": {
       "mode": "openai-compatible",
@@ -96,10 +231,11 @@
     "nvidia": {
       "mode": "openai-compatible",
       "baseUrl": "https://integrate.api.nvidia.com/v1",
-      "model": "z-ai/glm-5.1",
+      "model": "meta/llama-3.1-70b-instruct",
       "apiKeyProviderId": "nvidia",
       "httpReferer": "http://localhost:3147",
-      "appTitle": "OmniClaw"
+      "appTitle": "OmniClaw",
+      "timeoutMs": 60000
     },
     "minimax": {
       "mode": "openai-compatible",
@@ -160,7 +296,8 @@
   "session": {
     "detailMessageLimit": 80,
     "previewChars": 140,
-    "autoResetIdleMinutes": 0
+    "autoResetIdleMinutes": 0,
+    "identityLinks": {}
   },
   "agents": {
     "main": {
@@ -256,6 +393,14 @@
         "sessions_spawn",
         "sessions_yield",
         "session_status",
+        "acp_doctor",
+        "acp_install",
+        "acp_spawn",
+        "acp_status",
+        "acp_sessions",
+        "acp_cancel",
+        "acp_close",
+        "acp_set_option",
         "subagents",
         "agents_list",
         "memory_search",
@@ -309,10 +454,13 @@
       "allowConfigWrite": true,
       "allowShellExecution": true,
       "allowMemoryPromotion": true,
+      "allowMemoryRead": true,
+      "allowMemoryWrite": true,
       "allowDreamSweep": true,
       "allowConnectorWrite": true,
       "allowComputerAccess": true,
-      "allowBrowserControl": true
+      "allowBrowserControl": true,
+      "allowBrowserEvaluate": true
     },
     "filesystem": {
       "workspaceRoot": ".",
@@ -346,7 +494,9 @@
       ]
     },
     "research": {
-      "maxResults": 5,
+      "provider": "tinyfish",
+      "maxResults": 8,
+      "fetchTop": 5,
       "timeoutMs": 10000
     },
     "browserControl": {

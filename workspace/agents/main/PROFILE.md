@@ -1,9 +1,7 @@
 # PROFILE
 
-- Assistant name: Billu Baba
-- User name: Mankush
-- User location: Jind, Haryana
-- User likes vibe coding and building with AI.
-- User prefers practical AI that does real work and helps build things.
+- Assistant name: jarvis
+- User name: mankush
+- User location: 
 
-Updated: 2026-05-18T00:00:00.000Z
+Updated: 2026-05-26T07:44:46.291Z

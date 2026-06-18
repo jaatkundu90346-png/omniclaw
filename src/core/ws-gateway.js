@@ -780,21 +780,34 @@ async function handleRpc({ agent, method, params }) {
       if (!tool) {
         throw new Error("tool is required");
       }
+      // Support natural language intervals ("5m", "1h", "2d") and cron expressions
+      // intervalSeconds is numeric (backward compat), interval is string ("5m", "1h30m")
+      const scheduleInput = {
+        name: String(params?.name || `${tool} schedule`).trim(),
+        tool,
+        input: params?.input || {},
+        agentId: params?.agentId || "main",
+        maxRuns: Number(params?.maxRuns || 0),
+        runNow: Boolean(params?.runNow),
+        source: "ws",
+        retry: {
+          maxAttempts: Number(params?.retryMaxAttempts || 1),
+          delayMs: Number(params?.retryDelaySeconds || 5) * 1000,
+        },
+      };
+
+      // Prefer natural interval string, then cron, then numeric intervalSeconds
+      if (params?.interval && typeof params.interval === "string") {
+        scheduleInput.interval = params.interval; // "5m", "1h", "2d", "1h30m"
+      } else if (params?.cron && typeof params.cron === "string") {
+        scheduleInput.cron = params.cron; // Raw cron expression
+      } else {
+        // Legacy: intervalSeconds as number
+        scheduleInput.intervalMs = Number(params?.intervalSeconds || 60) * 1000;
+      }
+
       return {
-        schedule: agent.scheduler.createSchedule({
-          name: String(params?.name || `${tool} schedule`).trim(),
-          tool,
-          input: params?.input || {},
-          agentId: params?.agentId || "main",
-          intervalMs: Number(params?.intervalSeconds || 60) * 1000,
-          maxRuns: Number(params?.maxRuns || 0),
-          runNow: Boolean(params?.runNow),
-          source: "ws",
-          retry: {
-            maxAttempts: Number(params?.retryMaxAttempts || 1),
-            delayMs: Number(params?.retryDelaySeconds || 5) * 1000,
-          },
-        }),
+        schedule: agent.scheduler.createSchedule(scheduleInput),
       };
     }
     case "schedules.run": {
@@ -895,6 +908,147 @@ async function handleRpc({ agent, method, params }) {
       return {
         job: agent.worker.cancelJob(jobId, String(params?.reason || "ws-cancel").trim()),
       };
+    }
+    case "autonomous.execute": {
+      // Execute autonomous task with Think-Act-Observe-Reflect loop
+      // User can trigger this directly without LLM prompt
+      const objective = String(params?.objective || params?.task || params?.request || "").trim();
+      if (!objective) {
+        throw new Error("objective/task/request is required");
+      }
+
+      const maxIterations = Number(params?.maxIterations || 200);
+      const checkpointEnabled = Boolean(params?.checkpointEnabled !== false);
+      const daemonMode = Boolean(params?.daemonMode || false);
+
+      // Check if autonomousRuntime exists
+      if (!agent.autonomousRuntime) {
+        throw new Error("Autonomous runtime not initialized");
+      }
+
+      // Set execution parameters
+      const previousMax = agent.autonomousRuntime.executionState.maxIterations;
+      agent.autonomousRuntime.executionState.maxIterations = Math.max(1, Math.min(10000, maxIterations));
+      agent.autonomousRuntime.executionState.currentIteration = 0;
+
+      // Execute the task
+      const result = await agent.autonomousRuntime.executeTask(objective, {
+        agentId: params?.agentId || "main",
+        sessionId: params?.sessionId || "autonomous-ws-session",
+        checkpointEnabled,
+        daemonMode,
+        tools: agent.tools?.getAll?.({ agentId: params?.agentId || "main", modelCallableOnly: true }) || [],
+        skills: agent.skills?.list?.() || [],
+      });
+
+      // Restore original max
+      agent.autonomousRuntime.executionState.maxIterations = previousMax;
+
+      // Emit completion event
+      agent.gatewayStore.addEvent("autonomous.completed", {
+        objective,
+        success: result.success,
+        iterations: result.executionStats?.currentIteration || 0,
+        duration: result.executionStats?.totalDurationMs || 0,
+      });
+
+      return {
+        success: result.success,
+        objective,
+        iterations: result.executionStats?.currentIteration || 0,
+        maxIterations: maxIterations,
+        results: result.results || [],
+        goal: result.goal ? {
+          id: result.goal.id,
+          title: result.goal.title,
+          status: result.goal.status,
+        } : null,
+        executionStats: result.executionStats,
+      };
+    }
+    case "autonomous.status": {
+      // Get autonomous runtime status
+      if (!agent.autonomousRuntime) {
+        return { initialized: false };
+      }
+      const state = agent.autonomousRuntime.executionState;
+      return {
+        initialized: true,
+        currentGoal: state.currentGoal?.title || null,
+        currentIteration: state.currentIteration || 0,
+        maxIterations: state.maxIterations || 10,
+        executionHistory: (state.executionHistory || []).length,
+        reflectionLog: (state.reflectionLog || []).length,
+      };
+    }
+    case "autonomous.checkpoint": {
+      // Save or load checkpoint for autonomous task
+      const action = String(params?.action || "save").trim();
+      const taskId = String(params?.taskId || "").trim();
+
+      if (action === "save") {
+        // Save current state
+        const checkpointData = {
+          taskId,
+          timestamp: new Date().toISOString(),
+          state: agent.autonomousRuntime?.executionState || {},
+          goalStack: agent.autonomousRuntime?.goalManager?.goalStack || [],
+        };
+        return {
+          saved: true,
+          checkpointId: `checkpoint_${Date.now()}`,
+          data: checkpointData,
+        };
+      } else if (action === "load") {
+        // Load from checkpoint (would need checkpoint store implementation)
+        return {
+          loaded: false,
+          reason: "Checkpoint store not yet implemented",
+        };
+      }
+      throw new Error(`Unknown checkpoint action: ${action}`);
+    }
+    case "autonomous.daemon.start": {
+      // Start the autonomous daemon
+      agent.autonomousDaemon?.start();
+      return {
+        started: true,
+        status: agent.autonomousDaemon?.getStatus() || {},
+      };
+    }
+    case "autonomous.daemon.stop": {
+      // Stop the autonomous daemon
+      agent.autonomousDaemon?.stop();
+      return {
+        stopped: true,
+        status: agent.autonomousDaemon?.getStatus() || {},
+      };
+    }
+    case "autonomous.daemon.enqueue": {
+      // Add a task to the daemon queue
+      const objective = String(params?.objective || params?.task || "").trim();
+      if (!objective) {
+        throw new Error("objective/task is required");
+      }
+      const taskId = agent.autonomousDaemon?.enqueue({
+        objective,
+        priority: Number(params?.priority || 0),
+        maxIterations: Math.max(1, Math.min(10000, Number(params?.maxIterations || 200))),
+        context: params?.context || {},
+      });
+      return {
+        enqueued: true,
+        taskId,
+        queueLength: agent.autonomousDaemon?.taskQueue?.length || 0,
+      };
+    }
+    case "autonomous.daemon.status": {
+      // Get daemon status
+      return agent.autonomousDaemon?.getStatus() || { running: false };
+    }
+    case "autonomous.daemon.clear": {
+      // Clear the task queue
+      return agent.autonomousDaemon?.clearQueue() || { cleared: 0 };
     }
     default:
       throw new Error(`Unknown method: ${method}`);

@@ -144,6 +144,10 @@ const bundleResult = run(esbuild, [
   "--platform=node",
   "--target=node22",
   "--format=cjs",
+  "--external:playwright",
+  "--external:playwright-core",
+  "--external:playwright-core/*",
+  "--external:chromium-bidi/*",
   "--outfile=" + bundlePath,
 ]);
 

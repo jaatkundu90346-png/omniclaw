@@ -29,6 +29,33 @@ function sortByUpdatedAtDesc(left, right) {
   return rightTime - leftTime;
 }
 
+function normalizeRouteValue(value) {
+  const text = String(value == null ? "" : value).trim();
+  return text || null;
+}
+
+function normalizeIdentityToken(channel, peerId) {
+  const rawPeer = String(peerId || "").trim().toLowerCase();
+  const rawChannel = String(channel || "").trim().toLowerCase();
+  if (!rawPeer) return "";
+  return rawPeer.includes(":") ? rawPeer : `${rawChannel}:${rawPeer}`;
+}
+
+function findIdentityGroup(identityLinks = {}, token = "") {
+  const wanted = String(token || "").trim().toLowerCase();
+  if (!wanted || !identityLinks || typeof identityLinks !== "object") {
+    return null;
+  }
+  for (const [group, ids] of Object.entries(identityLinks)) {
+    if (!Array.isArray(ids)) continue;
+    const normalized = ids.map((id) => String(id || "").trim().toLowerCase());
+    if (normalized.includes(wanted)) {
+      return { group, ids: normalized };
+    }
+  }
+  return null;
+}
+
 export class SessionStore {
   constructor(rootDir, configStore = null) {
     this.rootDir = rootDir;
@@ -145,6 +172,17 @@ export class SessionStore {
       queuedRunIds: Array.isArray(session.queuedRunIds) ? session.queuedRunIds.map(String) : [],
       parentSessionId: session.parentSessionId || null,
       resetReason: session.resetReason || null,
+      lastChannel: normalizeRouteValue(session.lastChannel),
+      lastTo: normalizeRouteValue(session.lastTo),
+      lastAccountId: normalizeRouteValue(session.lastAccountId),
+      deliveryContext:
+        session.deliveryContext && typeof session.deliveryContext === "object"
+          ? {
+              channel: normalizeRouteValue(session.deliveryContext.channel),
+              to: normalizeRouteValue(session.deliveryContext.to),
+              accountId: normalizeRouteValue(session.deliveryContext.accountId),
+            }
+          : null,
       lastUserMessagePreview: String(session.lastUserMessagePreview || ""),
       lastAssistantPreview: String(session.lastAssistantPreview || ""),
       transcriptPath,
@@ -231,6 +269,10 @@ export class SessionStore {
       queuedRunIds: session.queuedRunIds,
       parentSessionId: session.parentSessionId,
       resetReason: session.resetReason,
+      lastChannel: session.lastChannel,
+      lastTo: session.lastTo,
+      lastAccountId: session.lastAccountId,
+      deliveryContext: session.deliveryContext,
       transcriptPath: session.transcriptPath,
       lastUserMessagePreview: session.lastUserMessagePreview,
       lastAssistantPreview: session.lastAssistantPreview,
@@ -242,6 +284,17 @@ export class SessionStore {
   listSessions(limit = 50) {
     const sessions = [...this.read().sessions].sort(sortByUpdatedAtDesc).slice(0, limit);
     return sessions.map((session) => this.summarizeSession(session));
+  }
+
+  listSessionSummariesFast(limit = 50) {
+    const max = Math.max(1, Math.min(200, Number(limit || 50)));
+    const parsed = this.readRaw();
+    const sessions = Array.isArray(parsed.sessions) ? parsed.sessions : [];
+    return sessions
+      .map((session) => this.normalizeSession(session))
+      .sort(sortByUpdatedAtDesc)
+      .slice(0, max)
+      .map((session) => this.summarizeSession(session));
   }
 
   findSessionIndex(data, sessionId) {
@@ -282,6 +335,10 @@ export class SessionStore {
       queuedRunIds: [],
       parentSessionId,
       resetReason,
+      lastChannel: channel || null,
+      lastTo: null,
+      lastAccountId: null,
+      deliveryContext: null,
     });
     this.ensureTranscriptArtifacts(session, { overwrite: true });
     return session;
@@ -366,6 +423,8 @@ export class SessionStore {
       modelToolLoop: message.modelToolLoop && typeof message.modelToolLoop === "object" ? message.modelToolLoop : undefined,
       providerDiagnostics:
         message.providerDiagnostics && typeof message.providerDiagnostics === "object" ? message.providerDiagnostics : undefined,
+      finalMetadata:
+        message.finalMetadata && typeof message.finalMetadata === "object" ? message.finalMetadata : undefined,
       planSummary: message.planSummary || undefined,
       at,
     });
@@ -627,6 +686,94 @@ export class SessionStore {
     return this.summarizeSession(data.sessions[index]);
   }
 
+  dockSession(sessionId, route = {}) {
+    const data = this.read();
+    const index = this.findSessionIndex(data, sessionId);
+    if (index === -1) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    const session = data.sessions[index];
+    const targetChannel = normalizeRouteValue(route.channel || route.targetChannel);
+    const targetTo = normalizeRouteValue(route.to || route.targetTo || route.peerId || route.targetPeerId);
+    const targetAccountId = normalizeRouteValue(route.accountId || route.targetAccountId || "default");
+    const sourceChannel = normalizeRouteValue(route.sourceChannel || session.lastChannel || session.channel);
+    const sourceTo = normalizeRouteValue(route.sourceTo || route.sourcePeerId || route.from || session.lastTo);
+
+    if (!targetChannel || !targetTo) {
+      return {
+        ok: false,
+        blocked: true,
+        reason: "missing-target-route",
+        message: "Docking requires target channel and target peer/to id.",
+        session: this.summarizeSession(session),
+      };
+    }
+
+    const identityLinks = this.configStore?.getConfig?.()?.session?.identityLinks || {};
+    if (Object.keys(identityLinks).length > 0) {
+      const targetToken = normalizeIdentityToken(targetChannel, targetTo);
+      const targetGroup = findIdentityGroup(identityLinks, targetToken);
+      if (!targetGroup) {
+        return {
+          ok: false,
+          blocked: true,
+          reason: "target-not-linked",
+          message: `Target ${targetToken} is not present in session.identityLinks.`,
+          session: this.summarizeSession(session),
+        };
+      }
+      if (sourceTo) {
+        const sourceToken = normalizeIdentityToken(sourceChannel || session.channel, sourceTo);
+        const sourceGroup = findIdentityGroup(identityLinks, sourceToken);
+        if (!sourceGroup || sourceGroup.group !== targetGroup.group) {
+          return {
+            ok: false,
+            blocked: true,
+            reason: "source-target-not-linked",
+            message: `Source ${sourceToken} and target ${targetToken} are not in the same identityLinks group.`,
+            session: this.summarizeSession(session),
+          };
+        }
+      }
+    }
+
+    const at = new Date().toISOString();
+    session.lastChannel = targetChannel;
+    session.lastTo = targetTo;
+    session.lastAccountId = targetAccountId;
+    session.deliveryContext = {
+      channel: targetChannel,
+      to: targetTo,
+      accountId: targetAccountId,
+    };
+    session.updatedAt = at;
+    this.appendTranscriptEntryInData(session, {
+      type: "event",
+      event: "session.docked",
+      payload: {
+        sourceChannel,
+        sourceTo,
+        targetChannel,
+        targetTo,
+        targetAccountId,
+      },
+      at,
+    });
+    data.sessions[index] = this.normalizeSession(session);
+    this.write(data);
+    return {
+      ok: true,
+      docked: true,
+      route: {
+        channel: targetChannel,
+        to: targetTo,
+        accountId: targetAccountId,
+      },
+      session: this.summarizeSession(data.sessions[index]),
+    };
+  }
+
   updateQueueState(sessionId, queuedRunIds = []) {
     const data = this.read();
     const index = this.findSessionIndex(data, sessionId);
@@ -724,5 +871,191 @@ export class SessionStore {
     data.sessions[index].updatedAt = new Date().toISOString();
     this.write(data);
     return { compacted: true, removedCount: removed.length, keptCount: kept.length };
+  }
+
+  // ─── Session Rotation with Handoff ─────────────────────────────────
+
+  /**
+   * Read handoff file content and parse it into sections.
+   * @param {string} handoffPath - Path to handoff markdown file
+   * @returns {Object} Parsed handoff content
+   */
+  readHandoffFile(handoffPath) {
+    if (!fs.existsSync(handoffPath)) {
+      throw new Error(`Handoff file not found: ${handoffPath}`);
+    }
+    const content = fs.readFileSync(handoffPath, "utf-8");
+    const sections = this.parseHandoffContent(content);
+    return { path: handoffPath, content, sections };
+  }
+
+  /**
+   * Parse handoff markdown content into structured sections.
+   * @param {string} content - Markdown content
+   * @returns {Object} Parsed sections
+   */
+  parseHandoffContent(content) {
+    const result = {
+      goal: "",
+      progress: "",
+      modifiedFiles: [],
+      keyDecisions: [],
+      openQuestions: [],
+      nextSteps: "",
+    };
+
+    const lines = content.split(/\r?\n/);
+    let currentSection = null;
+    let listBuffer = [];
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+
+      // Section headers
+      if (/^#+\s*(goal|target|objective)/i.test(trimmed)) {
+        currentSection = "goal";
+      } else if (/^#+\s*progress|done|completed/i.test(trimmed)) {
+        currentSection = "progress";
+      } else if (/^#+\s*(modified|changed|files?)/i.test(trimmed)) {
+        currentSection = "modifiedFiles";
+      } else if (/^#+\s*(key|important)\s*(decision|choice)/i.test(trimmed)) {
+        currentSection = "keyDecisions";
+      } else if (/^#+\s*(open|remaining)\s*(question|issue)/i.test(trimmed)) {
+        currentSection = "openQuestions";
+      } else if (/^#+\s*(next|what['"']?s?\s*next|action)/i.test(trimmed)) {
+        currentSection = "nextSteps";
+      } else if (currentSection && (trimmed.startsWith("-") || trimmed.startsWith("*") || /^\d+\./.test(trimmed))) {
+        // List items
+        listBuffer.push(trimmed.replace(/^[-*\d.]\s*/, "").trim());
+      } else if (currentSection && trimmed) {
+        // Paragraph content
+        if (currentSection === "goal" || currentSection === "progress" || currentSection === "nextSteps") {
+          result[currentSection] += (result[currentSection] ? " " : "") + trimmed;
+        }
+      }
+    }
+
+    // Flush list buffer to appropriate section
+    if (listBuffer.length > 0) {
+      if (currentSection === "modifiedFiles") {
+        result.modifiedFiles = listBuffer;
+      } else if (currentSection === "keyDecisions") {
+        result.keyDecisions = listBuffer;
+      } else if (currentSection === "openQuestions") {
+        result.openQuestions = listBuffer;
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Rotate session with handoff - archive old, create new with context.
+   * @param {string} sessionId - Session to rotate
+   * @param {string} handoffPath - Path to handoff markdown file
+   * @param {Object} options - Rotation options
+   * @returns {Object} New session info
+   */
+  rotateSession(sessionId, handoffPath, options = {}) {
+    const data = this.read();
+    const oldSession = this.findSession(data, sessionId);
+    if (!oldSession) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    // Read and parse handoff
+    const handoff = this.readHandoffFile(handoffPath);
+
+    // Archive old session
+    this.archiveSessionInData(data, sessionId, `rotated:${handoffPath}`);
+
+    // Create new session maintaining lineage
+    const newSession = this.createSession({
+      key: oldSession.key,
+      label: oldSession.label,
+      agentId: oldSession.agentId,
+      channel: oldSession.channel,
+      parentSessionId: sessionId, // Link to old session
+      resetReason: "session_rotation",
+    });
+
+    // Inject handoff content as first message
+    const handoffMessage = {
+      type: "handoff",
+      sessionId: newSession.id,
+      parentSessionId: sessionId,
+      at: new Date().toISOString(),
+      ...handoff.sections,
+      fullContent: handoff.content,
+    };
+
+    const transcriptPath = this.getTranscriptAbsolutePath(newSession);
+    fs.appendFileSync(transcriptPath, JSON.stringify(handoffMessage) + "\n");
+
+    // Update data store
+    data.sessions.push(newSession);
+    this.write(data);
+
+    return {
+      oldSessionId: sessionId,
+      newSessionId: newSession.id,
+      handoffPath: handoffPath,
+      handoffSections: handoff.sections,
+      lineage: {
+        parent: sessionId,
+        child: newSession.id,
+      },
+    };
+  }
+
+  /**
+   * Get session lineage (parent chain).
+   * @param {string} sessionId - Starting session
+   * @returns {Array} Array of session IDs in lineage
+   */
+  getSessionLineage(sessionId) {
+    const data = this.read();
+    const lineage = [sessionId];
+    let currentId = sessionId;
+
+    while (true) {
+      const session = this.findSession(data, currentId);
+      if (!session || !session.parentSessionId) break;
+      lineage.push(session.parentSessionId);
+      currentId = session.parentSessionId;
+      if (lineage.length > 100) break; // Safety limit
+    }
+
+    return lineage.reverse();
+  }
+
+  // ─── Legacy Archive Helper ────────────────────────────────────────
+
+  archiveSessionInData(data, sessionId, reason = "manual") {
+    const index = this.findSessionIndex(data, sessionId);
+    if (index === -1) return false;
+
+    const session = data.sessions[index];
+    const archiveDir = path.join(this.rootDir, "data", "sessions", "archive");
+    fs.mkdirSync(archiveDir, { recursive: true });
+
+    // Move transcript
+    const oldTranscriptPath = this.getTranscriptAbsolutePath(session);
+    if (fs.existsSync(oldTranscriptPath)) {
+      const archivePath = path.join(archiveDir, `${sessionId}.jsonl`);
+      fs.renameSync(oldTranscriptPath, archivePath);
+    }
+
+    // Update session state
+    data.sessions[index] = {
+      ...session,
+      status: "archived",
+      lifecycleState: "archived",
+      endedAt: new Date().toISOString(),
+      archiveReason: reason,
+      archivedAt: new Date().toISOString(),
+    };
+
+    return true;
   }
 }

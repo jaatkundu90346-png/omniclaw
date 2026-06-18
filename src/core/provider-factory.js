@@ -37,7 +37,14 @@ export function getProvider(configStore, secretStore, profileId) {
     return provider;
   }
   if (mode === "codex-cli") {
-    return new CodexCliProvider(configStore);
+    const tempConfig = {
+      ...config,
+      provider: { ...config.provider, ...profile },
+    };
+    const tempConfigStore = {
+      getConfig: () => tempConfig,
+    };
+    return new CodexCliProvider(tempConfigStore);
   }
   return null;
 }

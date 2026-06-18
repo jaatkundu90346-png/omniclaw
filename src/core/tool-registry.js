@@ -2,6 +2,69 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { createManusToolsExtension } from "./manus-tools-extension.js";
+import { findOverlappingWorkspaceAgentIds } from "./agent-delete-safety.js";
+
+const CACHEABLE_OBSERVATION_TOOLS = new Set([
+  "time_now",
+  "runtime_summary",
+  "provider_status",
+  "prompt_trace",
+  "tool_trace",
+  "list_tasks",
+  "list_files",
+  "read_file",
+  "list_computer_directory",
+  "read_computer_file",
+  "search_computer_files",
+  "computer_access_status",
+  "computer_access_audit",
+  "web_search",
+  "web_research",
+  "web_fetch",
+  "browser_status",
+  "browser_snapshot",
+  "browser_links",
+  "browser_text",
+  "session_status",
+  "sessions_list",
+  "sessions_history",
+  "subagents",
+  "memory_search",
+  "memory_get",
+]);
+
+const SIDE_EFFECT_TOOLS = new Set([
+  "write_file",
+  "append_file",
+  "write_computer_file",
+  "create_computer_directory",
+  "copy_computer_path",
+  "move_computer_path",
+  "delete_computer_path",
+  "run_terminal_command",
+  "exec",
+  "shell_exec",
+  "apply_patch",
+  "sandbox_apply",
+  "open_browser_url",
+  "browser",
+  "browser_click",
+  "browser_type",
+  "browser_press",
+  "message",
+  "send_message",
+  "sessions_send",
+  "sessions_spawn",
+  "agent_harness_spawn",
+  "agent_harness_cancel",
+  "delegate_task",
+  "remember_note",
+  "promote_memory",
+  "memory_write",
+  "run_task",
+  "configure_telegram",
+]);
 
 function normalizeContext(context = {}) {
   if (typeof context === "string") {
@@ -13,11 +76,339 @@ function normalizeContext(context = {}) {
   return context && typeof context === "object" ? context : {};
 }
 
+function stableToolStringify(value) {
+  if (value == null || typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableToolStringify(item)).join(",")}]`;
+  }
+  return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableToolStringify(value[key])}`).join(",")}}`;
+}
+
+function normalizeToolInputForKey(id, input = {}) {
+  const value = input && typeof input === "object" && !Array.isArray(input) ? input : {};
+  if (["web_search", "web_research"].includes(id)) {
+    return {
+      query: String(value.query || value.q || value.search || "").toLowerCase().replace(/\s+/g, " ").trim(),
+      maxResults: Number(value.maxResults || value.limit || 0) || undefined,
+    };
+  }
+  if (["web_fetch", "open_browser_url"].includes(id)) {
+    return { url: String(value.url || value.href || "").toLowerCase().trim() };
+  }
+  if (["read_file", "read_computer_file", "list_files", "list_computer_directory", "search_computer_files"].includes(id)) {
+    return Object.fromEntries(
+      Object.entries(value)
+        .map(([key, entry]) => [key, typeof entry === "string" ? entry.replace(/\0/g, "").trim() : entry])
+        .sort(([left], [right]) => left.localeCompare(right)),
+    );
+  }
+  return Object.fromEntries(Object.entries(value).sort(([left], [right]) => left.localeCompare(right)));
+}
+
+function buildObservationKey(id, input = {}, context = {}) {
+  const runScope = String(context.runId || context.sessionId || "global").trim() || "global";
+  const agentScope = String(context.agentId || "main").trim() || "main";
+  return `${agentScope}:${runScope}:${id}:${stableToolStringify(normalizeToolInputForKey(id, input))}`;
+}
+
+function isSuccessfulToolResult(result) {
+  return Boolean(result) &&
+    typeof result === "object" &&
+    !Array.isArray(result) &&
+    result.error !== true &&
+    result.blocked !== true &&
+    result.ok !== false &&
+    result.success !== false;
+}
+
+function isFailedToolResult(result) {
+  return Boolean(result) &&
+    typeof result === "object" &&
+    !Array.isArray(result) &&
+    (result.error === true || result.blocked === true || result.ok === false || result.success === false);
+}
+
+function compactObservationResult(result = {}) {
+  if (!result || typeof result !== "object" || Array.isArray(result)) {
+    return result;
+  }
+  return {
+    ...result,
+    cachedObservation: true,
+    cacheHint: "Same tool and same arguments already succeeded in this run/session, so OmniClaw reused the prior observation.",
+  };
+}
+
+function sanitizeToolResult(result) {
+  if (!result || typeof result !== "object" || Array.isArray(result)) {
+    return result;
+  }
+  const sanitize = (value, key = "", depth = 0) => {
+    if (depth > 5) {
+      return "[truncated-depth]";
+    }
+    const normalizedKey = String(key || "");
+    if (!/^apiKeyProviderId$/i.test(normalizedKey) && /api[_-]?key|authorization|bearer|password|secret|token|cookie|credential/i.test(normalizedKey)) {
+      return "[redacted]";
+    }
+    if (typeof value === "string") {
+      return value.length > 24000 ? `${value.slice(0, 23960)}...[truncated ${value.length - 23960} chars]` : value;
+    }
+    if (Array.isArray(value)) {
+      return value.slice(0, 200).map((item) => sanitize(item, "", depth + 1));
+    }
+    if (value && typeof value === "object") {
+      return Object.fromEntries(Object.entries(value).map(([childKey, child]) => [childKey, sanitize(child, childKey, depth + 1)]));
+    }
+    return value;
+  };
+  return sanitize(result);
+}
+
+function validateAgainstSimpleSchema(schema = null, input = {}) {
+  if (!schema || typeof schema !== "object") {
+    return { ok: true, errors: [] };
+  }
+  const errors = [];
+  const value = input && typeof input === "object" && !Array.isArray(input) ? input : {};
+  const required = Array.isArray(schema.required) ? schema.required : [];
+  for (const key of required) {
+    if (value[key] === undefined || value[key] === null || value[key] === "") {
+      errors.push(`${key} is required`);
+    }
+  }
+  const properties = schema.properties && typeof schema.properties === "object" ? schema.properties : {};
+  for (const [key, rule] of Object.entries(properties)) {
+    if (value[key] === undefined || !rule || typeof rule !== "object") {
+      continue;
+    }
+    const type = Array.isArray(rule.type) ? rule.type : [rule.type].filter(Boolean);
+    if (type.length === 0) {
+      continue;
+    }
+    const actual = Array.isArray(value[key]) ? "array" : typeof value[key];
+    if (!type.includes(actual)) {
+      errors.push(`${key} must be ${type.join(" or ")}`);
+    }
+  }
+  return { ok: errors.length === 0, errors };
+}
+
 function slugify(value) {
   return String(value || "")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "") || "openclaw-skill";
+}
+
+function normalizeBrowserAction(action = "") {
+  const normalized = String(action || "open").trim().toLowerCase().replace(/[_\s-]+/g, "-");
+  const aliases = {
+    goto: "open",
+    navigate: "open",
+    navigation: "open",
+    visit: "open",
+    observe: "view",
+    inspect: "view",
+    snapshot: "view",
+    text: "view",
+    read: "view",
+    fetch: "view",
+    capture: "screenshot",
+    fill: "type",
+    input: "type",
+    js: "evaluate",
+    eval: "evaluate",
+    forward: "forward",
+    next: "forward",
+    previous: "back",
+    stop: "close",
+    tabs: "sessions",
+    list: "sessions",
+    "list-sessions": "sessions",
+    doctor: "status",
+  };
+  return aliases[normalized] || normalized;
+}
+
+function browserObservation(action, tool, result, extra = {}) {
+  const ok = !result?.error && result?.ok !== false && result?.success !== false;
+  return {
+    ok,
+    action,
+    tool,
+    sessionId: result?.sessionId || extra.sessionId || null,
+    url: result?.url || result?.currentUrl || extra.url || null,
+    title: result?.title || null,
+    result,
+    next: ok
+      ? "Continue with another browser action if the page state is not enough; otherwise summarize the observed result."
+      : "Use the returned error as an observation, adjust selector/session/url, then retry or explain the blocker.",
+  };
+}
+
+function isPatchOperationLine(line = "") {
+  return /^(?:\*\*\* Add File: |\*\*\* Update File: |\*\*\* Delete File: )/.test(String(line || ""));
+}
+
+function parseStructuredPatchInput(input = "") {
+  const text = String(input || "").replace(/\r\n/g, "\n");
+  const lines = text.split("\n");
+  const first = lines.findIndex((line) => line.trim() === "*** Begin Patch");
+  let last = -1;
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    if (lines[i].trim() === "*** End Patch") {
+      last = i;
+      break;
+    }
+  }
+  if (first < 0 || last < 0 || last <= first) {
+    throw new Error("Patch must include *** Begin Patch and *** End Patch.");
+  }
+
+  const operations = [];
+  let i = first + 1;
+  while (i < last) {
+    const line = lines[i];
+    if (!line.trim()) {
+      i += 1;
+      continue;
+    }
+    let match = line.match(/^\*\*\* Add File: (.+)$/);
+    if (match) {
+      const filePath = match[1].trim();
+      i += 1;
+      const contentLines = [];
+      while (i < last && !isPatchOperationLine(lines[i])) {
+        if (!lines[i].startsWith("+")) {
+          throw new Error(`Add File lines must start with '+': ${filePath}`);
+        }
+        contentLines.push(lines[i].slice(1));
+        i += 1;
+      }
+      operations.push({ kind: "add", path: filePath, content: contentLines.join("\n") });
+      continue;
+    }
+
+    match = line.match(/^\*\*\* Delete File: (.+)$/);
+    if (match) {
+      operations.push({ kind: "delete", path: match[1].trim() });
+      i += 1;
+      continue;
+    }
+
+    match = line.match(/^\*\*\* Update File: (.+)$/);
+    if (match) {
+      const filePath = match[1].trim();
+      i += 1;
+      let moveTo = "";
+      if (i < last) {
+        const move = lines[i].match(/^\*\*\* Move to: (.+)$/);
+        if (move) {
+          moveTo = move[1].trim();
+          i += 1;
+        }
+      }
+      const hunks = [];
+      while (i < last && !isPatchOperationLine(lines[i])) {
+        hunks.push(lines[i]);
+        i += 1;
+      }
+      operations.push({ kind: "update", path: filePath, moveTo, hunks });
+      continue;
+    }
+
+    throw new Error(`Unsupported patch operation line: ${line}`);
+  }
+
+  if (operations.length === 0) {
+    throw new Error("Patch contains no file operations.");
+  }
+  return operations;
+}
+
+function splitPatchHunks(lines = []) {
+  const groups = [];
+  let current = [];
+  for (const line of lines) {
+    if (line.startsWith("@@")) {
+      if (current.length > 0) groups.push(current);
+      current = [];
+      continue;
+    }
+    if (line.trim() === "*** End of File" || line.trim() === "") {
+      continue;
+    }
+    current.push(line);
+  }
+  if (current.length > 0) groups.push(current);
+  return groups;
+}
+
+function findLineSequence(lines = [], expected = [], startAt = 0) {
+  if (expected.length === 0) return startAt;
+  for (let i = Math.max(0, startAt); i <= lines.length - expected.length; i += 1) {
+    let ok = true;
+    for (let j = 0; j < expected.length; j += 1) {
+      if (lines[i + j] !== expected[j]) {
+        ok = false;
+        break;
+      }
+    }
+    if (ok) return i;
+  }
+  return -1;
+}
+
+function applyPatchHunksToContent(content = "", hunkLines = [], filePath = "") {
+  const hadFinalNewline = /\n$/.test(content);
+  const lines = String(content || "").replace(/\r\n/g, "\n").split("\n");
+  if (hadFinalNewline && lines[lines.length - 1] === "") {
+    lines.pop();
+  }
+
+  let cursor = 0;
+  let appliedHunks = 0;
+  for (const hunk of splitPatchHunks(hunkLines)) {
+    const expected = [];
+    const replacement = [];
+    for (const line of hunk) {
+      const prefix = line[0];
+      const value = line.slice(1);
+      if (prefix === " ") {
+        expected.push(value);
+        replacement.push(value);
+      } else if (prefix === "-") {
+        expected.push(value);
+      } else if (prefix === "+") {
+        replacement.push(value);
+      } else {
+        throw new Error(`Unsupported patch hunk line in ${filePath}: ${line}`);
+      }
+    }
+
+    if (expected.length === 0) {
+      lines.splice(cursor, 0, ...replacement);
+      cursor += replacement.length;
+      appliedHunks += 1;
+      continue;
+    }
+
+    const index = findLineSequence(lines, expected, cursor);
+    if (index < 0) {
+      throw new Error(`Patch context did not match for ${filePath}. Read the file again and regenerate a narrower patch.`);
+    }
+    lines.splice(index, expected.length, ...replacement);
+    cursor = index + replacement.length;
+    appliedHunks += 1;
+  }
+
+  return {
+    content: lines.join("\n") + (hadFinalNewline ? "\n" : ""),
+    appliedHunks,
+  };
 }
 
 function parseOpenClawSkill(contents, filePath, rootDir) {
@@ -285,6 +676,116 @@ const LIMITED_PRODUCT_TOOLS = {
   },
 };
 
+const CODEX_GRADE_MODEL_TOOLS = new Set([
+  "time_now",
+  "provider_status",
+  "provider_diagnostics",
+  "configure_provider_brain",
+  "test_provider_profile",
+  "list_provider_models",
+  "list_files",
+  "read_file",
+  "write_file",
+  "append_file",
+  "edit",
+  "apply_patch",
+  "verify_html_artifact",
+  "search_computer_files",
+  "list_computer_directory",
+  "read_computer_file",
+  "write_computer_file",
+  "create_computer_directory",
+  "copy_computer_path",
+  "move_computer_path",
+  "delete_computer_path",
+  "computer_access_status",
+  "computer_system_status",
+  "exec_approval_status",
+  "plan_shell_command",
+  "run_terminal_command",
+  "exec",
+  "process",
+  "processes",
+  "process_status",
+  "process_kill",
+  "process_cleanup",
+  "code_execution",
+  "execute_code",
+  "auto_review",
+  "sandbox_status",
+  "sandbox_run",
+  "sandbox_apply",
+  "web_research",
+  "web_search",
+  "brave_search",
+  "exa_search",
+  "web_fetch",
+  "read_url",
+  "x_search",
+  "open_browser_url",
+  "browser",
+  "browser_status",
+  "browser_open",
+  "browser_view",
+  "browser_snapshot",
+  "browser_links",
+  "browser_text",
+  "browser_screenshot",
+  "browser_navigate",
+  "browser_click",
+  "browser_type",
+  "browser_scroll",
+  "browser_back",
+  "browser_forward",
+  "browser_wait",
+  "browser_evaluate",
+  "browser_close",
+  "browser_automate",
+  "browser_sessions",
+  "remember_note",
+  "list_notes",
+  "list_long_term_memory",
+  "promote_memory",
+  "dream_memory_sweep",
+  "memory_search",
+  "memory_get",
+  "memory",
+  "session_search",
+  "sessions_list",
+  "sessions_history",
+  "sessions_spawn",
+  "sessions_yield",
+  "sessions_status",
+  "channel_dock",
+  "acp_doctor",
+  "acp_install",
+  "acp_spawn",
+  "acp_status",
+  "acp_sessions",
+  "acp_cancel",
+  "acp_close",
+  "acp_set_option",
+  "agent_harness_doctor",
+  "agent_harness_spawn",
+  "agent_harness_status",
+  "agents",
+  "create_task",
+  "list_tasks",
+  "todo",
+  "run_task",
+  "delegate_task",
+  "subagents",
+  "cron",
+  "cronjob",
+  "configure_telegram",
+  "message",
+  "send_message",
+  "gateway_status",
+  "tool_ledger",
+  "runtime_profile",
+  "real_task_health",
+]);
+
 export class ToolRegistry {
   constructor({
     memoryStore,
@@ -305,6 +806,8 @@ export class ToolRegistry {
     connectorStore,
     agentRuntime,
     subAgentSpawner,
+    acpManager,
+    codingHarness,
   }) {
     this.memoryStore = memoryStore;
     this.taskStore = taskStore;
@@ -324,6 +827,12 @@ export class ToolRegistry {
     this.connectorStore = connectorStore;
     this.agentRuntime = agentRuntime;
     this.subAgentSpawner = subAgentSpawner;
+    this.acpManager = acpManager || agentRuntime?.acp;
+    this.codingHarness = codingHarness || agentRuntime?.codingHarness;
+    this.observationCache = new Map();
+    this.failedObservationCache = new Map();
+    this.inFlightToolKeys = new Set();
+    this.duplicateSideEffectKeys = new Set();
     this.tools = {
       time_now: {
         description: "Get the current local time in ISO format.",
@@ -335,12 +844,41 @@ export class ToolRegistry {
       remember_note: {
         description: "Save a short note into persistent memory.",
         permission: "allowNoteWrite",
+        schema: {
+          type: "object",
+          required: ["text"],
+          properties: {
+            text: { type: "string" },
+          },
+        },
         run: async ({ text }, context) => {
           const note = this.memoryStore.addNote(String(text || "").trim(), {
             agentId: this.getAgentId(context),
           });
           return { saved: true, note };
         },
+      },
+      memory_write: {
+        description: "Write OpenClaw-style layered memory: session note, daily memory, or promoted long-term memory with optional action boundary.",
+        permission: "allowMemoryWrite",
+        group: "memory",
+        schema: {
+          type: "object",
+          required: ["content"],
+          properties: {
+            type: { type: "string" },
+            content: { type: "string" },
+            source: { type: "string" },
+            expiry: { type: "string" },
+            actionBoundary: { type: "string" },
+          },
+        },
+        run: async (input = {}, context) => this.memoryStore.writeLayeredMemory({
+          ...input,
+          agentId: input.agentId || this.getAgentId(context),
+          sessionId: input.sessionId || context.sessionId || "",
+          runId: input.runId || context.runId || "",
+        }),
       },
       list_notes: {
         description: "List all saved notes.",
@@ -811,6 +1349,12 @@ export class ToolRegistry {
       list_files: {
         description: "List files in a workspace directory.",
         permission: "allowDirectoryList",
+        schema: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "Workspace-relative directory path, defaults to ." },
+          },
+        },
         run: async ({ path }) => ({
           path: path || ".",
           entries: this.fileStore.listDirectory(path || "."),
@@ -819,6 +1363,7 @@ export class ToolRegistry {
       computer_access_status: {
         description: "Show configured laptop/computer access roots, terminal policy, and browser capability.",
         permission: null,
+        schema: { type: "object", properties: {} },
         run: async () => {
           const config = this.configStore.getConfig();
           const policy = this.getComputerAccessPolicy();
@@ -864,6 +1409,16 @@ export class ToolRegistry {
       search_computer_files: {
         description: "Search file and folder names across configured laptop access roots.",
         permission: "allowComputerAccess",
+        schema: {
+          type: "object",
+          properties: {
+            query: { type: "string", description: "Filename, folder name, or text to search." },
+            roots: { type: "array", items: { type: "string" }, description: "Optional roots like ~/Downloads or C:/Users/name/Documents." },
+            maxDepth: { type: "number" },
+            maxResults: { type: "number" },
+            maxScanMs: { type: "number" },
+          },
+        },
         run: async (input = {}, context) => {
           const result = this.fileStore.searchComputerFiles(input, this.requireComputerAccessPolicy());
           this.recordComputerAccessOperation("search", {
@@ -884,6 +1439,12 @@ export class ToolRegistry {
       list_computer_directory: {
         description: "List files from configured laptop access roots such as the user home folder.",
         permission: "allowComputerAccess",
+        schema: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "Computer path, e.g. ~, ~/Downloads, ~/Documents, C:/Users/name/Desktop." },
+          },
+        },
         run: async ({ path }, context) => {
           const result = this.fileStore.listComputerDirectory(path || "~", this.requireComputerAccessPolicy());
           this.recordComputerAccessOperation("list", result, context);
@@ -893,6 +1454,13 @@ export class ToolRegistry {
       read_computer_file: {
         description: "Read a text file from configured laptop access roots.",
         permission: "allowComputerAccess",
+        schema: {
+          type: "object",
+          required: ["path"],
+          properties: {
+            path: { type: "string", description: "Computer file path, e.g. ~/Downloads/notes.txt." },
+          },
+        },
         run: async ({ path }, context) => {
           const config = this.configStore.getConfig();
           const result = this.fileStore.readComputerText(
@@ -907,6 +1475,15 @@ export class ToolRegistry {
       write_computer_file: {
         description: "Write or append a text file inside configured laptop access roots.",
         permission: "allowComputerAccess",
+        schema: {
+          type: "object",
+          required: ["path", "content"],
+          properties: {
+            path: { type: "string", description: "Computer file path inside allowed roots, e.g. ~/Downloads/omniclaw-output.txt." },
+            content: { type: "string", description: "Exact text content to write." },
+            append: { type: "boolean", description: "Append instead of overwrite." },
+          },
+        },
         run: async ({ path, content, append }, context) => {
           const result = this.fileStore.writeComputerText(path, String(content || ""), {
             append: Boolean(append),
@@ -919,6 +1496,13 @@ export class ToolRegistry {
       create_computer_directory: {
         description: "Create a directory inside configured laptop access roots.",
         permission: "allowComputerAccess",
+        schema: {
+          type: "object",
+          required: ["path"],
+          properties: {
+            path: { type: "string", description: "Computer directory path inside allowed roots." },
+          },
+        },
         run: async ({ path }, context) => {
           const result = this.fileStore.createComputerDirectory(path, this.requireComputerAccessPolicy());
           this.recordComputerAccessOperation("mkdir", result, context);
@@ -928,6 +1512,17 @@ export class ToolRegistry {
       copy_computer_path: {
         description: "Copy a file or folder between configured laptop access roots.",
         permission: "allowComputerAccess",
+        schema: {
+          type: "object",
+          required: ["from", "to"],
+          properties: {
+            from: { type: "string" },
+            source: { type: "string" },
+            to: { type: "string" },
+            destination: { type: "string" },
+            overwrite: { type: "boolean" },
+          },
+        },
         run: async ({ from, source, to, destination, overwrite }, context) => {
           const result = this.fileStore.copyComputerPath(from || source, to || destination, {
             overwrite: Boolean(overwrite),
@@ -940,6 +1535,17 @@ export class ToolRegistry {
       move_computer_path: {
         description: "Move or rename a file or folder inside configured laptop access roots.",
         permission: "allowComputerAccess",
+        schema: {
+          type: "object",
+          required: ["from", "to"],
+          properties: {
+            from: { type: "string" },
+            source: { type: "string" },
+            to: { type: "string" },
+            destination: { type: "string" },
+            overwrite: { type: "boolean" },
+          },
+        },
         run: async ({ from, source, to, destination, overwrite }, context) => {
           const result = this.fileStore.moveComputerPath(from || source, to || destination, {
             overwrite: Boolean(overwrite),
@@ -952,18 +1558,51 @@ export class ToolRegistry {
       delete_computer_path: {
         description: "Delete a file or folder inside configured laptop access roots. By default it moves the item to data/trash for restore.",
         permission: "allowComputerAccess",
-        run: async ({ path, permanent }, context) => {
+        schema: {
+          type: "object",
+          required: ["path"],
+          properties: {
+            path: { type: "string" },
+            permanent: { type: "boolean", description: "Permanent delete only if explicitly requested and policy allows it." },
+            confirmAgentWorkspaceDelete: { type: "boolean" },
+          },
+        },
+        run: async ({ path, permanent, confirmAgentWorkspaceDelete }, context) => {
+          const policy = this.requireComputerAccessPolicy();
+          const target = this.fileStore.resolveComputerPath(path, policy);
+          const overlappingAgentIds = findOverlappingWorkspaceAgentIds(
+            this.agentRegistry,
+            this.getAgentId(context),
+            target,
+          );
+          if (overlappingAgentIds.length > 0 && !confirmAgentWorkspaceDelete) {
+            return {
+              path: target,
+              deleted: false,
+              blocked: true,
+              reason: "Target overlaps another agent workspace.",
+              overlappingAgentIds,
+              confirmHint: "Pass confirmAgentWorkspaceDelete=true only after the user explicitly confirms deleting this shared/overlapping agent workspace path.",
+            };
+          }
           const result = this.fileStore.deleteComputerPath(path, {
             permanent: Boolean(permanent),
-            policy: this.requireComputerAccessPolicy(),
+            policy,
           });
-          this.recordComputerAccessOperation("delete", result, context);
+          this.recordComputerAccessOperation("delete", { ...result, overlappingAgentIds }, context);
           return result;
         },
       },
       read_file: {
         description: "Read a text file from the workspace.",
         permission: "allowFileRead",
+        schema: {
+          type: "object",
+          required: ["path"],
+          properties: {
+            path: { type: "string", description: "Workspace-relative file path to read." },
+          },
+        },
         run: async ({ path }) => {
           const config = this.configStore.getConfig();
           return this.fileStore.readText(path, config.tools.filesystem.maxReadBytes);
@@ -972,6 +1611,14 @@ export class ToolRegistry {
       write_file: {
         description: "Write a text file inside protected writable roots.",
         permission: "allowFileWrite",
+        schema: {
+          type: "object",
+          required: ["path", "content"],
+          properties: {
+            path: { type: "string", description: "Workspace-relative destination file path." },
+            content: { type: "string", description: "Full text content to write." },
+          },
+        },
         run: async ({ path, content }) => {
           const config = this.configStore.getConfig();
           return this.fileStore.writeText(path, String(content || ""), {
@@ -983,6 +1630,14 @@ export class ToolRegistry {
       append_file: {
         description: "Append text to a file inside protected writable roots.",
         permission: "allowFileWrite",
+        schema: {
+          type: "object",
+          required: ["path", "content"],
+          properties: {
+            path: { type: "string", description: "Workspace-relative destination file path." },
+            content: { type: "string", description: "Text content to append." },
+          },
+        },
         run: async ({ path, content }) => {
           const config = this.configStore.getConfig();
           return this.fileStore.writeText(path, String(content || ""), {
@@ -994,10 +1649,53 @@ export class ToolRegistry {
       verify_html_artifact: {
         description: "Verify a generated HTML artifact is nonblank, structured, and has interactive app pieces.",
         permission: "allowFileRead",
-        run: async ({ path }) => {
+        run: async ({ path: artifactInputPath, requiredText = [], forbiddenText = [], minBytes = 1200 }) => {
           const config = this.configStore.getConfig();
-          const file = this.fileStore.readText(path, config.tools.filesystem.maxReadBytes);
+          const file = this.fileStore.readText(artifactInputPath, config.tools.filesystem.maxReadBytes);
           const html = String(file.content || "");
+          const artifactPath = String(file.path || artifactInputPath || "");
+          const artifactDir = artifactPath.replace(/[^/\\]+$/i, "");
+          const linkedAssetPaths = [
+            ...[...html.matchAll(/<script\b[^>]+src=["']([^"']+)["'][^>]*>/gi)].map((match) => match[1]),
+            ...[...html.matchAll(/<link\b(?=[^>]+rel=["']stylesheet["'])(?=[^>]+href=["']([^"']+)["'])[^>]*>/gi)].map((match) => match[1]),
+          ]
+            .map((asset) => String(asset || "").trim())
+            .filter((asset) => asset && !/^(?:https?:|data:|#)/i.test(asset))
+            .map((asset) => path.normalize(path.join(artifactDir || ".", asset)).replace(/\\/g, "/"));
+          const linkedAssetText = linkedAssetPaths.map((assetPath) => {
+            try {
+              return this.fileStore.readText(assetPath, config.tools.filesystem.maxReadBytes).content || "";
+            } catch {
+              return "";
+            }
+          }).join("\n");
+          const verificationText = `${html}\n${linkedAssetText}`;
+          const bytes = file.totalBytes || file.bytesRead || Buffer.byteLength(html, "utf8");
+          const required = Array.isArray(requiredText) ? requiredText.map((item) => String(item || "").trim()).filter(Boolean) : [];
+          const forbidden = Array.isArray(forbiddenText) ? forbiddenText.map((item) => String(item || "").trim()).filter(Boolean) : [];
+          const normalizedVerificationText = verificationText.toLowerCase();
+          const requiredMatches = required.map((needle) => {
+            const normalizedNeedle = needle.toLowerCase();
+            if (normalizedVerificationText.includes(normalizedNeedle)) return true;
+            const tokens = normalizedNeedle
+              .split(/[^a-z0-9]+/i)
+              .map((token) => token.trim())
+              .filter((token) => token.length > 2 && !["cta", "app", "web", "site", "page"].includes(token));
+            if (tokens.length === 0) return true;
+            if (
+              tokens.includes("responsive") &&
+              (tokens.includes("layout") || tokens.includes("design")) &&
+              /<meta\b[^>]+name=["']viewport["']/i.test(html) &&
+              /@media\b/i.test(linkedAssetText || html)
+            ) {
+              return true;
+            }
+            return tokens.every((token) =>
+              normalizedVerificationText.includes(token) ||
+              (token === "reservation" && normalizedVerificationText.includes("reserve")) ||
+              (token === "reserve" && normalizedVerificationText.includes("reservation")),
+            );
+          });
           const withoutScripts = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ");
           const withoutStyles = withoutScripts.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ");
           const textPreview = withoutStyles
@@ -1007,19 +1705,27 @@ export class ToolRegistry {
             .slice(0, 300);
           const checks = [
             { id: "exists", label: "File exists and was readable", ok: true },
+            { id: "min-bytes", label: `File has enough substance (${minBytes}+ bytes)`, ok: bytes >= Number(minBytes || 0) },
             { id: "html-root", label: "Contains <!doctype> or <html>", ok: /<!doctype html|<html[\s>]/i.test(html) },
             { id: "body", label: "Contains <body>", ok: /<body[\s>]/i.test(html) },
             { id: "visible-text", label: "Has visible text content", ok: textPreview.length >= 10 },
+            { id: "style-depth", label: "Has meaningful embedded styling", ok: /<style\b[^>]*>[\s\S]{180,}<\/style>/i.test(html) || /<link\b[^>]+rel=["']stylesheet["']/i.test(html) },
             { id: "interactive-control", label: "Has buttons, inputs, selects, textareas, or links", ok: /<(button|input|select|textarea|a)\b/i.test(html) },
             { id: "script", label: "Has client-side script", ok: /<script\b/i.test(html) },
+            { id: "script-interaction", label: "Script wires real UI behavior", ok: /(addEventListener|onclick|onsubmit|onchange|querySelector|localStorage)/i.test(verificationText) },
             { id: "responsive-meta", label: "Has viewport meta tag", ok: /<meta\b[^>]+name=["']viewport["']/i.test(html) },
+            { id: "required-text", label: "Includes requested app-specific text", ok: requiredMatches.every(Boolean), details: required },
+            { id: "forbidden-text", label: "Does not include known fallback template text", ok: forbidden.every((needle) => !html.includes(needle)), details: forbidden },
           ];
           const passed = checks.filter((check) => check.ok).length;
           const score = Math.round((passed / checks.length) * 100);
           return {
             path: file.path,
-            bytes: file.totalBytes || file.bytesRead || html.length,
-            ok: score >= 75 && checks.find((check) => check.id === "visible-text")?.ok,
+            bytes,
+            ok: score >= 85
+              && checks.find((check) => check.id === "visible-text")?.ok
+              && checks.find((check) => check.id === "required-text")?.ok
+              && checks.find((check) => check.id === "forbidden-text")?.ok,
             score,
             passed,
             total: checks.length,
@@ -1032,6 +1738,13 @@ export class ToolRegistry {
       plan_shell_command: {
         description: "Prepare a shell-command request that requires later approval.",
         permission: "allowShellPlanning",
+        schema: {
+          type: "object",
+          required: ["request"],
+          properties: {
+            request: { type: "string", description: "Natural-language or shell command request." },
+          },
+        },
         run: async ({ request }) => {
           const command = this.inferCommand(request);
           return this.shellPlanner.buildRequest(
@@ -1040,16 +1753,66 @@ export class ToolRegistry {
           );
         },
       },
+      exec_approval_status: {
+        description: "Inspect OmniClaw terminal/exec approval policy: trust level, allowlist mode, safe defaults, and what the agent can run without asking.",
+        permission: null,
+        run: async () => {
+          const config = this.configStore.getConfig();
+          const shellPolicy = config.tools?.shellExecution || {};
+          const permissions = config.tools?.permissions || {};
+          return {
+            enabled: Boolean(permissions.allowShellExecution),
+            host: shellPolicy.host || "gateway",
+            trustLevel: shellPolicy.trustLevel || "protected",
+            allowlistMode: shellPolicy.allowlistMode || "advisory",
+            cwd: shellPolicy.cwd || ".",
+            allowExternalCwd: Boolean(shellPolicy.allowExternalCwd),
+            timeoutMs: shellPolicy.timeoutMs || 120000,
+            maxOutputBytes: shellPolicy.maxOutputBytes || 256000,
+            safeBins: shellPolicy.safeBins || ["cut", "uniq", "head", "tail", "tr", "wc"],
+            strictInlineEval: Boolean(shellPolicy.strictInlineEval),
+            allowlistPatterns: shellPolicy.allowlistPatterns || [],
+            blockedPatterns: shellPolicy.blockedPatterns || [],
+            decisions: ["allow once", "allow always", "deny"],
+            rule: "Terminal commands execute locally through ShellExecutor. Failed stdout/stderr is returned to the LLM for self-correction; destructive commands stay blocked by policy.",
+          };
+        },
+      },
       web_research: {
-        description: "Run lightweight web research using public web sources.",
+        description: "Search the web, fetch/read the best result pages, and return grounded page text for the LLM to synthesize into a real answer.",
         permission: "allowWebResearch",
-        run: async ({ query }) => this.webResearch.search(String(query || "").trim()),
+        group: "web",
+        schema: {
+          type: "object",
+          required: ["query"],
+          properties: {
+            query: { type: "string" },
+            maxResults: { type: "number" },
+            count: { type: "number" },
+            fetchTop: { type: "number" },
+            provider: { type: "string" },
+          },
+        },
+        run: async ({ query, count, maxResults, fetchTop, provider }) =>
+          this.webResearch.search(String(query || "").trim(), {
+            maxResults: Number(count || maxResults || 8),
+            fetchTop: fetchTop === undefined ? undefined : Number(fetchTop),
+            provider,
+          }),
       },
       read_url: {
         description: "Fetch and read the text content of a specific public URL.",
         permission: "allowWebResearch",
-        run: async ({ url }, context) =>
-          this.runBrowserOperation("read_url", () => this.browserOperator.readUrl(String(url || "").trim()), context),
+        group: "web",
+        schema: {
+          type: "object",
+          required: ["url"],
+          properties: {
+            url: { type: "string" },
+            maxChars: { type: "number" },
+          },
+        },
+        run: async ({ url, maxChars }) => this.webResearch.fetchUrl(String(url || "").trim(), Number(maxChars || 12000)),
       },
       open_browser_url: {
         description: "Open a URL in the laptop's default browser.",
@@ -1066,6 +1829,14 @@ export class ToolRegistry {
       run_terminal_command: {
         description: "Execute a terminal command through OmniClaw shell policy and audit logging.",
         permission: "allowShellExecution",
+        schema: {
+          type: "object",
+          required: ["command"],
+          properties: {
+            command: { type: "string", description: "Exact terminal command to execute." },
+            cwd: { type: "string", description: "Optional working directory." },
+          },
+        },
         run: async ({ command, cwd }, context) =>
           this.agentRuntime?.executeTerminalCommand
             ? this.agentRuntime.executeTerminalCommand({
@@ -1102,11 +1873,18 @@ export class ToolRegistry {
         description: "Execute a shell command with optional background mode. Use background=true for long-running commands. Returns processId for background processes.",
         permission: "allowShellExecution",
         group: "terminal",
+        examples: [
+          { input: { command: "git status" }, description: "Check git working tree status" },
+          { input: { command: "npm run build", background: true }, description: "Run build in background, get processId" },
+          { input: { command: "ping -n 4 google.com" }, description: "Ping 4 times to test connectivity" },
+        ],
         run: async ({ command, cwd, background, timeout }, context) => {
           const result = await this.shellExecutor.execute({
             command: String(command || "").trim(),
             cwd: String(cwd || "").trim(),
             background: Boolean(background),
+            runId: context.runId || "",
+            sessionId: context.sessionId || "",
           });
           return result;
         },
@@ -1164,18 +1942,28 @@ export class ToolRegistry {
         description: "Inspect the vendored OpenClaw reference checkout and license metadata.",
         permission: null,
         group: "openclaw",
+        examples: [
+          { input: {}, description: "Show OpenClaw vendor status, version, and license info" },
+        ],
         run: async () => this.getOpenClawVendorStatus(),
       },
       openclaw_code_study: {
         description: "Study the vendored OpenClaw source tree and produce an OmniClaw implementation map.",
         permission: null,
         group: "openclaw",
+        examples: [
+          { input: {}, description: "Deep-dive OpenClaw and map features to OmniClaw equivalents" },
+          { input: { focus: "skill-system" }, description: "Focus analysis on OpenClaw's skill system implementation" },
+        ],
         run: async (input = {}) => this.getOpenClawCodeStudy(input),
       },
       hermes_reference_status: {
         description: "Summarize Hermes Agent reference ideas and map them to OmniClaw's current runtime.",
         permission: null,
         group: "hermes",
+        examples: [
+          { input: {}, description: "Get Hermes Agent reference status and feature mapping" },
+        ],
         run: async () => {
           const provider = this.agentRuntime?.getProviderInfo?.() || {};
           const report = this.agentRuntime?.getV2Report?.() || {};
@@ -1261,24 +2049,37 @@ export class ToolRegistry {
         description: "Hermes-style context compression status: head/middle/tail, summary framing, token budget awareness.",
         permission: null,
         group: "runtime",
+        examples: [
+          { input: {}, description: "Get current context compression status and token budget" },
+        ],
         run: async (_, context) => this.getContextCompressionStatus(context),
       },
       memory_lifecycle_status: {
         description: "Hermes-style memory lifecycle status: prefetch, fenced memory block, sync, dream sweep, and session search.",
         permission: null,
         group: "memory",
+        examples: [
+          { input: {}, description: "Get memory lifecycle status and health metrics" },
+          { input: { query: "project decisions" }, description: "Query memory for specific context" },
+        ],
         run: async ({ query } = {}, context) => this.getMemoryLifecycleStatus({ query, context }),
       },
       skill_system_status: {
         description: "Hermes-style skills system status: progressive disclosure, agentskills compatibility, and self-improvement gaps.",
         permission: null,
         group: "skills",
+        examples: [
+          { input: {}, description: "Get skill system status and available skills" },
+        ],
         run: async (_, context) => this.getSkillSystemStatus(context),
       },
       messaging_gateway_status: {
         description: "Hermes-style messaging gateway status: adapters, session routing, voice/media ingestion, and DM security.",
         permission: null,
-        group: "gateway",
+        group: "messaging",
+        examples: [
+          { input: {}, description: "Get messaging gateway status and active sessions" },
+        ],
         run: async (_, context) => this.getMessagingGatewayStatus(context),
       },
       configure_telegram: {
@@ -1291,66 +2092,101 @@ export class ToolRegistry {
         description: "Hermes-style terminal backend status: local/docker/ssh/cloud backends, process registry, and approval gates.",
         permission: null,
         group: "runtime",
+        examples: [
+          { input: {}, description: "Get terminal backend status and active processes" },
+        ],
         run: async (_, context) => this.getTerminalBackendsStatus(context),
       },
       model_provider_status: {
         description: "Hermes-style multi-provider model support status: API mode, credential pool, failover, and model discovery.",
         permission: null,
         group: "provider",
+        examples: [
+          { input: {}, description: "Get provider status, credentials, and failover config" },
+        ],
         run: async (_, context) => this.getModelProviderStatus(context),
       },
       subagent_delegation_status: {
         description: "Hermes-style subagent delegation status: isolation, blocked child tools, concurrency, and shared budget.",
         permission: null,
         group: "delegation",
+        examples: [
+          { input: {}, description: "Get subagent delegation status and active delegations" },
+        ],
         run: async (_, context) => this.getSubagentDelegationStatus(context),
       },
       mcp_integration_status: {
         description: "Hermes-style MCP integration status: configured servers, live tool registry, aliases, and ACP gap.",
         permission: null,
         group: "mcp",
+        examples: [
+          { input: {}, description: "Get MCP integration status and available tools" },
+        ],
         run: async (_, context) => this.getMcpIntegrationStatus(context),
       },
       mcp_connect_all: {
         description: "Connect all configured MCP servers and refresh their live tool registry.",
         permission: "allowConfigWrite",
         group: "mcp",
+        examples: [
+          { input: {}, description: "Connect all MCP servers and sync tool registry" },
+        ],
         run: async () => this.connectAllMcpServers(),
       },
       cron_scheduler_status: {
         description: "Hermes-style built-in cron scheduler status: schedules, background jobs, triggers, and delivery path.",
         permission: null,
         group: "cron",
+        examples: [
+          { input: {}, description: "Get scheduler overview: active schedules, next run time" },
+          { input: { scheduleId: "schedule_xxx" }, description: "Get specific schedule status" },
+        ],
         run: async (_, context) => this.getCronSchedulerStatus(context),
       },
       trajectory_training_status: {
         description: "Hermes-style trajectory generation and RL training status for agent runs/tool traces.",
         permission: null,
         group: "research",
+        examples: [
+          { input: {}, description: "Get trajectory training status and active models" },
+        ],
         run: async (_, context) => this.getTrajectoryTrainingStatus(context),
       },
       closed_learning_loop_status: {
         description: "Hermes-style closed learning loop status: session logging, memory nudges, skill promotion, and next interaction improvement.",
         permission: null,
         group: "learning",
+        examples: [
+          { input: {}, description: "Get learning loop status and recent improvements" },
+        ],
         run: async (_, context) => this.getClosedLearningLoopStatus(context),
       },
       hermes_use_cases_status: {
         description: "Map Hermes use-case categories to OmniClaw's current real capabilities and gaps.",
         permission: null,
         group: "runtime",
+        examples: [
+          { input: {}, description: "Get Hermes use cases and OmniClaw capability mapping" },
+        ],
         run: async (_, context) => this.getHermesUseCasesStatus(context),
       },
       design_principles_status: {
         description: "Report Hermes-style design principles and OmniClaw compliance/gaps.",
         permission: null,
         group: "runtime",
+        examples: [
+          { input: {}, description: "Get design principles and compliance report" },
+        ],
         run: async (_, context) => this.getDesignPrinciplesStatus(context),
       },
       openclaw_skill_scan: {
         description: "Scan vendored OpenClaw SKILL.md files for possible OmniClaw imports.",
         permission: null,
         group: "openclaw",
+        examples: [
+          { input: {}, description: "Scan all OpenClaw skills and show import candidates" },
+          { input: { category: "browser" }, description: "Scan only browser-related skills" },
+        ],
         run: async (input = {}) => this.scanOpenClawSkills(input),
       },
       openclaw_skill_import: {
@@ -1507,29 +2343,152 @@ export class ToolRegistry {
         group: "hermes-code",
         run: async ({ code }, context) => this.tools.code_execution.run({ code }, context),
       },
+      auto_review: {
+        description: "Run a Codex/OpenClaw-style self-review pass: inspect git changes, run validation, and return actionable failures.",
+        permission: "allowShellExecution",
+        group: "code",
+        run: async ({ tests = true, mode = "local", maxOutputChars = 12000 } = {}, context = {}) => {
+          if (!this.agentRuntime?.executeTerminalCommand) {
+            throw new Error("Terminal execution runtime is unavailable.");
+          }
+          const cwd = this.getRootDir();
+          const commands = [
+            { id: "status", command: "git status --short" },
+            { id: "diffstat", command: "git diff --stat" },
+          ];
+          if (tests) {
+            commands.push(
+              { id: "build", command: "npm.cmd run build" },
+              { id: "agent-loop", command: "npm.cmd run test:agent-loop" },
+              { id: "tool-contract", command: "npm.cmd run test:tool-contract" },
+              { id: "runtime-backend", command: "npm.cmd run test:runtime-backend" },
+              { id: "tool-execution", command: "npm.cmd run test:tool-execution" },
+              { id: "health", command: "npm.cmd test" },
+            );
+          }
+          const results = [];
+          for (const item of commands) {
+            const execution = await this.agentRuntime.executeTerminalCommand({
+              command: item.command,
+              cwd,
+              context,
+            });
+            results.push({
+              id: item.id,
+              command: item.command,
+              status: execution.status,
+              exitCode: execution.exitCode,
+              timedOut: Boolean(execution.timedOut),
+              durationMs: execution.durationMs || 0,
+              stdout: String(execution.stdout || "").slice(0, Number(maxOutputChars || 12000)),
+              stderr: String(execution.stderr || "").slice(0, Number(maxOutputChars || 12000)),
+            });
+          }
+          const failures = results.filter((item) =>
+            item.status !== "completed" || (item.exitCode != null && item.exitCode !== 0) || item.timedOut,
+          );
+          return {
+            ok: failures.length === 0,
+            mode,
+            testsRun: Boolean(tests),
+            commandCount: results.length,
+            failureCount: failures.length,
+            failures,
+            results,
+            nextAction:
+              failures.length > 0
+                ? "Read failing stdout/stderr, patch the concrete issue, then run auto_review again."
+                : "Validation commands passed. Inspect diff semantics before finalizing.",
+          };
+        },
+      },
       browser: {
-        description: "OpenClaw-compatible browser helper for URL open/fetch and DevTools automation actions.",
+        description: "OpenClaw-compatible unified browser tool. Use action/kind: status, open, view, links, screenshot, click, type, press, scroll, back, forward, wait, evaluate, automate, sessions, close.",
         permission: "allowBrowserControl",
-        group: "ui",
+        group: "browser",
         run: async (input = {}, context) => {
-          const { action, url } = input;
-          const normalizedAction = String(action || "open").trim().toLowerCase();
-          if (["status", "snapshot", "observe", "inspect", "screenshot", "capture", "text", "links", "click", "type", "fill"].includes(normalizedAction)) {
-            return this.runBrowserOperation(normalizedAction, () => this.browserOperator.automate(input), context);
+          const rawAction = input.action || input.kind || input.type || (input.url ? "open" : "status");
+          const action = normalizeBrowserAction(rawAction);
+          const sessionId = input.sessionId || input.browserSessionId || input.tabId;
+          const url = input.url || input.target || input.href || input.path;
+          const common = { ...input, sessionId };
+          const runConcrete = async (tool, args = common) => {
+            const result = await this.tools[tool].run(args, context);
+            return browserObservation(action, tool, result, { sessionId, url });
+          };
+
+          if (action === "status") {
+            const result = await this.tools.browser_status.run({}, context);
+            return browserObservation(action, "browser_status", result, { sessionId, url });
           }
-          if (["navigate", "goto"].includes(normalizedAction)) {
-            return this.runBrowserOperation(normalizedAction, () => this.browserOperator.automate(input), context);
+          if (action === "sessions") {
+            const result = await this.tools.browser_sessions.run({}, context);
+            return browserObservation(action, "browser_sessions", { success: true, sessions: result }, { sessionId, url });
           }
-          if (["fetch", "read", "read_url"].includes(normalizedAction)) {
-            return this.runBrowserOperation("read_url", () => this.browserOperator.readUrl(String(url || "").trim()), context);
+          if (action === "open") {
+            return runConcrete("browser_open", { ...common, url });
           }
-          if (["open"].includes(normalizedAction)) {
-            return this.runBrowserOperation("open_url", () => this.browserOperator.openUrl(String(url || "").trim()), context);
+          if (action === "view") {
+            if (url) {
+              const opened = await this.tools.browser_open.run({ ...common, url }, context);
+              if (opened?.error || opened?.success === false) {
+                return browserObservation(action, "browser_open", opened, { sessionId, url });
+              }
+            }
+            return runConcrete("browser_view", { ...common, format: input.format || "markdown" });
+          }
+          if (action === "links") {
+            const result = await this.runBrowserOperation("browser_links", () =>
+              this.requireBrowserPlaywright().evaluate({
+                sessionId,
+                script: `Array.from(document.querySelectorAll('a[href]')).slice(0, 80).map((a) => ({ text: (a.innerText || a.textContent || '').trim().slice(0, 160), href: a.href }))`,
+              }), context);
+            return browserObservation(action, "browser_evaluate", result, { sessionId, url });
+          }
+          if (action === "screenshot") {
+            return runConcrete("browser_screenshot", common);
+          }
+          if (action === "click") {
+            return runConcrete("browser_click", common);
+          }
+          if (action === "type") {
+            return runConcrete("browser_type", common);
+          }
+          if (action === "press") {
+            const result = await this.runBrowserOperation("browser_press", () =>
+              this.requireBrowserPlaywright().press({
+                sessionId,
+                selector: input.selector || "body",
+                key: input.key || input.text || "Enter",
+              }), context);
+            return browserObservation(action, "browser_press", result, { sessionId, url });
+          }
+          if (action === "scroll") {
+            return runConcrete("browser_scroll", common);
+          }
+          if (action === "back") {
+            return runConcrete("browser_back", common);
+          }
+          if (action === "forward") {
+            return runConcrete("browser_forward", common);
+          }
+          if (action === "wait") {
+            return runConcrete("browser_wait", common);
+          }
+          if (action === "evaluate") {
+            return runConcrete("browser_evaluate", common);
+          }
+          if (action === "automate") {
+            return runConcrete("browser_automate", { ...common, url, actions: input.actions || [] });
+          }
+          if (action === "close") {
+            return runConcrete("browser_close", common);
           }
           return {
             ok: false,
-            action: normalizedAction,
-            message: "Supported browser actions: status, open, navigate/goto, fetch/read, screenshot, text, links, click, type/fill.",
+            action,
+            supportedActions: ["status", "open", "view", "links", "screenshot", "click", "type", "press", "scroll", "back", "forward", "wait", "evaluate", "automate", "sessions", "close"],
+            message: "Unsupported browser action. Choose one supported action and retry.",
           };
         },
       },
@@ -1736,10 +2695,95 @@ export class ToolRegistry {
         run: async () => this.hermesToolNotReady("browser_dialog", "Dialog accept/dismiss support needs browser adapter wiring."),
       },
       web_search: {
-        description: "OpenClaw-compatible web search alias.",
+        description: "OpenClaw-compatible web search alias that also fetches the best result pages when fetchTop is enabled.",
         permission: "allowWebResearch",
         group: "web",
-        run: async ({ query }) => this.webResearch.search(String(query || "").trim()),
+        schema: {
+          type: "object",
+          required: ["query"],
+          properties: {
+            query: { type: "string" },
+            count: { type: "number" },
+            maxResults: { type: "number" },
+            fetchTop: { type: "number" },
+            provider: { type: "string" },
+            freshness: { type: "string" },
+            date_after: { type: "string" },
+            date_before: { type: "string" },
+            country: { type: "string" },
+            language: { type: "string" },
+            contents: { type: "string" },
+            type: { type: "string" },
+          },
+        },
+        run: async ({ query, count, maxResults, fetchTop, provider, freshness, date_after, date_before, country, language, contents, type }) =>
+          this.webResearch.search(String(query || "").trim(), {
+            maxResults: Number(count || maxResults || 8),
+            fetchTop: fetchTop === undefined ? undefined : Number(fetchTop),
+            provider,
+            freshness,
+            date_after,
+            date_before,
+            country,
+            language,
+            contents,
+            type,
+          }),
+      },
+      brave_search: {
+        description: "Search the web through Brave Search when a Brave key is configured; returns structured URL/title/snippet observations or a clear missing-key blocker.",
+        permission: "allowWebResearch",
+        group: "web",
+        run: async ({ query, count, maxResults, freshness, date_after, date_before, country, language, search_lang, ui_lang }) => {
+          const key = this.webResearch?.secretStore?.getProviderKey?.("brave")
+            || this.webResearch?.secretStore?.getProviderKey?.("brave-search")
+            || process.env.BRAVE_API_KEY
+            || "";
+          if (!key) {
+            return {
+              ok: false,
+              blocked: true,
+              provider: "brave",
+              error: "BRAVE_API_KEY is not configured. Use web_search for fallback providers or configure a Brave provider key.",
+            };
+          }
+          return this.webResearch.search(String(query || "").trim(), {
+            maxResults: Number(count || maxResults || 8),
+            provider: "brave",
+            freshness,
+            date_after,
+            date_before,
+            country,
+            language,
+            search_lang,
+            ui_lang,
+          });
+        },
+      },
+      exa_search: {
+        description: "Search the web through Exa neural/keyword search when an Exa key is configured; can request highlights, text, or summaries.",
+        permission: "allowWebResearch",
+        group: "web",
+        run: async ({ query, count, maxResults, type, contents, freshness, date_after, date_before }) => {
+          const key = this.webResearch?.secretStore?.getProviderKey?.("exa") || process.env.EXA_API_KEY || "";
+          if (!key) {
+            return {
+              ok: false,
+              blocked: true,
+              provider: "exa",
+              error: "EXA_API_KEY is not configured. Use web_search for fallback providers or configure an Exa provider key.",
+            };
+          }
+          return this.webResearch.search(String(query || "").trim(), {
+            maxResults: Number(count || maxResults || 8),
+            provider: "exa",
+            type,
+            contents,
+            freshness,
+            date_after,
+            date_before,
+          });
+        },
       },
       web_extract: {
         description: "Hermes-compatible URL extraction/fetch alias.",
@@ -1757,8 +2801,15 @@ export class ToolRegistry {
         description: "OpenClaw-compatible URL fetch alias.",
         permission: "allowWebResearch",
         group: "web",
-        run: async ({ url }, context) =>
-          this.runBrowserOperation("web_fetch", () => this.browserOperator.readUrl(String(url || "").trim()), context),
+        schema: {
+          type: "object",
+          required: ["url"],
+          properties: {
+            url: { type: "string" },
+            maxChars: { type: "number" },
+          },
+        },
+        run: async ({ url, maxChars }) => this.webResearch.fetchUrl(String(url || "").trim(), Number(maxChars || 12000)),
       },
       read: {
         description: "OpenClaw-compatible workspace file read alias.",
@@ -1804,24 +2855,10 @@ export class ToolRegistry {
         },
       },
       apply_patch: {
-        description: "OpenClaw-compatible patch entrypoint. Stores patch text as an artifact for review; direct application is intentionally gated.",
+        description: "Apply an OpenClaw/Codex structured patch to workspace files, then return changed paths and verification metadata.",
         permission: "allowFileWrite",
         group: "fs",
-        run: async ({ patch, label }) => {
-          const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-          const safeLabel = String(label || "patch").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "patch";
-          const path = `docs/drafts/${stamp}-${safeLabel}.patch`;
-          const config = this.configStore.getConfig();
-          return {
-            applied: false,
-            gated: true,
-            reason: "Patch was saved for review. Use Codex/apply_patch or an approved shell command to apply it.",
-            artifact: this.fileStore.writeText(path, String(patch || ""), {
-              allowedRoots: config.tools.filesystem.writableRoots,
-              append: false,
-            }),
-          };
-        },
+        run: async (input = {}) => this.applyStructuredPatch(input),
       },
       patch: {
         description: "Hermes-compatible patch alias.",
@@ -1926,6 +2963,34 @@ export class ToolRegistry {
         group: "sessions",
         run: async (input) => this.tools.message.run(input),
       },
+      channel_dock: {
+        description: "Move the current session reply route to a linked channel/peer without creating a new session.",
+        permission: "allowConnectorWrite",
+        group: "sessions",
+        run: async (input = {}, context = {}) => {
+          const sessionId = String(input.sessionId || context.sessionId || "").trim();
+          if (!sessionId) {
+            return {
+              ok: false,
+              blocked: true,
+              reason: "missing-session-id",
+              message: "channel_dock needs a current sessionId or explicit sessionId.",
+            };
+          }
+          if (!this.agentRuntime?.sessions?.dockSession) {
+            throw new Error("Session docking backend is unavailable.");
+          }
+          const result = this.agentRuntime.sessions.dockSession(sessionId, input);
+          this.agentRuntime?.gateway?.addEvent?.("session.docked", {
+            sessionId,
+            ok: Boolean(result.ok),
+            blocked: Boolean(result.blocked),
+            reason: result.reason || "",
+            route: result.route || null,
+          });
+          return result;
+        },
+      },
 
       browser_open: {
         description: "Open a URL in a browser. Returns sessionId for subsequent operations.",
@@ -2007,20 +3072,51 @@ export class ToolRegistry {
       },
 
       sessions_spawn: {
-        description: "Start a new OmniClaw session lane by label, agent, and channel.",
+        description: "Spawn an isolated background OmniClaw session and immediately return child session/run ids.",
         permission: null,
         group: "sessions",
-        run: async ({ label, agentId, channel }) => {
+        schema: {
+          type: "object",
+          properties: {
+            label: { type: "string" },
+            agentId: { type: "string" },
+            channel: { type: "string" },
+            message: { type: "string" },
+            task: { type: "string" },
+          },
+        },
+        run: async ({ label, agentId, channel, message, task } = {}, context = {}) => {
+          const instruction = String(message || task || "").trim();
           const session = this.agentRuntime?.sessions?.resolveSession?.({
             label: String(label || "spawned").trim(),
             agentId: String(agentId || "main").trim(),
             channel: String(channel || "webchat").trim(),
+            parentSessionId: context.sessionId || null,
           });
-          return { spawned: Boolean(session), session };
+          if (!session || !instruction || !this.agentRuntime?.handleMessage) {
+            return { spawned: Boolean(session), session, childSessionKey: session?.key || "", runId: "", queued: false };
+          }
+          const result = await this.agentRuntime.handleMessage(instruction, {
+            sessionId: session.id,
+            label: session.label,
+            agentId: session.agentId,
+            channel: session.channel,
+            parentRunId: context.runId || "",
+            parentSessionId: context.sessionId || "",
+            source: "sessions_spawn",
+          });
+          return {
+            spawned: true,
+            session,
+            childSessionKey: session.key,
+            runId: result?.run?.id || "",
+            queued: true,
+            contract: "spawn -> yield -> result event; do not poll repeatedly",
+          };
         },
       },
       sessions_yield: {
-        description: "Return current run/session status without doing more work.",
+        description: "Yield current turn after spawning/delegating work; wait for result event instead of polling.",
         permission: null,
         group: "sessions",
         run: async (_, context) => ({
@@ -2028,6 +3124,7 @@ export class ToolRegistry {
           sessionId: context.sessionId || "",
           runId: context.runId || "",
           agentId: this.getAgentId(context),
+          contract: "Do not poll subagents repeatedly. Spawn -> yield -> result event.",
         }),
       },
       session_status: {
@@ -2041,6 +3138,152 @@ export class ToolRegistry {
           runId: context.runId || "",
           agent: this.agentRegistry?.resolveAgent?.(this.getAgentId(context)) || null,
         }),
+      },
+      acp_doctor: {
+        description: "Run ACP backend/harness readiness checks for Codex, OpenCode, Claude, Gemini, and other ACP agents.",
+        permission: null,
+        group: "acp",
+        run: async (input = {}) => this.requireAcpManager().doctor(input),
+      },
+      acp_install: {
+        description: "Return deterministic ACP/acpx install and permission setup instructions.",
+        permission: null,
+        group: "acp",
+        run: async (input = {}) => this.requireAcpManager().installInstructions(input),
+      },
+      acp_spawn: {
+        description: "Spawn a real external ACP/local CLI harness session for a task.",
+        permission: "allowShellExecution",
+        group: "acp",
+        run: async (input = {}, context = {}) => this.requireAcpManager().spawn(input, context),
+      },
+      acp_status: {
+        description: "Show ACP control-plane status and optionally inspect one ACP session.",
+        permission: null,
+        group: "acp",
+        run: async (input = {}) => this.requireAcpManager().status(input),
+      },
+      acp_sessions: {
+        description: "List recent ACP external harness sessions.",
+        permission: null,
+        group: "acp",
+        run: async (input = {}) => this.requireAcpManager().listSessions(input),
+      },
+      acp_cancel: {
+        description: "Cancel a running ACP external harness session.",
+        permission: "allowShellExecution",
+        group: "acp",
+        run: async (input = {}) => this.requireAcpManager().cancel(input),
+      },
+      acp_close: {
+        description: "Close an ACP session binding/record.",
+        permission: "allowShellExecution",
+        group: "acp",
+        run: async (input = {}) => this.requireAcpManager().close(input),
+      },
+      acp_set_option: {
+        description: "Set ACP runtime option such as model, permissions, timeout, or cwd on a session/config.",
+        permission: "allowConfigWrite",
+        group: "acp",
+        run: async (input = {}) => this.requireAcpManager().setOption(input),
+      },
+      agent_harness_doctor: {
+        description: "Check jcode-style coding agent harness readiness for Codex/OpenCode/Claude/Gemini/Qwen CLI agents.",
+        permission: null,
+        group: "harness",
+        schema: {
+          type: "object",
+          properties: {
+            agentId: { type: "string", description: "Harness agent id such as codex, opencode, claude, gemini, or qwen." },
+          },
+        },
+        run: async (input = {}) => this.requireCodingHarness().doctor(input),
+      },
+      agent_harness_spawn: {
+        description: "Spawn a real coding-agent harness session to work on a coding task and return stored stdout/stderr/session metadata.",
+        permission: "allowShellExecution",
+        group: "harness",
+        schema: {
+          type: "object",
+          required: ["task"],
+          properties: {
+            agentId: { type: "string", description: "Harness agent id. Defaults to codingHarness.defaultAgent." },
+            task: { type: "string", description: "Coding task/prompt for the harness agent." },
+            prompt: { type: "string", description: "Alias for task." },
+            cwd: { type: "string", description: "Working directory. Defaults to workspace root." },
+            mode: { type: "string", description: "run waits for completion; background/session returns process id." },
+            label: { type: "string" },
+            model: { type: "string" },
+            permissions: { type: "string" },
+            timeoutSeconds: { type: "number" },
+            successCriteria: {
+              type: "array",
+              items: { type: "string" },
+              description: "Acceptance criteria the child agent must satisfy.",
+            },
+            verificationCommands: {
+              type: "array",
+              items: { type: "string" },
+              description: "Commands OmniClaw should run after the harness finishes. All must pass for verified completion.",
+            },
+            requiredArtifacts: {
+              type: "array",
+              items: { type: "string" },
+              description: "Expected files/artifacts that must exist after the harness run.",
+            },
+            constraints: {
+              type: "array",
+              items: { type: "string" },
+              description: "Extra safety/scope constraints for the child agent.",
+            },
+            context: { type: "string", description: "Compact parent context for the child agent." },
+          },
+        },
+        run: async (input = {}, context = {}) => this.requireCodingHarness().spawn(input, context),
+      },
+      agent_harness_status: {
+        description: "Inspect one coding-agent harness session or get harness control-plane status.",
+        permission: null,
+        group: "harness",
+        schema: {
+          type: "object",
+          properties: {
+            sessionId: { type: "string" },
+            sessionKey: { type: "string" },
+            label: { type: "string" },
+            limit: { type: "number" },
+            status: { type: "string" },
+          },
+        },
+        run: async (input = {}) => this.requireCodingHarness().status(input),
+      },
+      agent_harness_sessions: {
+        description: "List recent coding-agent harness sessions.",
+        permission: null,
+        group: "harness",
+        schema: {
+          type: "object",
+          properties: {
+            limit: { type: "number" },
+            status: { type: "string" },
+            agentId: { type: "string" },
+          },
+        },
+        run: async (input = {}) => this.requireCodingHarness().listSessions(input),
+      },
+      agent_harness_cancel: {
+        description: "Cancel a running coding-agent harness session.",
+        permission: "allowShellExecution",
+        group: "harness",
+        schema: {
+          type: "object",
+          properties: {
+            sessionId: { type: "string" },
+            sessionKey: { type: "string" },
+            label: { type: "string" },
+          },
+        },
+        run: async (input = {}) => this.requireCodingHarness().cancel(input),
       },
       subagents: {
         description: "List available sub-agents and optionally delegate a task.",
@@ -2064,13 +3307,13 @@ export class ToolRegistry {
         }),
       },
       skills_list: {
-        description: "Hermes-compatible skill listing across OmniClaw and vendored Hermes skills.",
+        description: "List compact OmniClaw skills. Full SKILL.md content is intentionally omitted; use skill_read on demand.",
         permission: null,
-        group: "hermes-skills",
+        group: "skills",
         run: async (input = {}, context) => {
           const agentId = this.getAgentId(context);
           const omniSkills = this.agentRegistry
-            ? this.agentRegistry.filterSkills(this.customizationEngine?.skillRegistry?.getAll?.() || [], agentId)
+            ? this.agentRegistry.filterSkills(this.agentRuntime?.skills?.getAll?.({ agentId }) || this.customizationEngine?.skillRegistry?.getAll?.({ agentId }) || [], agentId)
             : [];
           const hermes = this.scanHermesSkills({
             query: input.query || "",
@@ -2082,6 +3325,33 @@ export class ToolRegistry {
             hermesSkillCount: hermes.totalAvailable,
             omniSkills,
             hermesSkills: hermes.skills,
+            precedence: ["workspace-agent", "workspace", "personal-agent", "managed", "personal", "bundled"],
+            note: "Prompt gets compact list only; read SKILL.md via skill_read/read_file when needed.",
+          };
+        },
+      },
+      skill_read: {
+        description: "Read one OmniClaw SKILL.md on demand using skill precedence.",
+        permission: null,
+        group: "skills",
+        schema: {
+          type: "object",
+          required: ["name"],
+          properties: {
+            name: { type: "string" },
+            scope: { type: "string" },
+          },
+        },
+        run: async ({ name, scope } = {}, context = {}) => {
+          const agentId = this.getAgentId(context);
+          const skill = this.agentRuntime?.skills?.getSkill?.(String(name || "").trim(), scope || "all", agentId);
+          return {
+            found: Boolean(skill),
+            id: skill?.id || "",
+            name: skill?.name || name || "",
+            source: skill?.source || skill?.scope || "",
+            path: skill?.path || "",
+            content: skill?.content || "",
           };
         },
       },
@@ -2127,25 +3397,59 @@ export class ToolRegistry {
         }),
       },
       memory_search: {
-        description: "Search notes and promoted memory by text.",
+        description: "Hybrid search across session transcripts, daily memory, long-term memory, notes, research, and artifacts.",
         permission: null,
         group: "memory",
-        run: async ({ query }, context) => {
-          const q = String(query || "").trim().toLowerCase();
-          const notes = this.memoryStore.getNotes(this.getAgentId(context)).filter((item) =>
-            JSON.stringify(item).toLowerCase().includes(q),
-          );
-          const memories = this.memoryStore.getLongTermMemory(100, this.getAgentId(context)).filter((item) =>
-            JSON.stringify(item).toLowerCase().includes(q),
-          );
-          return { query: q, notes, memories };
+        schema: {
+          type: "object",
+          required: ["query"],
+          properties: {
+            query: { type: "string" },
+            limit: { type: "number" },
+            scope: { type: "string" },
+          },
         },
+        run: async ({ query, limit, scope, filters } = {}, context) =>
+          this.memoryStore.hybridSearch({
+            query,
+            limit: Number(limit || 12),
+            scope: scope || filters?.scope || "all",
+            agentId: this.getAgentId(context),
+            semanticMemory: this.agentRuntime?.semanticMemory,
+          }),
       },
       memory_get: {
-        description: "Read long-term memory overview and recent promoted memories.",
+        description: "Read memory layer files or memory overview. file can be MEMORY.md, daily, dreams, or overview.",
         permission: null,
         group: "memory",
-        run: async (_, context) => this.tools.list_long_term_memory.run(_, context),
+        schema: {
+          type: "object",
+          properties: {
+            file: { type: "string" },
+            range: { type: "string" },
+          },
+        },
+        run: async ({ file, range } = {}, context) => this.memoryStore.getLayeredMemory({
+          file: file || "overview",
+          range,
+          agentId: this.getAgentId(context),
+        }),
+      },
+      memory_compact: {
+        description: "Compact daily/session memory into durable long-term memory candidates and refresh MEMORY.md.",
+        permission: "allowMemoryPromotion",
+        group: "memory",
+        schema: {
+          type: "object",
+          properties: {
+            dryRun: { type: "boolean" },
+            maxItems: { type: "number" },
+          },
+        },
+        run: async (input = {}, context) => this.memoryStore.compactLayeredMemory({
+          ...input,
+          agentId: input.agentId || this.getAgentId(context),
+        }),
       },
       memory: {
         description: "Hermes-compatible memory read/search/save/promote tool.",
@@ -2157,7 +3461,7 @@ export class ToolRegistry {
             return this.tools.memory_search.run({ query }, context);
           }
           if (["remember", "save", "note"].includes(normalized)) {
-            return this.tools.remember_note.run({ text }, context);
+            return this.tools.memory_write.run({ type: "daily", content: text, source: "memory-tool" }, context);
           }
           if (["promote"].includes(normalized)) {
             return this.tools.promote_memory.run({ text, sourceType: "manual" }, context);
@@ -2430,10 +3734,15 @@ export class ToolRegistry {
           if (normalizedAction === "history") {
             return { history: this.subAgentSpawner.getHistory(20) };
           }
-          return this.subAgentSpawner.getStatus();
+          return {
+            ...this.subAgentSpawner.getStatus(),
+            activeDelegations: this.agentRuntime?.gateway?.listDelegations?.({ limit: 20 }) || [],
+            contract: "Use sessions_spawn/delegate_task once, then sessions_yield. Avoid repeated polling.",
+          };
         },
       },
     };
+    Object.assign(this.tools, createManusToolsExtension(this.agentRuntime || this));
   }
 
   getAgentId(context = {}) {
@@ -2480,17 +3789,27 @@ export class ToolRegistry {
     if (!gateway?.addEvent) {
       return null;
     }
+    const targetPath = result.path || result.source || "";
+    const destinationPath = result.destination || result.movedTo || "";
+    const workspaceAgentIds = targetPath && this.agentRegistry?.resolveAgentIdsByWorkspacePath
+      ? this.agentRegistry.resolveAgentIdsByWorkspacePath(targetPath)
+      : [];
+    const destinationWorkspaceAgentIds = destinationPath && this.agentRegistry?.resolveAgentIdsByWorkspacePath
+      ? this.agentRegistry.resolveAgentIdsByWorkspacePath(destinationPath)
+      : [];
     return gateway.addEvent("computer.access_operation", {
       action,
       agentId: this.getAgentId(context),
       runId: context.runId || "",
       sessionId: context.sessionId || "",
-      path: result.path || result.source || "",
-      destination: result.destination || result.movedTo || "",
+      path: targetPath,
+      destination: destinationPath,
       type: result.type || "",
       bytes: result.bytes ?? result.bytesRead ?? result.bytesWritten ?? 0,
       permanent: Boolean(result.permanent),
       overwritten: Boolean(result.overwritten),
+      workspaceAgentIds,
+      destinationWorkspaceAgentIds,
       ok: !result.error,
     });
   }
@@ -2514,6 +3833,20 @@ export class ToolRegistry {
       throw new Error("Shell executor is not available in this OmniClaw runtime.");
     }
     return this.shellExecutor;
+  }
+
+  requireAcpManager() {
+    if (!this.acpManager) {
+      throw new Error("ACP manager is not available in this OmniClaw runtime.");
+    }
+    return this.acpManager;
+  }
+
+  requireCodingHarness() {
+    if (!this.codingHarness) {
+      throw new Error("Coding agent harness is not available in this OmniClaw runtime.");
+    }
+    return this.codingHarness;
   }
 
   requireBrowserPlaywright() {
@@ -2681,23 +4014,39 @@ export class ToolRegistry {
 
   getAll(context = {}) {
     const normalized = normalizeContext(context);
+    const permissions = this.configStore?.getConfig?.()?.tools?.permissions || {};
     const tools = [
       ...Object.entries(this.tools).map(([id, tool]) => ({
         id,
         description: tool.description,
         permission: tool.permission,
         group: tool.group || "",
+        schema: tool.schema || tool.inputSchema || null,
         ...this.getProductToolMetadata(id, tool),
       })),
       ...this.pluginRegistry.getToolDefinitions().map((tool) => ({
         ...tool,
         runtimeStatus: "plugin",
         productReady: true,
-        modelCallable: true,
+        modelCallable: false,
         replacement: "",
-        readinessReason: "Plugin tool is registered.",
+        readinessReason: "Plugin tool is registered for operators, but hidden from the LLM until it passes the Codex-grade tool contract.",
       })),
-    ].filter((tool) => !(normalized.productMode || normalized.modelCallableOnly) || tool.modelCallable !== false);
+    ].filter((tool) => {
+      if (!(normalized.productMode || normalized.modelCallableOnly)) {
+        return true;
+      }
+      if (tool.modelCallable === false) {
+        return false;
+      }
+      if (normalized.modelCallableOnly) {
+        if (tool.permission && permissions[tool.permission] === false) {
+          return false;
+        }
+        return CODEX_GRADE_MODEL_TOOLS.has(tool.id);
+      }
+      return true;
+    });
 
     if (normalized.includeAllAgents || !this.agentRegistry) {
       return tools;
@@ -2712,6 +4061,7 @@ export class ToolRegistry {
         id,
         description: this.tools[id].description,
         permission: this.tools[id].permission,
+        schema: this.tools[id].schema || this.tools[id].inputSchema || null,
       };
     }
 
@@ -2726,6 +4076,7 @@ export class ToolRegistry {
     const normalized = normalizeContext(context);
     const agentId = this.getAgentId(normalized);
     const definition = this.getToolDefinition(id);
+    const observationKey = buildObservationKey(id, input, { ...normalized, agentId });
 
     if (!definition) {
       throw new Error(`Unknown tool: ${id}`);
@@ -2743,7 +4094,25 @@ export class ToolRegistry {
       const result = await this.pluginRegistry.runTool(id, input);
       return {
         agentId,
-        ...result,
+        ...sanitizeToolResult(result),
+      };
+    }
+
+    const schemaValidation = validateAgainstSimpleSchema(this.tools[id].schema || this.tools[id].inputSchema || null, input);
+    if (!schemaValidation.ok) {
+      this.agentRuntime?.gateway?.addEvent?.("tool_runtime.validation_failed", {
+        tool: id,
+        agentId,
+        sessionId: normalized.sessionId || "",
+        runId: normalized.runId || "",
+        errors: schemaValidation.errors,
+      });
+      return {
+        blocked: true,
+        reason: "Tool input schema validation failed.",
+        errors: schemaValidation.errors,
+        agentId,
+        tool: id,
       };
     }
 
@@ -2760,15 +4129,106 @@ export class ToolRegistry {
       }
     }
 
-    const result = await this.tools[id].run(input, normalized);
+    if (CACHEABLE_OBSERVATION_TOOLS.has(id) && this.observationCache.has(observationKey)) {
+      const cached = this.observationCache.get(observationKey);
+      this.agentRuntime?.gateway?.addEvent?.("tool_runtime.observation_reused", {
+        tool: id,
+        agentId,
+        sessionId: normalized.sessionId || "",
+        runId: normalized.runId || "",
+        observationKey,
+      });
+      return compactObservationResult(cached);
+    }
+
+    if (this.failedObservationCache.has(observationKey)) {
+      const failed = this.failedObservationCache.get(observationKey);
+      this.agentRuntime?.gateway?.addEvent?.("tool_runtime.failed_repeat_blocked", {
+        tool: id,
+        agentId,
+        sessionId: normalized.sessionId || "",
+        runId: normalized.runId || "",
+        observationKey,
+      });
+      return {
+        blocked: true,
+        reason: "Same tool and same arguments already failed.",
+        detail: "Change query/args, fix the previous blocker, or explain the blocker instead of repeating the same failed call.",
+        previousFailure: failed,
+        agentId,
+        tool: id,
+      };
+    }
+
+    if (this.inFlightToolKeys.has(observationKey)) {
+      return {
+        blocked: true,
+        reason: "Duplicate pending tool call blocked.",
+        detail: "Same tool and same arguments are already running for this run/session.",
+        agentId,
+        tool: id,
+      };
+    }
+
+    if (SIDE_EFFECT_TOOLS.has(id) && this.duplicateSideEffectKeys.has(observationKey)) {
+      return {
+        blocked: true,
+        reason: "Duplicate side-effect tool call blocked.",
+        detail: "Same side-effect tool and same arguments already ran in this run/session. Change args, use cached observation, or explain the blocker.",
+        agentId,
+        tool: id,
+      };
+    }
+
+    this.inFlightToolKeys.add(observationKey);
+    let result;
+    try {
+      this.agentRuntime?.gateway?.addEvent?.("tool_runtime.before_tool_call", {
+        tool: id,
+        agentId,
+        sessionId: normalized.sessionId || "",
+        runId: normalized.runId || "",
+        permission: this.tools[id].permission || "",
+        cacheable: CACHEABLE_OBSERVATION_TOOLS.has(id),
+        sideEffect: SIDE_EFFECT_TOOLS.has(id),
+      });
+      result = await this.tools[id].run(input, normalized);
+    } finally {
+      this.inFlightToolKeys.delete(observationKey);
+    }
     if (!result || typeof result !== "object" || Array.isArray(result)) {
       return result;
     }
 
-    return {
+    const output = {
       agentId,
-      ...result,
+      ...sanitizeToolResult(result),
     };
+    if (CACHEABLE_OBSERVATION_TOOLS.has(id) && isSuccessfulToolResult(output)) {
+      this.observationCache.set(observationKey, output);
+      if (this.observationCache.size > 500) {
+        const oldest = this.observationCache.keys().next().value;
+        this.observationCache.delete(oldest);
+      }
+    }
+    if (isFailedToolResult(output)) {
+      this.failedObservationCache.set(observationKey, {
+        reason: output.reason || output.message || output.error || "tool failed",
+        at: new Date().toISOString(),
+      });
+      if (this.failedObservationCache.size > 500) {
+        const oldest = this.failedObservationCache.keys().next().value;
+        this.failedObservationCache.delete(oldest);
+      }
+    }
+    if (SIDE_EFFECT_TOOLS.has(id)) {
+      this.duplicateSideEffectKeys.add(observationKey);
+      if (this.duplicateSideEffectKeys.size > 500) {
+        const oldest = this.duplicateSideEffectKeys.values().next().value;
+        this.duplicateSideEffectKeys.delete(oldest);
+      }
+    }
+    return output;
   }
 
   inferCommand(request) {
@@ -3365,6 +4825,7 @@ export class ToolRegistry {
     const mcp = this.agentRuntime?.mcp;
     const status = mcp?.getStatus?.() || {};
     const tools = mcp?.getAllTools?.() || [];
+    const acpStatus = this.agentRuntime?.acp?.status?.({ limit: 5 }) || null;
     const configPath = mcp?.configPath || "config/mcp-servers.json";
     let configuredServers = [];
     try {
@@ -3401,8 +4862,12 @@ export class ToolRegistry {
         gap: "OmniClaw can consume MCP servers; exposing OmniClaw itself as an MCP server is not wired yet",
       },
       acpAdapter: {
-        status: "planned",
-        gap: "Agent Communication Protocol adapter is not wired yet",
+        status: acpStatus?.enabled ? "partial" : "disabled",
+        backend: acpStatus?.backend || "",
+        defaultAgent: acpStatus?.defaultAgent || "",
+        sessions: acpStatus?.sessions || [],
+        readyTools: ["acp_doctor", "acp_install", "acp_spawn", "acp_status", "acp_sessions", "acp_cancel", "acp_close"],
+        gap: "ACP control plane is wired for local external harness commands; full ACP protocol streaming through acpx is still the next backend upgrade.",
       },
       nextUpgrade: "Add dashboard connect/test buttons for MCP servers, then expose connected MCP tools in capability_demo.",
     };
@@ -3700,6 +5165,111 @@ export class ToolRegistry {
       suspiciousCount: suspicious.length,
       suspicious: suspicious.slice(0, 12),
       rule: "Workspace/project context is injected as untrusted data. Suspicious phrases are blocked in the final system prompt instead of treated as instructions.",
+    };
+  }
+
+  resolvePatchRelativePath(inputPath, { workspaceOnly = true } = {}) {
+    const root = this.fileStore?.rootDir || this.getRootDir();
+    const text = String(inputPath || "").trim();
+    if (!text) {
+      throw new Error("Patch file path is required.");
+    }
+    const absolute = path.resolve(path.isAbsolute(text) ? text : path.join(root, text));
+    const relative = path.relative(path.resolve(root), absolute);
+    if (workspaceOnly && (relative.startsWith("..") || path.isAbsolute(relative))) {
+      throw new Error(`Patch path is outside the workspace: ${text}`);
+    }
+    if (relative.startsWith("..") || path.isAbsolute(relative)) {
+      throw new Error("OmniClaw apply_patch currently supports workspace-contained writes only.");
+    }
+    return relative.replace(/\\/g, "/");
+  }
+
+  applyStructuredPatch(input = {}) {
+    const patchText = String(input.input || input.patch || "");
+    const dryRun = input.dryRun === true || input.apply === false;
+    const config = this.configStore.getConfig();
+    const workspaceOnly = config.tools?.exec?.applyPatch?.workspaceOnly !== false;
+    const writableRoots = Array.isArray(config.tools?.filesystem?.writableRoots)
+      ? config.tools.filesystem.writableRoots
+      : ["."];
+    const operations = parseStructuredPatchInput(patchText);
+    const results = [];
+
+    for (const operation of operations) {
+      const relativePath = this.resolvePatchRelativePath(operation.path, { workspaceOnly });
+      if (operation.kind === "add") {
+        const target = this.fileStore.resolveWorkspacePath(relativePath);
+        if (fs.existsSync(target) && input.overwrite !== true) {
+          throw new Error(`Patch add target already exists: ${relativePath}`);
+        }
+        if (!dryRun) {
+          this.fileStore.writeText(relativePath, operation.content, {
+            allowedRoots: writableRoots,
+            append: false,
+          });
+        }
+        results.push({
+          kind: "add",
+          path: relativePath,
+          bytes: Buffer.byteLength(operation.content, "utf8"),
+          applied: !dryRun,
+        });
+        continue;
+      }
+
+      if (operation.kind === "delete") {
+        const target = this.fileStore.resolveWorkspacePath(relativePath);
+        const exists = fs.existsSync(target);
+        if (!exists) {
+          throw new Error(`Patch delete target does not exist: ${relativePath}`);
+        }
+        if (!dryRun) {
+          fs.rmSync(target, { recursive: false, force: false });
+        }
+        results.push({
+          kind: "delete",
+          path: relativePath,
+          existed: exists,
+          applied: !dryRun,
+        });
+        continue;
+      }
+
+      if (operation.kind === "update") {
+        const read = this.fileStore.readText(relativePath, Math.max(config.tools?.filesystem?.maxReadBytes || 65536, 1024 * 1024));
+        const next = applyPatchHunksToContent(read.content, operation.hunks, relativePath);
+        const targetPath = operation.moveTo
+          ? this.resolvePatchRelativePath(operation.moveTo, { workspaceOnly })
+          : relativePath;
+        if (!dryRun) {
+          this.fileStore.writeText(targetPath, next.content, {
+            allowedRoots: writableRoots,
+            append: false,
+          });
+          if (operation.moveTo && operation.moveTo !== operation.path) {
+            fs.rmSync(this.fileStore.resolveWorkspacePath(relativePath), { force: false });
+          }
+        }
+        results.push({
+          kind: operation.moveTo ? "move-update" : "update",
+          path: relativePath,
+          targetPath,
+          hunks: next.appliedHunks,
+          bytes: Buffer.byteLength(next.content, "utf8"),
+          applied: !dryRun,
+        });
+      }
+    }
+
+    return {
+      ok: true,
+      applied: !dryRun,
+      dryRun,
+      operationCount: results.length,
+      changedPaths: [...new Set(results.flatMap((item) => [item.path, item.targetPath].filter(Boolean)))],
+      operations: results,
+      rule: "Patch paths are workspace-contained by default. After patching code, run a read/build/test tool before finalizing.",
     };
   }
 

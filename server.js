@@ -67,6 +67,7 @@ const publicDir = path.join(process.pkg ? runtimeDir : sourceDir, "public");
 const agent = new OmniClawAgent({
   rootDir: runtimeDir,
 });
+await agent.start();
 const openaiAPI = new OpenAICompatibleAPI(agent);
 const eventClients = new Set();
 
@@ -81,6 +82,120 @@ function sendJson(res, statusCode, payload) {
   res.end(JSON.stringify(payload, null, 2));
 }
 
+function truncateHttpText(value = "", maxChars = 1200) {
+  const text = String(value == null ? "" : value);
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, Math.max(0, maxChars - 32)).trimEnd()}...[truncated ${text.length - maxChars} chars]`;
+}
+
+function compactToolOutputForHttp(item = {}) {
+  const output = item.output || {};
+  return {
+    tool: item.tool || "",
+    input: item.input || {},
+    reason: truncateHttpText(item.reason || "", 300),
+    source: item.source || "",
+    round: item.round,
+    output: {
+      status: output.status || "",
+      ok: output.ok,
+      blocked: Boolean(output.blocked),
+      error: output.error ? truncateHttpText(output.error, 600) : output.error,
+      reason: truncateHttpText(output.reason || "", 500),
+      path: output.path || "",
+      url: output.url || "",
+      title: output.title || "",
+      summary: truncateHttpText(output.summary || output.content || output.stdout || output.stderr || "", 1200),
+      count: output.count ?? (Array.isArray(output.results) ? output.results.length : undefined),
+      results: (output.results || []).slice(0, 5).map((result) => ({
+        title: truncateHttpText(result.title || result.name || "", 180),
+        url: result.url || "",
+        path: result.path || "",
+        snippet: truncateHttpText(result.snippet || result.text || result.content || "", 360),
+      })),
+    },
+    toolSummary: item.toolSummary || undefined,
+  };
+}
+
+function compactChatResultForHttp(result = {}) {
+  return {
+    error: result.error || undefined,
+    session: result.session,
+    agent: result.agent,
+    run: result.run,
+    reply: result.reply || "",
+    intents: result.intents || [],
+    plan: result.plan ? {
+      summary: result.plan.summary || "",
+      intents: result.plan.intents || [],
+      source: result.plan.source || "",
+      profile: result.plan.profile ? {
+        id: result.plan.profile.id,
+        description: result.plan.profile.description,
+      } : undefined,
+      toolsAvailableCount: Array.isArray(result.plan.toolsAvailable) ? result.plan.toolsAvailable.length : 0,
+      steps: (result.plan.steps || []).slice(0, 8).map((step) => ({
+        type: step.type || "",
+        tool: step.tool || "",
+        reason: truncateHttpText(step.reason || "", 500),
+      })),
+    } : result.plan,
+    toolOutputs: Array.isArray(result.toolOutputs)
+      ? result.toolOutputs.slice(-12).map(compactToolOutputForHttp)
+      : result.toolOutputs,
+    context: result.context ? {
+      usedChars: result.context.usedChars,
+      maxChars: result.context.maxChars,
+      omittedItems: result.context.omittedItems,
+      summary: result.context.summary,
+    } : result.context,
+    modelToolLoop: result.modelToolLoop ? {
+      enabled: result.modelToolLoop.enabled,
+      attempted: result.modelToolLoop.attempted,
+      rounds: result.modelToolLoop.rounds,
+      maxRounds: result.modelToolLoop.maxRounds,
+      toolCallCount: result.modelToolLoop.toolCallCount,
+      finalReady: result.modelToolLoop.finalReady,
+      stoppedReason: result.modelToolLoop.stoppedReason,
+      skippedReason: result.modelToolLoop.skippedReason,
+      recoveredToolCalls: result.modelToolLoop.recoveredToolCalls,
+      repeatedToolCallsSkipped: result.modelToolLoop.repeatedToolCallsSkipped,
+      errors: (result.modelToolLoop.errors || []).slice(0, 5).map((error) => truncateHttpText(error, 500)),
+    } : result.modelToolLoop,
+    finalMetadata: result.finalMetadata ? {
+      mode: result.finalMetadata.mode,
+      model: result.finalMetadata.model,
+      providerId: result.finalMetadata.providerId,
+      durationMs: result.finalMetadata.durationMs,
+      stepCount: result.finalMetadata.stepCount,
+      toolCallCount: result.finalMetadata.toolCallCount,
+      stopReason: result.finalMetadata.stopReason,
+      failedToolCount: result.finalMetadata.failedToolCount,
+      verificationPassed: result.finalMetadata.verificationPassed,
+      remainingIssues: result.finalMetadata.remainingIssues || [],
+    } : result.finalMetadata,
+    providerDiagnostics: result.providerDiagnostics ? {
+      ok: result.providerDiagnostics.ok,
+      status: result.providerDiagnostics.status,
+      reason: result.providerDiagnostics.reason,
+      message: truncateHttpText(result.providerDiagnostics.message || "", 800),
+      providerId: result.providerDiagnostics.providerId,
+      model: result.providerDiagnostics.model,
+      durationMs: result.providerDiagnostics.durationMs,
+    } : result.providerDiagnostics,
+    provider: result.provider ? {
+      id: result.provider.id,
+      mode: result.provider.mode,
+      ready: result.provider.ready,
+      model: result.provider.model,
+      apiKeySource: result.provider.apiKeySource,
+      message: truncateHttpText(result.provider.message || "", 500),
+    } : result.provider,
+    approvals: Array.isArray(result.approvals) ? result.approvals.slice(0, 5) : result.approvals,
+  };
+}
+
 function sendSSEHeaders(res, statusCode = 200) {
   res.writeHead(statusCode, {
     "Content-Type": "text/event-stream; charset=utf-8",
@@ -88,12 +203,21 @@ function sendSSEHeaders(res, statusCode = 200) {
     "Connection": "keep-alive",
     ...CORS_HEADERS,
   });
+  try { res.flushHeaders?.(); } catch {}
+}
+
+function writeSSE(res, payload) {
+  res.write(`data: ${JSON.stringify(payload)}\n\n`);
 }
 
 function broadcastEvent(record) {
   const chunk = `data: ${JSON.stringify(record)}\n\n`;
   for (const client of eventClients) {
-    client.write(chunk);
+    try {
+      client.write(chunk);
+    } catch {
+      eventClients.delete(client);
+    }
   }
 }
 
@@ -153,7 +277,10 @@ function sendFile(res, filePath) {
     const contentType = contentTypes[ext] || "application/octet-stream";
 
     const body = fs.readFileSync(filePath);
-    res.writeHead(200, { "Content-Type": contentType });
+    res.writeHead(200, {
+      "Content-Type": contentType,
+      "Cache-Control": "no-store",
+    });
     res.end(body);
   } catch (error) {
     sendJson(res, 404, { error: "Not found" });
@@ -163,6 +290,44 @@ function sendFile(res, filePath) {
 
 // ─── Auth Middleware ──────────────────────────────────────────────
 const PUBLIC_ENDPOINTS = new Set(["/api/health", "/api/events", "/api/auth/overview", "/api/auth/pairing/request"]);
+
+function listAgentsForShell() {
+  try {
+    const agents = agent.agents?.getAll?.() || [];
+    const entries = agents.length ? agents : [{ id: "main", name: "Main agent" }];
+    return entries.map((entry) => ({
+      id: entry.id || "main",
+      name: entry.name || entry.id || "Main agent",
+      description: entry.description || entry.goal || "Local OmniClaw agent",
+      default: Boolean(entry.default),
+      workspace: entry.workspace || entry.workspacePath
+        ? { path: entry.workspacePath || entry.workspace?.path || "" }
+        : undefined,
+      status: "ready",
+    }));
+  } catch (error) {
+    return [{
+      id: "main",
+      name: "Main agent",
+      description: "Local OmniClaw agent",
+      default: true,
+      status: "fallback",
+      error: error.message,
+    }];
+  }
+}
+
+function listSessionSummariesForShell(limit) {
+  const max = Math.max(1, Math.min(200, Number(limit || 50)));
+  try {
+    const sessions = typeof agent.sessions?.listSessionSummariesFast === "function"
+      ? agent.sessions.listSessionSummariesFast(max)
+      : agent.sessions.listSessions(max);
+    return { sessions };
+  } catch (error) {
+    return { sessions: [], degraded: true, error: error.message };
+  }
+}
 
 function checkAuth(req, pathname) {
   // Public endpoints skip auth
@@ -306,7 +471,11 @@ const server = http.createServer(async (req, res) => {
  name: "OmniClaw",
  version: "0.1.0",
  uptime: Math.round(process.uptime()),
- provider: agent.getProviderInfo(),
+ provider: {
+   id: agent.config?.getConfig?.()?.provider?.mode || "unknown",
+   ready: true,
+   source: "cached-config",
+ },
  timestamp: new Date().toISOString(),
  });
  return;
@@ -319,7 +488,7 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === "GET" && pathname === "/api/agents") {
     sendJson(res, 200, {
-      agents: agent.getState().agents,
+      agents: listAgentsForShell(),
     });
     return;
   }
@@ -341,7 +510,7 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === "GET" && pathname.startsWith("/api/agents/")) {
     const agentId = pathname.slice("/api/agents/".length);
-    const item = agent.getState().agents.find((entry) => entry.id === agentId) || null;
+    const item = listAgentsForShell().find((entry) => entry.id === agentId) || null;
     if (!item) {
       sendJson(res, 404, { error: "Agent not found" });
       return;
@@ -353,9 +522,32 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "GET" && pathname === "/api/gateway") {
     sendJson(res, 200, {
       overview: agent.gateway.getOverview(),
-      events: agent.gateway.listEvents(50),
+      events: agent.gateway.listEvents(50).map((event) => ({
+        ...event,
+        payload: event.payload || {},
+      })),
       runs: agent.gateway.listRuns(20).map(({ promptTrace, toolTrace, ...run }) => ({
-        ...run,
+        id: run.id,
+        status: run.status,
+        createdAt: run.createdAt,
+        updatedAt: run.updatedAt,
+        completedAt: run.completedAt,
+        sessionId: run.sessionId,
+        sessionKey: run.sessionKey,
+        agentId: run.agentId,
+        channel: run.channel,
+        label: run.label,
+        queuePosition: run.queuePosition,
+        waitedMs: run.waitedMs,
+        blockedByRunId: run.blockedByRunId,
+        stopReason: run.stopReason,
+        error: truncateHttpText(run.error || "", 500),
+        message: truncateHttpText(run.message || "", 500),
+        reply: truncateHttpText(run.reply || "", 700),
+        planSummary: run.plan?.summary || "",
+        toolOutputCount: Array.isArray(run.toolOutputs) ? run.toolOutputs.length : 0,
+        providerStatus: run.providerDiagnostics?.status || "",
+        providerReason: run.providerDiagnostics?.reason || "",
         promptTrace: Boolean(promptTrace),
         toolTrace: Boolean((Array.isArray(toolTrace) && toolTrace.length > 0) || run.modelToolLoop?.attempted),
         toolTraceCount: Array.isArray(toolTrace) ? toolTrace.length : Number(run.toolTraceCount || 0),
@@ -363,6 +555,48 @@ const server = http.createServer(async (req, res) => {
       approvals: agent.gateway.listApprovals(),
       delegations: agent.gateway.listDelegations({ limit: 20 }),
     });
+    return;
+  }
+
+  if (req.method === "GET" && pathname === "/api/harness/status") {
+    sendJson(res, 200, agent.codingHarness.status({
+      sessionId: url.searchParams.get("sessionId") || "",
+      sessionKey: url.searchParams.get("sessionKey") || "",
+      label: url.searchParams.get("label") || "",
+      status: url.searchParams.get("status") || "",
+      limit: Number(url.searchParams.get("limit") || 20),
+    }));
+    return;
+  }
+
+  if (req.method === "GET" && pathname === "/api/harness/doctor") {
+    sendJson(res, 200, await agent.codingHarness.doctor({
+      agentId: url.searchParams.get("agentId") || "",
+    }));
+    return;
+  }
+
+  if (req.method === "POST" && pathname === "/api/harness/spawn") {
+    try {
+      const body = await parseBody(req);
+      const result = await agent.codingHarness.spawn(body, {
+        sessionId: body.sessionId || "",
+        runId: body.runId || "",
+      });
+      sendJson(res, result.blocked || result.ok === false ? 400 : 202, result);
+    } catch (error) {
+      sendJson(res, 400, { error: error.message });
+    }
+    return;
+  }
+
+  if (req.method === "POST" && pathname === "/api/harness/cancel") {
+    try {
+      const body = await parseBody(req);
+      sendJson(res, 200, agent.codingHarness.cancel(body));
+    } catch (error) {
+      sendJson(res, 400, { error: error.message });
+    }
     return;
   }
 
@@ -459,23 +693,26 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === "GET" && pathname === "/api/events") {
-    res.writeHead(200, {
-      "Content-Type": "text/event-stream; charset=utf-8",
-      "Cache-Control": "no-store",
-      Connection: "keep-alive",
-    });
-    res.write(`data: ${JSON.stringify({ type: "hello", at: new Date().toISOString() })}\n\n`);
+    sendSSEHeaders(res);
+    writeSSE(res, { type: "hello", at: new Date().toISOString() });
     eventClients.add(res);
+    const heartbeat = setInterval(() => {
+      try {
+        writeSSE(res, { type: "heartbeat", at: new Date().toISOString() });
+      } catch {
+        eventClients.delete(res);
+        clearInterval(heartbeat);
+      }
+    }, 15000);
     req.on("close", () => {
       eventClients.delete(res);
+      clearInterval(heartbeat);
     });
     return;
   }
 
   if (req.method === "GET" && pathname === "/api/sessions") {
-    sendJson(res, 200, {
-      sessions: agent.sessions.listSessions(Number(url.searchParams.get("limit") || 50)),
-    });
+    sendJson(res, 200, listSessionSummariesForShell(url.searchParams.get("limit") || 50));
     return;
   }
 
@@ -1835,6 +2072,65 @@ if (req.method === "GET" && pathname === "/api/workspace") {
     return;
   }
 
+  if (req.method === "POST" && pathname === "/api/tools/run") {
+    try {
+      const body = await parseBody(req);
+      const toolName = String(body.tool || body.name || "").trim();
+      if (!toolName) {
+        sendJson(res, 400, { error: "tool or name is required" });
+        return;
+      }
+      const result = await agent.tools.run(toolName, body.input || body.params || {}, { agentId: body.agentId || "main" });
+      sendJson(res, 200, { tool: toolName, result });
+    } catch (error) {
+      sendJson(res, 400, { error: error.message });
+    }
+    return;
+  }
+
+  // ── Autonomous Task Execution ──────────────────────────────────
+  if (req.method === "POST" && pathname === "/api/autonomous/execute") {
+    try {
+      const body = await parseBody(req);
+      const objective = String(body.objective || body.task || body.request || "").trim();
+      if (!objective) {
+        sendJson(res, 400, { error: "objective/task/request is required" });
+        return;
+      }
+
+      const maxIterations = Number(body.maxIterations || 50);
+      const result = await agent.autonomousRuntime.executeTask(objective, {
+        agentId: body.agentId || "main",
+        sessionId: body.sessionId || "http-execution",
+        maxIterations,
+        checkpointEnabled: body.checkpointEnabled !== false,
+        daemonMode: Boolean(body.daemonMode || false),
+      });
+
+      sendJson(res, 200, {
+        success: result.success,
+        objective,
+        iterations: result.executionStats?.currentIteration || 0,
+        goal: result.goal ? { id: result.goal.id, title: result.goal.title, status: result.goal.status } : null,
+        executionStats: result.executionStats,
+      });
+    } catch (error) {
+      sendJson(res, 400, { error: error.message });
+    }
+    return;
+  }
+
+  if (req.method === "GET" && pathname === "/api/autonomous/status") {
+    const state = agent.autonomousRuntime?.executionState || {};
+    sendJson(res, 200, {
+      initialized: Boolean(agent.autonomousRuntime),
+      currentGoal: state.currentGoal?.title || null,
+      currentIteration: state.currentIteration || 0,
+      maxIterations: state.maxIterations || 50,
+    });
+    return;
+  }
+
   // ── Session Export ──────────────────────────────────────────────
  if (req.method === "GET" && pathname.startsWith("/api/sessions/") && pathname.endsWith("/export")) {
    const parts = pathname.split("/").filter(Boolean);
@@ -1902,7 +2198,7 @@ if (req.method === "POST" && pathname === "/api/chat") {
         channel: body.channel,
       });
       const conflict = result.run?.status === "busy" || result.run?.status === "archived";
-      sendJson(res, conflict ? 409 : 200, result);
+      sendJson(res, conflict ? 409 : 200, compactChatResultForHttp(result));
     } catch (error) {
       sendJson(res, 400, { error: error.message });
     }
@@ -1912,25 +2208,94 @@ if (req.method === "POST" && pathname === "/api/chat") {
   
  // Streaming chat endpoint (SSE)
  if (req.method === "POST" && pathname === "/api/chat/stream") {
- try {
- const body = await parseBody(req);
- const message = String(body.message || "").trim();
- if (!message) { sendJson(res, 400, { error: "message is required" }); return; }
- sendSSEHeaders(res);
- res.write("data: " + JSON.stringify({ type: "start", timestamp: new Date().toISOString(), status: "agent-loop" }) + "\n\n");
- const result = await agent.handleMessage(message, { sessionId: body.sessionId, label: body.label, agentId: body.agentId, channel: body.channel });
- const reply = result.reply || "";
- const chunkSize = 16;
- for (let i = 0; i < reply.length; i += chunkSize) {
- res.write("data: " + JSON.stringify({ type: "token", content: reply.slice(i, i + chunkSize) }) + "\n\n");
- }
- if (result.toolOutputs && result.toolOutputs.length > 0) {
- res.write("data: " + JSON.stringify({ type: "tools", toolOutputs: result.toolOutputs }) + "\n\n");
- }
- res.write("data: " + JSON.stringify({ type: "done", runId: result.run?.id || "", sessionId: result.session?.id || "", data: result }) + "\n\n");
- } catch (error) { try { res.write("data: " + JSON.stringify({ type: "error", error: error.message }) + "\n\n"); } catch {} }
- res.end();
- return;
+   let unsubscribe = null;
+   let heartbeat = null;
+   try {
+     const body = await parseBody(req);
+     const message = String(body.message || "").trim();
+     if (!message) { sendJson(res, 400, { error: "message is required" }); return; }
+     sendSSEHeaders(res);
+     const startedMs = Date.now();
+     let streamRunId = "";
+     let streamSessionId = String(body.sessionId || "").trim();
+     const interesting = /^(agent|tool|model_tool_loop|auto_verification|provider|context|shell|terminal|approval|run)\./;
+     writeSSE(res, {
+       type: "start",
+       timestamp: new Date(startedMs).toISOString(),
+       status: "agent-loop",
+       message: "Agent manager accepted the request and is waiting for live loop events.",
+     });
+     heartbeat = setInterval(() => {
+       try { writeSSE(res, { type: "heartbeat", timestamp: new Date().toISOString() }); } catch {}
+     }, 15000);
+     unsubscribe = agent.gateway.onEvent((record) => {
+       try {
+         if (!interesting.test(record.event || "")) return;
+         const payload = record.payload || {};
+         const recordMs = Date.parse(record.at || "");
+         if (Number.isFinite(recordMs) && recordMs < startedMs - 1000) return;
+         if (streamRunId && payload.runId && payload.runId !== streamRunId) return;
+         if (!streamRunId && payload.runId) {
+           if (streamSessionId && payload.sessionId && payload.sessionId !== streamSessionId) return;
+           streamRunId = payload.runId;
+           streamSessionId = payload.sessionId || streamSessionId;
+         }
+         if (!streamRunId && streamSessionId && payload.sessionId && payload.sessionId !== streamSessionId) return;
+         writeSSE(res, { type: "event", record });
+       } catch {}
+     });
+     const result = await agent.handleMessage(message, {
+       sessionId: body.sessionId,
+       label: body.label,
+       agentId: body.agentId,
+       channel: body.channel,
+     });
+     streamRunId = result.run?.id || streamRunId;
+     streamSessionId = result.session?.id || result.sessionId || streamSessionId;
+     const finalMetadata = result.finalMetadata || {
+       mode: result.plan?.profile?.id || result.agent?.profileId || "",
+       model: result.provider?.model || "",
+       providerId: result.provider?.id || "",
+       durationMs: result.providerDiagnostics?.durationMs || Date.now() - startedMs,
+       stepCount: result.modelToolLoop?.rounds || 0,
+       toolCallCount: Array.isArray(result.toolOutputs) ? result.toolOutputs.length : 0,
+       stopReason: result.modelToolLoop?.stoppedReason || result.providerDiagnostics?.reason || "completed",
+       fixedErrors: result.modelToolLoop?.selfCorrectionTriggered || result.modelToolLoop?.autoRepairAttempted || false,
+       failedToolCount: Array.isArray(result.toolOutputs)
+         ? result.toolOutputs.filter((item) =>
+             item?.output?.error ||
+             item?.output?.blocked ||
+             item?.output?.ok === false ||
+             (Array.isArray(item?.output?.issues) && item.output.issues.length > 0)
+           ).length
+         : 0,
+       autoVerificationCount: Number(result.modelToolLoop?.autoVerificationCount || 0),
+       autoRepairAttempted: Boolean(result.modelToolLoop?.autoRepairAttempted),
+       autoRepairToolCallCount: Number(result.modelToolLoop?.autoRepairReport?.toolCallCount || 0),
+       verificationPassed: Number(result.modelToolLoop?.autoVerificationCount || 0) > 0,
+       remainingIssues: [
+         ...(Array.isArray(result.modelToolLoop?.remainingIssues) ? result.modelToolLoop.remainingIssues : []),
+         ...(Array.isArray(result.modelToolLoop?.agentLoop?.remainingIssues) ? result.modelToolLoop.agentLoop.remainingIssues : []),
+         ...(Array.isArray(result.modelToolLoop?.runtimePlanAgentLoop?.remainingIssues) ? result.modelToolLoop.runtimePlanAgentLoop.remainingIssues : []),
+       ].filter(Boolean).slice(0, 12),
+       pendingApprovalCount: Array.isArray(result.approvals) ? result.approvals.length : 0,
+     };
+     const compactResult = compactChatResultForHttp(result);
+     writeSSE(res, {
+       type: "final",
+       content: result.reply || "",
+       metadata: finalMetadata,
+       data: compactResult,
+     });
+     writeSSE(res, { type: "done", runId: streamRunId, sessionId: streamSessionId, data: compactResult });
+   } catch (error) {
+     try { writeSSE(res, { type: "error", error: error.message }); } catch {}
+   } finally {
+     if (unsubscribe) unsubscribe();
+     if (heartbeat) clearInterval(heartbeat);
+     res.end();
+   }
+   return;
  }
  // Memory search
  if (req.method === "GET" && pathname === "/api/memory/search") {
@@ -1971,12 +2336,40 @@ if (req.method === "POST" && pathname === "/api/chat") {
  } catch (error) { sendJson(res, 400, { error: error.message }); }
  return;
  }
-if (req.method === "GET" && pathname === "/") {
+  if ((req.method === "GET" || req.method === "HEAD") && (pathname === "/favicon.ico" || pathname === "/favicon.svg")) {
+    sendFile(res, path.join(publicDir, "favicon.svg"));
+    return;
+  }
+
+  // Embedded preview browser: serve agent-built artifacts (workspace-relative)
+  // so the dashboard can open them in an iframe instead of the OS browser.
+  if ((req.method === "GET" || req.method === "HEAD") && pathname.startsWith("/preview/")) {
+    const previewRoots = ["output", "scratch", "public", "workspace", "docs", "data/generated", "data/browser-screenshots"];
+    const relative = decodeURIComponent(pathname.slice("/preview/".length)).replace(/\\/g, "/").replace(/^\/+/, "");
+    const target = path.resolve(runtimeDir, relative);
+    const insideRoot = previewRoots.some((root) => {
+      const resolvedRoot = path.resolve(runtimeDir, root);
+      const rel = path.relative(resolvedRoot, target);
+      return rel === "" || (rel && !rel.startsWith("..") && !path.isAbsolute(rel));
+    });
+    if (!insideRoot || relative.includes("..")) {
+      sendJson(res, 403, { error: "Preview path is outside allowed roots." });
+      return;
+    }
+    if (fs.existsSync(target) && fs.statSync(target).isFile()) {
+      sendFile(res, target);
+      return;
+    }
+    sendJson(res, 404, { error: "Preview file not found." });
+    return;
+  }
+
+if ((req.method === "GET" || req.method === "HEAD") && pathname === "/") {
     sendFile(res, path.join(publicDir, "index.html"));
     return;
   }
 
-  if (req.method === "GET" && pathname.startsWith("/")) {
+  if ((req.method === "GET" || req.method === "HEAD") && pathname.startsWith("/")) {
     const target = path.join(publicDir, pathname);
     if (target.startsWith(publicDir) && fs.existsSync(target) && fs.statSync(target).isFile()) {
       sendFile(res, target);

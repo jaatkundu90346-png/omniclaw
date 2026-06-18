@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 
-const port = Number(process.env.SMOKE_PORT || 3257);
+const port = Number(process.env.SMOKE_PORT || 3257 + Math.floor(Math.random() * 400));
 const timeoutMs = 15_000;
 
 function waitForServerReady(child) {

@@ -138,9 +138,26 @@ async function run() {
       nodeResearchOutput.query === "Node.js features",
       "research query extraction should preserve the actual technical topic.",
     );
+    const minimaxResearch = await postChat(
+      "MiniMax AI ka deep but concise research karo. Official sources first use karo, clean Hinglish me batao.",
+      `chat-smoke-minimax-research-${suffix}`,
+    );
+    const minimaxResearchOutput = minimaxResearch.toolOutputs.find((item) => item.tool === "web_research")?.output || {};
     assert(
-      nodeResearchOutput.contentFetched === true,
-      "web research should fetch top page content for grounded summaries.",
+      minimaxResearchOutput.query === "MiniMax AI",
+      "MiniMax research query should extract the entity instead of the whole instruction.",
+    );
+    assert(
+      /^## Research: MiniMax AI/i.test(minimaxResearch.reply),
+      "MiniMax research reply should have a clean topic title.",
+    );
+    assert(
+      !/Raw tool logs|provider tinyfish|Top\s+\d+\s+page|page\/snippet fetch/i.test(minimaxResearch.reply),
+      "MiniMax research reply should not leak prompt/debug metadata.",
+    );
+    assert(
+      nodeResearchOutput.provider !== "known-reference" && Array.isArray(nodeResearchOutput.results) && nodeResearchOutput.results.length > 0,
+      "web research should use live search results instead of static known-reference fallbacks.",
     );
     assert(
       /node\.js/i.test(nodeResearch.reply),
@@ -172,6 +189,10 @@ async function run() {
       calculator.toolOutputs.some((item) => item.tool === "write_file" && item.output?.path === "data/generated/index.html"),
       "calculator build should create a runnable HTML artifact.",
     );
+    assert(
+      calculator.toolOutputs.some((item) => item.tool === "write_file" && item.output?.path === "data/generated/manifest.json"),
+      "calculator build should create a manifest artifact.",
+    );
     const calculatorVerification = calculator.toolOutputs.find((item) => item.tool === "verify_html_artifact")?.output || {};
     assert(calculatorVerification.ok === true, "calculator build should verify the generated HTML artifact.");
     assert(calculatorVerification.score >= 75, "calculator HTML verification score should be strong enough.");
@@ -185,6 +206,35 @@ async function run() {
     );
     assert(fs.existsSync(path.join(smokeRootDir, "data", "generated", "index.html")), "calculator HTML artifact should exist.");
     assertToolSummaries(calculator.toolOutputs, "calculator build request");
+
+    const fitnessApp = await postChat(
+      "Build a polished frontend-only fitness tracker web app. Create a working HTML/CSS/JS artifact in data/generated/fitness-app with dashboard, workout plan, calories/macros, progress chart, responsive mobile layout, and no backend. Use real file tools and verify the created files. Do not just describe it.",
+      `chat-smoke-fitness-app-${suffix}`,
+    );
+    const fitnessPath = path.join(smokeRootDir, "data", "generated", "fitness-app", "index.html");
+    const fitnessHtml = fs.readFileSync(fitnessPath, "utf8");
+    assert(
+      fitnessApp.toolOutputs.some((item) => item.tool === "write_file" && item.output?.path === "data/generated/fitness-app/index.html"),
+      "fitness app build should create the requested folder artifact.",
+    );
+    assert(
+      fitnessApp.toolOutputs.some((item) => item.tool === "write_file" && item.output?.path === "data/generated/fitness-app/manifest.json"),
+      "fitness app build should create a machine-readable manifest.",
+    );
+    assert(
+      !fitnessApp.toolOutputs.some((item) => item.tool === "web_research"),
+      "pure frontend build should not run noisy generic web research unless the user asks for research.",
+    );
+    const fitnessVerification = fitnessApp.toolOutputs.find((item) => item.tool === "verify_html_artifact")?.output || {};
+    assert(fitnessVerification.ok === true, "fitness app should verify successfully.");
+    assert(fitnessVerification.score === 100, "fitness app should pass every HTML verification check.");
+    assert(fitnessHtml.includes("PulseFit Tracker"), "fitness app should be domain-specific, not a generic web app.");
+    assert(fitnessHtml.includes("Workout Plan"), "fitness app should include the requested workout plan section.");
+    assert(fitnessHtml.includes("Macros"), "fitness app should include the requested macro/calorie section.");
+    assert(fitnessHtml.includes("Weekly Progress"), "fitness app should include the requested progress chart section.");
+    assert(!fitnessHtml.includes("OmniClaw Web App"), "fitness app should not fall back to the generic OmniClaw Web App template.");
+    assert(/Verified: passed \(100\/100, \d+\/\d+ checks\)/i.test(fitnessApp.reply), "fitness app reply should include full verification proof.");
+    assertToolSummaries(fitnessApp.toolOutputs, "fitness app build request");
 
     const task = await postChat("test karo", `chat-smoke-test-${suffix}`);
     const commands = task.toolOutputs.map((item) => item.output?.command || "");

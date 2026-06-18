@@ -395,6 +395,7 @@ export class OpenAICompatibleProvider {
     return {
       text: message.content || "",
       toolCalls,
+      assistantMessage: message,
       model: data.model || providerConfig.provider.model,
       usage: data.usage || null,
       raw: data,
@@ -449,11 +450,15 @@ export class OpenAICompatibleProvider {
                   compactJson(context.contextBundle?.toolOutputs || context.toolOutputs || [], 5000),
                   "Tool observations are ground truth. If a list_files/list_computer_directory observation includes names or containsPackageJson, answer from that evidence instead of guessing from a truncated preview.",
                   "Never claim a tool ran unless its tool id appears in Tool observations. If a tool failed, say it failed. For laptop/local file questions, web_search/web_research cannot prove local files exist or do not exist.",
+                  "For web research observations, synthesize from fetchedContent/text/snippets into a clean answer. Do not dump URLs only. Do not mention provider names, raw tool ids, JSON, or internal trace labels.",
+                  "For file/shell observations, state exactly what was done and include the read-back/stdout proof. Do not say you can do it later if the observation already proves it ran.",
+                  "If observations are weak or failed, say the blocker honestly instead of inventing facts.",
                   "",
                   "Memory/context summary:",
                   compactJson(
                     {
                       contextReport: context.contextBundle?.report || null,
+                      contextManifest: context.contextBundle?.contextManifest || null,
                       recentConversations: context.contextBundle?.recentConversations || context.recentConversations,
                       notes: context.contextBundle?.notes || context.notes,
                       longTermMemory: context.contextBundle?.longTermMemory || context.longTermMemory,
@@ -464,7 +469,7 @@ export class OpenAICompatibleProvider {
                     5000,
                   ),
                   "",
-                  "Write the final human response now.",
+                  "Write the final human response now in the user's language/style. Keep it concise, grounded, and source-aware.",
                 ].join("\n"),
               },
             ],

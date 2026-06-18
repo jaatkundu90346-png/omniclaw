@@ -40,10 +40,10 @@ function decodeWsFrames(buffer) {
       headerLen = 10;
     }
 
-    const maskingKeyOffset = headerLen;
-    const payloadOffset = maskingKeyOffset + (masked ? 4 : 0);
+    const maskingKeyOffset = offset + headerLen;
+    const payloadOffset = offset + headerLen + (masked ? 4 : 0);
 
-    if (offset + payloadOffset + len > buffer.length) break;
+    if (payloadOffset + len > buffer.length) break;
 
     let payload = buffer.subarray(payloadOffset, payloadOffset + len);
 
@@ -196,7 +196,7 @@ export class GatewayWSProtocol {
     socket.on("data", async (chunk) => {
       buffer = Buffer.concat([buffer, chunk]);
       const frames = decodeWsFrames(buffer);
-      if (frames.length > 0) {
+      if (frames.payloads.length > 0) {
         buffer = frames.remaining || Buffer.alloc(0);
         for (const payload of frames.payloads) {
           try {

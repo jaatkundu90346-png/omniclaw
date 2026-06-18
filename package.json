@@ -20,6 +20,13 @@
     "build": "node --check server.js && node --check public/app.js",
     "test": "node scripts/health-smoke.mjs",
     "test:chat-agent": "node scripts/chat-agent-smoke.mjs",
+    "test:agent-loop": "node scripts/agent-loop-contract-smoke.mjs",
+    "test:tool-contract": "node scripts/tool-contract-smoke.mjs",
+    "test:acp": "node scripts/acp-smoke.mjs",
+    "test:harness": "node scripts/coding-harness-smoke.mjs",
+    "test:tool-execution": "node scripts/tool-execution-smoke.mjs",
+    "test:omni-loop": "node scripts/omni-loop-smoke.mjs",
+    "test:runtime-backend": "node scripts/runtime-backend-smoke.mjs",
     "test:ws": "node scripts/ws-smoke.mjs",
     "test:auth-provider": "node scripts/auth-provider-smoke.mjs"
   },

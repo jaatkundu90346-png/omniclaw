@@ -12,6 +12,20 @@ function asStringList(value) {
     : [];
 }
 
+function normalizeAgentId(value) {
+  return String(value || "main").trim() || "main";
+}
+
+function normalizePathForComparison(input) {
+  const resolved = path.resolve(String(input || "").replace(/\0/g, ""));
+  return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+}
+
+function isPathInside(parent, candidate) {
+  const relative = path.relative(parent, candidate);
+  return relative === "" || (relative && !relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
 export class AgentRegistry {
   constructor({ rootDir, configStore, workspaceBootstrap }) {
     this.rootDir = rootDir;
@@ -33,7 +47,14 @@ export class AgentRegistry {
   getAll() {
     const config = this.configStore.getConfig();
     const agents = isPlainObject(config.agents) ? config.agents : {};
-    const entries = Object.entries(agents).map(([id, agent]) => this.normalizeAgent(id, agent));
+    const entries = Array.isArray(agents.list)
+      ? agents.list
+          .filter((agent) => isPlainObject(agent))
+          .map((agent) => this.normalizeAgent(agent.id, agent))
+      : Object.entries(agents)
+          .filter(([id]) => id !== "defaults" && id !== "list")
+          .filter(([, agent]) => isPlainObject(agent))
+          .map(([id, agent]) => this.normalizeAgent(id, agent));
 
     if (entries.length === 0) {
       return [this.normalizeAgent("main", {})];
@@ -43,7 +64,21 @@ export class AgentRegistry {
   }
 
   getDefaultAgent() {
-    return this.getAll()[0];
+    const agents = this.getAll();
+    return agents.find((agent) => agent.default) || agents[0];
+  }
+
+  listAgentIds() {
+    const ids = [];
+    const seen = new Set();
+    for (const agent of this.getAll()) {
+      if (seen.has(agent.id)) {
+        continue;
+      }
+      seen.add(agent.id);
+      ids.push(agent.id);
+    }
+    return ids.length > 0 ? ids : ["main"];
   }
 
   resolveAgent(agentId = "") {
@@ -63,14 +98,16 @@ export class AgentRegistry {
 
   normalizeAgent(id, raw) {
     const agent = isPlainObject(raw) ? raw : {};
-    const workspacePath = this.workspaceBootstrap.getAgentWorkspaceDir(id);
+    const agentId = normalizeAgentId(id);
+    const workspacePath = this.workspaceBootstrap.getAgentWorkspaceDir(agentId);
     return {
-      id: String(id || "main"),
-      name: String(agent.name || id),
+      id: agentId,
+      name: String(agent.name || agentId),
       description: String(agent.description || "OmniClaw routed agent."),
+      default: Boolean(agent.default),
       profileId: String(agent.profile || this.configStore.getConfig().runtime.activeProfile || "balanced"),
       workspacePath,
-      routeKey: `agent:${id}`,
+      routeKey: `agent:${agentId}`,
       allowedTools: asStringList(agent.allowedTools),
       blockedTools: asStringList(agent.blockedTools),
       blockedPermissions: asStringList(agent.blockedPermissions),
@@ -127,6 +164,32 @@ export class AgentRegistry {
   getWorkspaceStatus(agentId = "") {
     const agent = this.resolveAgent(agentId);
     return this.workspaceBootstrap.getAgentStatus(agent);
+  }
+
+  resolveAgentIdsByWorkspacePath(workspacePath = "") {
+    const target = normalizePathForComparison(workspacePath);
+    const matches = [];
+    const agents = this.getAll();
+
+    for (let index = 0; index < agents.length; index += 1) {
+      const agent = agents[index];
+      const workspaceDir = normalizePathForComparison(agent.workspacePath);
+      if (!isPathInside(workspaceDir, target)) {
+        continue;
+      }
+      matches.push({ id: agent.id, workspaceDir, order: index });
+    }
+
+    matches.sort((left, right) => {
+      const workspaceLengthDelta = right.workspaceDir.length - left.workspaceDir.length;
+      return workspaceLengthDelta || left.order - right.order;
+    });
+
+    return matches.map((entry) => entry.id);
+  }
+
+  resolveAgentIdByWorkspacePath(workspacePath = "") {
+    return this.resolveAgentIdsByWorkspacePath(workspacePath)[0] || "";
   }
 
   summarizeAgents({ sessions = [], memoryStore = null, taskStore = null, skillRegistry = null, toolRegistry = null } = {}) {

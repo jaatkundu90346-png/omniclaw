@@ -32,9 +32,11 @@ function wrapCommandForSpawn(command, args = []) {
   if (!isWindowsCommandScript(command)) {
     return { command, args };
   }
+  const script = quoteCmdArg(command);
+  const renderedArgs = args.map(quoteCmdArg).join(" ");
   return {
     command: process.env.ComSpec || "cmd.exe",
-    args: ["/d", "/c", [quoteCmdArg(command), ...args.map(quoteCmdArg)].join(" ")],
+    args: ["/d", "/s", "/c", ["call", script, renderedArgs].filter(Boolean).join(" ")],
   };
 }
 
@@ -46,10 +48,18 @@ function commandExists(command) {
   const probe = process.platform === "win32" ? "where.exe" : "command";
   const args = process.platform === "win32" ? [bin] : ["-v", bin];
   const result = spawnSync(probe, args, { encoding: "utf8", shell: process.platform !== "win32" });
+  const paths = String(result.stdout || "").trim().split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
+  const preferredPath = process.platform === "win32"
+    ? (paths.find((item) => /\.(?:cmd|bat|exe)$/i.test(item)) || paths[0] || "")
+    : (paths[0] || "");
+  const runCommand = process.platform === "win32" && /\.(?:cmd|bat)$/i.test(preferredPath) && !path.isAbsolute(bin)
+    ? path.basename(preferredPath)
+    : (preferredPath || bin);
   return {
     ok: result.status === 0,
     command: bin,
-    path: String(result.stdout || "").trim().split(/\r?\n/)[0] || "",
+    path: preferredPath,
+    runCommand,
     error: String(result.stderr || result.error?.message || "").trim(),
   };
 }
@@ -73,6 +83,7 @@ function runProcess(command, args, options = {}) {
   return new Promise((resolve) => {
     const wrapped = wrapCommandForSpawn(command, args);
     let settled = false;
+    let outputPoll = null;
     const child = spawn(wrapped.command, wrapped.args, {
       cwd: options.cwd || process.cwd(),
       shell: false,
@@ -89,6 +100,9 @@ function runProcess(command, args, options = {}) {
       }
       settled = true;
       clearTimeout(timer);
+      if (outputPoll) {
+        clearInterval(outputPoll);
+      }
       resolve(result);
     };
     const killTree = () => {
@@ -119,6 +133,35 @@ function runProcess(command, args, options = {}) {
         error: `Codex CLI provider timed out after ${timeoutMs}ms.`,
       });
     }, timeoutMs);
+
+    if (options.outputPath) {
+      let stableHits = 0;
+      let lastSize = -1;
+      outputPoll = setInterval(() => {
+        try {
+          const stat = fs.statSync(options.outputPath);
+          if (stat.size <= 0) {
+            stableHits = 0;
+            lastSize = stat.size;
+            return;
+          }
+          stableHits = stat.size === lastSize ? stableHits + 1 : 0;
+          lastSize = stat.size;
+          if (stableHits >= 1) {
+            killTree();
+            finish({
+              ok: true,
+              exitCode: 0,
+              stdout,
+              stderr,
+              completedFromOutputFile: true,
+            });
+          }
+        } catch {
+          // Output file has not been written yet.
+        }
+      }, 1000);
+    }
 
     child.stdout.on("data", (chunk) => {
       stdout = truncateText(stdout + chunk.toString("utf8"), maxOutput);
@@ -152,7 +195,7 @@ export class CodexCliProvider {
       model: String(provider.model || provider.codexModel || "").trim(),
       profile: String(provider.codexProfile || "").trim(),
       sandbox: String(provider.codexSandbox || "read-only").trim() || "read-only",
-      timeoutMs: Math.max(5_000, Math.min(45_000, Number(provider.codexTimeoutMs || provider.timeoutMs || 45_000))),
+      timeoutMs: Math.max(5_000, Math.min(180_000, Number(provider.codexTimeoutMs || provider.timeoutMs || 120_000))),
       liveEnabled: provider.codexLiveEnabled === true,
       cwd: process.cwd(),
     };
@@ -161,26 +204,20 @@ export class CodexCliProvider {
   getInfo() {
     const config = this.configStore.getConfig();
     const options = this.getOptions(config);
-    const detected = commandExists(options.command);
-    const usable = detected.ok ? commandUsable(options.command) : { ok: false, error: detected.error };
     return {
       id: "codex-cli",
       mode: "account-bridge",
-      ready: detected.ok && usable.ok && options.liveEnabled,
+      ready: options.liveEnabled,
       apiKeyConfigured: false,
       apiKeySource: "chatgpt-account",
       model: options.model || "codex default",
       command: options.command,
-      commandPath: detected.path,
-      commandVersion: usable.version,
+      commandPath: "",
+      commandVersion: "",
       sandbox: options.sandbox,
-      message: detected.ok && usable.ok
-        ? options.liveEnabled
-          ? "Using OpenAI Codex CLI as the provider bridge. Sign in to Codex with ChatGPT for subscription access."
-          : "Codex CLI is installed, but live account-bridge replies are disabled because the CLI can hang. Use BYOK OpenAI-compatible provider for reliable API replies, or set provider.codexLiveEnabled=true after verifying codex exec works."
-        : detected.ok
-          ? `Codex CLI was found but could not run: ${usable.error || "unknown error"}. Install @openai/codex from npm or fix the app execution alias, then run codex login.`
-          : `Codex CLI command "${options.command}" was not found. Install @openai/codex, then run codex login.`,
+      message: options.liveEnabled
+        ? "Using OpenAI Codex CLI as the provider bridge. Run provider test for live auth/command verification."
+        : "Codex CLI live account-bridge replies are disabled. Set provider.codexLiveEnabled=true after signing in with codex login.",
     };
   }
 
@@ -212,11 +249,14 @@ export class CodexCliProvider {
       "",
       "Tool observations:",
       compactJson(context.contextBundle?.toolOutputs || context.toolOutputs || [], 5000),
+      "Tool observations are ground truth. For web research, synthesize fetchedContent/text/snippets into a clean answer with sources; never return only URLs or raw tool JSON.",
+      "For file/shell observations, state exactly what ran and include read-back/stdout proof. If a tool failed, say the blocker honestly.",
       "",
       "Memory/context summary:",
       compactJson(
         {
           contextReport: context.contextBundle?.report || null,
+          contextManifest: context.contextBundle?.contextManifest || null,
           recentConversations: context.contextBundle?.recentConversations || context.recentConversations,
           notes: context.contextBundle?.notes || context.notes,
           longTermMemory: context.contextBundle?.longTermMemory || context.longTermMemory,
@@ -227,7 +267,7 @@ export class CodexCliProvider {
         4500,
       ),
       "",
-      "Write the final human response now.",
+      "Write the final human response now in the user's language/style. Keep it concise, grounded, and source-aware.",
     ].join("\n");
   }
 
@@ -267,7 +307,8 @@ export class CodexCliProvider {
         error: `Codex CLI not found. Install with npm install -g @openai/codex, then run codex login.`,
       };
     }
-    const usable = commandUsable(options.command);
+    const commandToRun = detected.runCommand || detected.path || options.command;
+    const usable = commandUsable(commandToRun);
     if (!usable.ok) {
       return {
         ok: false,
@@ -283,11 +324,12 @@ export class CodexCliProvider {
         ...options,
         timeoutMs: Number(input.timeoutMs || options.timeoutMs || 30000),
       });
-      const result = await runProcess(options.command, args, {
+      const result = await runProcess(commandToRun, args, {
         cwd: options.cwd,
         stdin: input.prompt || "Reply with exactly: ok",
         timeoutMs: Number(input.timeoutMs || 30000),
         maxOutputBytes: 12000,
+        outputPath,
       });
       const fileText = fs.existsSync(outputPath) ? fs.readFileSync(outputPath, "utf8").trim() : "";
       fs.rmSync(outputPath, { force: true });
@@ -304,7 +346,7 @@ export class CodexCliProvider {
       }
       return {
         ok: true,
-        command: options.command,
+        command: commandToRun,
         commandPath: detected.path,
         commandVersion: usable.version,
         authVerified: true,
@@ -329,8 +371,7 @@ export class CodexCliProvider {
     if (!options.liveEnabled) {
       return [
         "Codex CLI account bridge is installed, but live replies are disabled to prevent chat hangs.",
-        "For reliable model replies, use BYOK/OpenAI-compatible mode with a real API key, base URL, and model.",
-        "If you want to test the account bridge anyway, set provider.codexLiveEnabled=true after confirming codex exec returns from terminal.",
+        "Run codex login if needed, then set provider.codexLiveEnabled=true so OmniClaw can use your signed-in Codex account.",
       ].join(" ");
     }
     const detected = commandExists(options.command);
@@ -341,7 +382,8 @@ export class CodexCliProvider {
         "OmniClaw local tools and memory still completed before this provider step.",
       ].join(" ");
     }
-    const usable = commandUsable(options.command);
+    const commandToRun = detected.runCommand || detected.path || options.command;
+    const usable = commandUsable(commandToRun);
     if (!usable.ok) {
       return [
         "Codex CLI bridge is selected, but the codex command could not run.",
@@ -352,10 +394,11 @@ export class CodexCliProvider {
 
     const outputPath = path.join(os.tmpdir(), `omniclaw-codex-${Date.now()}-${Math.random().toString(36).slice(2)}.txt`);
     const args = this.buildExecArgs(outputPath, options);
-    const result = await runProcess(options.command, args, {
+    const result = await runProcess(commandToRun, args, {
       cwd: options.cwd,
       stdin: this.buildPrompt(context),
       timeoutMs: options.timeoutMs,
+      outputPath,
     });
     const fileText = fs.existsSync(outputPath) ? fs.readFileSync(outputPath, "utf8").trim() : "";
     fs.rmSync(outputPath, { force: true });

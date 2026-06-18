@@ -130,7 +130,7 @@ export class ShellExecutor {
   }
 
   // Main execute method - supports both sync and background modes
-  execute({ command, cwd = "", background = false, approvalId = "", runId = "", sessionId = "" } = {}) {
+  execute({ command, cwd = "", background = false, approvalId = "", runId = "", sessionId = "", timeoutMs = 0 } = {}) {
     const policy = this.getPolicy();
     const safeCommand = this.validateCommand(command, policy);
     const analysis = analyzeShellCommand(safeCommand, policy);
@@ -150,12 +150,12 @@ export class ShellExecutor {
     }
 
     // Sync mode - wait for completion
-    return this.executeSync(safeCommand, safeCwd, analysis, policy, { approvalId, runId, sessionId });
+    return this.executeSync(safeCommand, safeCwd, analysis, policy, { approvalId, runId, sessionId, timeoutMs });
   }
 
   // Synchronous execution (waits for completion)
-  executeSync(command, cwd, analysis, policy, { approvalId = "", runId = "", sessionId = "" } = {}) {
-    const timeoutMs = Math.max(1000, Math.min(policy.timeoutMs, 300000)); // Max 5 min
+  executeSync(command, cwd, analysis, policy, { approvalId = "", runId = "", sessionId = "", timeoutMs = 0 } = {}) {
+    const effectiveTimeoutMs = Math.max(1000, Math.min(Number(timeoutMs || policy.timeoutMs), 900000)); // Max 15 min
     const maxOutputBytes = Math.max(1024, Math.min(policy.maxOutputBytes, 512000));
     const startedAt = new Date().toISOString();
     const startedMs = Date.now();
@@ -171,10 +171,20 @@ export class ShellExecutor {
       let stderr = "";
       let timedOut = false;
 
+      const killTree = () => {
+        try {
+          if (process.platform === "win32" && child.pid) {
+            spawn("taskkill.exe", ["/pid", String(child.pid), "/t", "/f"], { windowsHide: true });
+            return;
+          }
+        } catch {}
+        try { child.kill("SIGTERM"); } catch {}
+      };
+
       const timer = setTimeout(() => {
         timedOut = true;
-        child.kill("SIGTERM");
-      }, timeoutMs);
+        killTree();
+      }, effectiveTimeoutMs);
 
       child.stdout.on("data", (chunk) => {
         stdout += chunk.toString("utf8");
@@ -324,14 +334,30 @@ export class ShellExecutor {
   // Emit output event (for WebSocket/SSE)
   emitOutput(processId, stream, text) {
     if (this.eventBus) {
-      this.eventBus.emit("process.output", { processId, stream, text, timestamp: Date.now() });
+      const process = backgroundProcesses.get(processId);
+      this.eventBus.emit("process.output", {
+        processId,
+        stream,
+        text,
+        runId: process?.runId || "",
+        sessionId: process?.sessionId || "",
+        timestamp: Date.now(),
+      });
     }
   }
 
   // Emit status change event
   emitStatus(processId, status, details = {}) {
     if (this.eventBus) {
-      this.eventBus.emit("process.status", { processId, status, ...details, timestamp: Date.now() });
+      const process = backgroundProcesses.get(processId);
+      this.eventBus.emit("process.status", {
+        processId,
+        status,
+        ...details,
+        runId: process?.runId || "",
+        sessionId: process?.sessionId || "",
+        timestamp: Date.now(),
+      });
     }
   }
 
