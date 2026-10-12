@@ -202,6 +202,42 @@ function isLoopback(req) {
   return isLoopbackIp(ip);
 }
 
+/**
+ * Attachment descriptors arrive from the browser and are used to attach images
+ * to the model. They name files on disk, so they are untrusted input: an
+ * absolute path or a `..` segment would let a caller make OmniClaw read ANY
+ * file on the machine and hand it to the model as an image.
+ *
+ * So: keep only relative, containment-checked paths under the runtime dir, keep
+ * a small allowlist of image extensions, and cap the count. Anything else is
+ * dropped silently — the text note still names the file, so a blind model can
+ * still call describe_image through the normal, permission-checked path.
+ */
+const MAX_CHAT_ATTACHMENTS = 6;
+const CHAT_ATTACHMENT_IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "webp", "gif", "bmp", "avif"]);
+
+function sanitizeAttachmentRefs(list) {
+  if (!Array.isArray(list)) return [];
+  const root = path.resolve(runtimeDir);
+  const out = [];
+  for (const item of list.slice(0, MAX_CHAT_ATTACHMENTS)) {
+    const relPath = String(item?.relPath || "").trim();
+    if (!relPath) continue;
+    const ext = relPath.split(".").pop().toLowerCase();
+    if (!CHAT_ATTACHMENT_IMAGE_EXTS.has(ext)) continue;
+    if (path.isAbsolute(relPath)) continue;
+    const abs = path.resolve(root, relPath);
+    const relative = path.relative(root, abs);
+    if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) continue;
+    out.push({
+      relPath: relative.split(path.sep).join("/"),
+      name: String(item?.name || "").slice(0, 200),
+      isImage: true,
+    });
+  }
+  return out;
+}
+
 function sendErr(res, status, code, message) {
   sendJson(res, status, { error: message, code });
 }
@@ -4266,6 +4302,7 @@ if (req.method === "POST" && pathname === "/api/chat") {
         agentId: body.agentId,
         channel: body.channel,
         workspacePath: body.workspacePath,
+        attachments: sanitizeAttachmentRefs(body.attachments),
       });
       const conflict = result.run?.status === "busy" || result.run?.status === "archived";
       sendJson(res, conflict ? 409 : 200, compactChatResultForHttp(result));
@@ -4354,6 +4391,8 @@ if (req.method === "POST" && pathname === "/api/chat") {
        label: body.label,
        agentId: body.agentId,
        channel: body.channel,
+        workspacePath: body.workspacePath,
+        attachments: sanitizeAttachmentRefs(body.attachments),
      });
      streamRunId = result.run?.id || streamRunId;
      streamSessionId = result.session?.id || result.sessionId || streamSessionId;
@@ -4644,9 +4683,6 @@ agentReady.then(() => {
       const rows = [
         ["main", cfg.provider?.model || ""],
         ["compaction", cfg.provider?.compactionModel || ""],
-        ["subagents", cfg.runtime?.subAgents?.model || ""],
-        ["subagents-fallback", cfg.runtime?.subAgents?.fallbackModel || cfg.provider?.compactionModel || ""],
-        ["reviewer", cfg.provider?.reviewerModel || ""],
       ];
       for (const [role, model] of rows) {
         if (!model) continue;

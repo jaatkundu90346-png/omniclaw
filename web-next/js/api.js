@@ -206,12 +206,6 @@ export function getModelRegistry() {
   return req("/api/models/registry");
 }
 
-// backend: server.js POST /api/config {runtime:{subAgents:{model}}} — sub-agent
-// model picker persistence ("inherit" = parent's full binding) (D3).
-export function setSubAgentModel(model) {
-  return req("/api/config", { method: "POST", body: JSON.stringify({ runtime: { subAgents: { model } } }) });
-}
-
 // backend: server.js:2871 POST /api/config/validate (config-store.js:126-163)
 // Partial config ok — used as a pre-save shape check for the provider block.
 export function validateConfig(patch) {

@@ -25,6 +25,7 @@ import { getProvider } from "./provider-factory.js";
 import { rateLimitGuard } from "./retry-backoff.js";
 import { reasoningOptionFor } from "./control-commands.js";
 import { TaskPlaybooks, classifyTask } from "./task-playbooks.js";
+import { resolveVisionSupport, guessImageMime, IMAGE_FILE_EXTS } from "./vision-capability.js";
 import {
   collapseOverBudget,
   contextMapInputs,
@@ -2234,11 +2235,10 @@ export class OmniLoop {
   // vision-capable, attach the screenshot as a real image part so the agent
   // inspects the actual rendering (layout, colors, missing assets).
   modelSupportsVision() {
-    const vision = this.getSettings().vision;
-    if (vision === false) return false;
-    if (vision === true) return true;
-    const model = String(this.runtime.provider?.getInfo?.()?.model || "").toLowerCase();
-    return /gpt-4o|gpt-4\.1|gpt-4-turbo|gpt-5|\bo3\b|\bo4\b|claude|gemini|llava|qwen[.\d-]*vl|pixtral|minicpm-v|internvl|phi-4-multimodal|llama-3\.2[\w-]*vision|llama-4|maverick|scout|grok-(?:2-vision|vision|4)|glm-4v|minimax-vl|nova-(?:lite|pro|premier)|deepseek-vl|step-1v|yi-vision|nemotron[\w-]*vl/.test(model);
+    return resolveVisionSupport({
+      configured: this.getSettings().vision,
+      modelId: this.runtime.provider?.getInfo?.()?.model || "",
+    });
   }
 
   // Single source of truth for HOW to verify a rendered page, adapted to whether
@@ -2293,6 +2293,86 @@ export class OmniLoop {
         ...parts,
       ],
     };
+  }
+
+  /**
+   * Build the CURRENT user turn.
+   *
+   * This is where "can the model look at an image?" is decided, and the two
+   * branches are deliberately opposite:
+   *
+   *   canSee = true   -> send each image NATIVELY as an OpenAI-style content
+   *                      part. The model reads the real pixels. NO tool call:
+   *                      routing an image the model can already see through
+   *                      describe_image would send it to a DIFFERENT vision
+   *                      model and return a lossy text summary of something
+   *                      the reader could have seen directly. That indirection
+   *                      is also what used to fail outright when no vision
+   *                      backend was configured — the user's image produced
+   *                      "Failed/blocked: describe_image" three times over.
+   *
+   *   canSee = false  -> the image is only a path in text. Keep the existing
+   *                      "[Attached by user ...]" note so the model knows the
+   *                      file exists and is EXPECTED to call describe_image for
+   *                      it. That tool is the only way a blind model can see,
+   *                      and the read_file guard already points it there.
+   *
+   * A vision model that turns out to reject image parts is not a dead end: the
+   * provider 400 path already strips images and retries text-only, so the worst
+   * case degrades to exactly the blind branch above.
+   */
+  buildUserMessage({ text, attachments = [], canSee = false } = {}) {
+    const body = String(text || "");
+    const images = canSee ? this.readableImageParts(attachments) : [];
+    if (!images.length) {
+      // Blind model (or no image, or an unreadable one): plain text, exactly
+      // as before.
+      return { role: "user", content: body };
+    }
+    const parts = [{ type: "text", text: body }];
+    for (const image of images) parts.push(image);
+    return { role: "user", content: parts };
+  }
+
+  /**
+   * Turn attachment descriptors into image content parts.
+   * Returns [] when nothing is readable, so the caller falls back to text.
+   */
+  readableImageParts(attachments = []) {
+    const parts = [];
+    // A flood of images is a context bomb, and the model can usually only act on
+    // the few that matter. Newest-first would drop what the user sent most
+    // recently, so keep the FIRST few in the order they were attached.
+    for (const att of Array.isArray(attachments) ? attachments : []) {
+      if (parts.length >= 4) break;
+      const rel = String(att?.relPath || att?.path || "");
+      if (!rel) continue;
+      const ext = String(rel).split(".").pop().toLowerCase();
+      if (!IMAGE_FILE_EXTS.has(ext)) continue;
+      // The upload route writes under runtimeDir/uploads, and relPath is
+      // already workspace-relative ("uploads/<name>.png"), so resolve it the
+      // same way the preview route and file-store do.
+      const root = path.resolve(this.runtime.rootDir || process.cwd());
+      const abs = path.isAbsolute(rel) ? path.resolve(rel) : path.resolve(root, rel);
+      // Containment check. Relying on "the traversal target usually doesn't
+      // exist" is not a control: if the target IS a readable image, the bytes
+      // would be handed to the model. The server already sanitizes these
+      // paths, but this is the layer that actually reads from disk, so it must
+      // not depend on an upstream check being present.
+      const inside = path.relative(root, abs);
+      if (!inside || inside.startsWith("..") || path.isAbsolute(inside)) continue;
+      try {
+        if (!fs.existsSync(abs)) continue;
+        const stat = fs.statSync(abs);
+        // Keep the request under control: an 8MB base64 blob is ~11MB of
+        // tokens to send. describe_image uses the same ceiling.
+        if (stat.size <= 0 || stat.size > 8 * 1024 * 1024) continue;
+        const b64 = fs.readFileSync(abs).toString("base64");
+        if (!b64) continue;
+        parts.push({ type: "image_url", image_url: { url: `data:${guessImageMime(rel)};base64,${b64}` } });
+      } catch { /* unreadable file: skip, the text note still names it */ }
+    }
+    return parts;
   }
 
   // Strip image parts from the transcript (provider rejected them) — messages
@@ -4562,6 +4642,10 @@ export class OmniLoop {
     run = {},
     tools = [],
     contextBundle = {},
+    // Attachment descriptors from the composer ({relPath, name, isImage}). Only
+    // used to attach images NATIVELY when the active model has vision; a blind
+    // model still gets the plain text note and uses describe_image.
+    attachments = [],
   }) {
     // Per-run copy so slash-control overrides for THIS session don't leak into
     // the shared settings or other sessions.
@@ -4902,11 +4986,16 @@ export class OmniLoop {
       loadedAt: promptContextBundle.workspaceContext?.loadedAt || "",
       session, run, agent, settings, providerModel,
     });
+    const userMessage = this.buildUserMessage({
+      text: message,
+      attachments,
+      canSee: this.modelSupportsVision(),
+    });
     const messages = [
       { role: "system", content: systemPrompt },
       ...this.loadHistoryMessages(session, settings.historyMessages),
       { role: "system", content: zoneC },
-      { role: "user", content: String(message || "") },
+      userMessage,
     ];
     // Advancing-breakpoint anchor: index of the last history message (0 when
     // the session is fresh). History never mutates in-run unless compaction

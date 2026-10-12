@@ -214,7 +214,7 @@ function agentIdForSession(sessionId) {
           pendingSend = null;
           setTimeout(() => {
             if (thread && threadSession === id && !thread.running) {
-              thread.send(parked.text, { workspacePath: parked.workspacePath });
+              thread.send(parked.text, { workspacePath: parked.workspacePath, attachments: parked.attachments });
             }
           }, 250);
         }
@@ -317,7 +317,7 @@ function agentIdForSession(sessionId) {
         if (activeId) {
           // Park it. renderRoute() mounts the thread on the hashchange task and
           // flushes this as soon as loadHistory resolves.
-          pendingSend = { id: activeId, text: outgoing, workspacePath };
+          pendingSend = { id: activeId, text: outgoing, workspacePath, attachments: atts };
           window.location.hash = `#/t/${encodeURIComponent(activeId)}`;
           return;
         }
@@ -346,7 +346,7 @@ function agentIdForSession(sessionId) {
         thread.setPendingLabel(label);
         view.scrollTop = 0;
       }
-      thread.send(outgoing, { workspacePath });
+      thread.send(outgoing, { workspacePath, attachments: atts });
     },
     onStop: () => {
       if (thread) thread.stop();

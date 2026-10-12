@@ -29,12 +29,14 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { getProvider } from "./provider-factory.js";
+import { VISION_MODEL_RE as VisionModelRe, guessImageMime as guessMime } from "./vision-capability.js";
 
 const execFileAsync = promisify(execFile);
 
-// Same capability sniff omni-loop uses — one place would be better, but the
-// regex is stable and omni-loop's copy is method-bound to its settings.
-const VISION_MODEL_RE = /gpt-4o|gpt-4\.1|gpt-4-turbo|gpt-5|\bo3\b|\bo4\b|claude|gemini|llava|qwen[.\d-]*vl|pixtral|minicpm-v|internvl|phi-4-multimodal|llama-3\.2[\w-]*vision|llama-4|maverick|scout|grok-(?:2-vision|vision|4)|glm-4v|minimax-vl|nova-(?:lite|pro|premier)|deepseek-vl|step-1v|yi-vision|nemotron[\w-]*vl/;
+// The vision capability table now lives in vision-capability.js — ONE list, used
+// by both this file and omni-loop, so the two can never disagree about whether
+// the active model has eyes.
+const VISION_MODEL_RE = VisionModelRe;
 
 const POLLINATIONS_IMAGE_URL = "https://image.pollinations.ai/prompt/";
 const POLLINATIONS_TEXT_URL = "https://text.pollinations.ai/openai";
@@ -58,13 +60,8 @@ function slugify(text = "", max = 48) {
   return String(text).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, max) || "media";
 }
 
-function guessMime(filePath = "") {
-  const ext = path.extname(filePath).toLowerCase();
-  return ext === ".jpg" || ext === ".jpeg" ? "image/jpeg"
-    : ext === ".webp" ? "image/webp"
-    : ext === ".gif" ? "image/gif"
-    : "image/png";
-}
+// guessMime now comes from vision-capability.js (re-exported under the local
+// name above) so the MIME table is shared with the attachment path too.
 
 export class MediaEngine {
   constructor({ rootDir, configStore, secretStore, provider = null, providerRef = null } = {}) {

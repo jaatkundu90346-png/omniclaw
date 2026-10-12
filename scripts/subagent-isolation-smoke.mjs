@@ -29,25 +29,23 @@ function spawnerWith(modelList, finalText = "did the thing with evidence") {
   });
 }
 
-// 1. explicit invalid model id fails FAST (no burned rounds)
+// 1. an explicit model argument is IGNORED — it can no longer fail fast,
+// because it is no longer consulted at all. (It used to raise "not a valid
+// model id" here.) The delegation must still run, on the main model.
 {
   const sp = spawnerWith(["main-model", "cheap-model"]);
-  let err = "";
-  try {
-    await sp.spawn({ task: "do x", model: "nope-not-a-model", timeoutMs: 30000, context: {} });
-  } catch (e) { err = String(e?.message || e); }
-  ok(/not a valid model id/.test(err), "explicit bad model fails fast with actionable error");
+  const out = await sp.spawn({ task: "do x", model: "nope-not-a-model", timeoutMs: 30000, context: {} });
+  ok(out.status === "completed", "an explicit model argument does not break or redirect the delegation");
 }
 
-// 2. stale configured default warns + inherits main (run still completes)
+// 2. a stale configured sub-agent model is ignored; the run still completes
 {
   const sp = spawnerWith(["main-model"]);
   sp.getLimits = () => ({
-    maxConcurrent: 3, maxPerHour: 30, defaultModel: "stale-configured-model",
-    fallbackModel: "", timeoutMs: 60000, contextChars: 240000,
+    maxConcurrent: 3, maxPerHour: 30, timeoutMs: 60000, contextChars: 240000,
   });
   const out = await sp.spawn({ task: "do x", timeoutMs: 30000, context: {} });
-  ok(out.status === "completed", "stale configured default falls back to main, run completes");
+  ok(out.status === "completed", "the run completes on the main model");
 }
 
 // 3. bounded structured report + JSONL transcript pointer (D2/D3)
@@ -132,103 +130,81 @@ function spawnerWith(modelList, finalText = "did the thing with evidence") {
 {
   const sp = spawnerWith([]);
   sp.getLimits = () => ({
-    maxConcurrent: 3, maxPerHour: 30, defaultModel: "whatever-model",
-    fallbackModel: "", timeoutMs: 60000, contextChars: 240000,
+    maxConcurrent: 3, maxPerHour: 30, timeoutMs: 60000, contextChars: 240000,
   });
   const out = await sp.spawn({ task: "do x", timeoutMs: 30000, context: {} });
   ok(out.status === "completed", "no list endpoint -> proceeds unvalidated");
 }
 
-// 6. retired dedicated-provider default is skipped; child inherits parent binding
+// 6-8. The model ladder is GONE. These three cases used to prove that a
+// dedicated sub-agent provider, an explicit model, and a retired configured
+// default each resolved to a DIFFERENT model than the parent had. That is
+// exactly the surprise the feature removal is about, so they are now replaced
+// by the inverse: none of those inputs may move the child off the main model.
 {
-  const { markModelRetired } = await import("../src/core/model-registry.js");
-  const NV_BASE = "https://fake-nvidia.test/v1";
-  markModelRetired(tmpRoot, NV_BASE, "old/retired", "pre-marked for test");
+  const MAIN_BASE = "https://fake-main.test/v1";
+  const seen = [];
   const events = [];
   const mainStub = {
-    completeWithTools: async () => ({ text: "parent-binding works", toolCalls: [] }),
-    complete: async () => ({ text: "parent-binding works" }),
-    getInfo: () => ({ id: "openai-compatible", model: "main-ok", baseUrl: "https://fake-main.test/v1", ready: true }),
-  };
-  const nvStub = { getInfo: () => ({ id: "nvidia", model: "old/retired", baseUrl: NV_BASE, ready: true }) };
-  const sp = new SubAgentSpawner({
-    agentRuntime: { rootDir: tmpRoot, provider: mainStub, gateway: { addEvent: (e, p) => events.push({ event: e, payload: p }) } },
-    configStore: { getConfig: () => ({ runtime: { subAgents: { provider: "nvidia" } }, provider: {} }) },
-    toolRegistry: { getAll: () => [], run: async () => ({ ok: true }) },
-    agentRegistry: null, memoryStore: null, taskStore: null,
-  });
-  sp.providerForProfile = (id) => id === "nvidia"
-    ? { provider: nvStub, providerId: "nvidia", baseUrl: NV_BASE, model: "old/retired", usable: true }
-    : { provider: null, usable: false };
-  const out = await sp.spawn({ task: "do y", timeoutMs: 30000, context: {} });
-  ok(out.status === "completed", "retired dedicated default skipped, parent binding runs");
-  const binding = events.find((e) => e.event === "subagent.binding");
-  ok(binding && binding.payload.source === "inherited" && binding.payload.model === "main-ok", `binding logged as inherited parent (got ${binding?.payload?.source}/${binding?.payload?.model})`);
-  ok(events.some((e) => e.event === "subagent.model_fallback" && /RETIRED/.test(e.payload.message || "")), "retired-default warning emitted");
-}
-
-// 7. explicit model valid on parent but not dedicated retargets (endpoint follows model)
-{
-  const events = [];
-  const MAIN_BASE = "https://fake-main2.test/v1";
-  const NV2_BASE = "https://fake-nvidia2.test/v1";
-  const mainStub = {
-    completeWithTools: async () => ({ text: "via parent", toolCalls: [] }),
+    completeWithTools: async (_m, opts) => {
+      seen.push(opts?.model || "(none)");
+      return { text: "parent binding works", toolCalls: [] };
+    },
+    complete: async () => ({ text: "parent binding works" }),
     getInfo: () => ({ id: "openai-compatible", model: "main-ok", baseUrl: MAIN_BASE, ready: true }),
-    listModels: async () => [{ id: "open-a" }, { id: "main-ok" }],
+    listModels: async () => [{ id: "main-ok" }, { id: "other/model" }],
   };
-  const nvStub = {
-    completeWithTools: async () => ({ text: "via nvidia", toolCalls: [] }),
-    getInfo: () => ({ id: "nvidia", model: "nv-a", baseUrl: NV2_BASE, ready: true }),
-    listModels: async () => [{ id: "nv-a" }],
-  };
+  // A config that still carries every removed key, plus a spawn that still
+  // passes a model. If ANY of these still steer the child, the removal leaked.
   const sp = new SubAgentSpawner({
     agentRuntime: { rootDir: tmpRoot, provider: mainStub, gateway: { addEvent: (e, p) => events.push({ event: e, payload: p }) } },
-    configStore: { getConfig: () => ({ runtime: { subAgents: { provider: "nvidia" } }, provider: {} }) },
+    configStore: {
+      getConfig: () => ({
+        runtime: { subAgents: { provider: "nvidia", model: "other/model", fallbackModel: "other/fallback" } },
+        provider: {},
+      }),
+    },
     toolRegistry: { getAll: () => [], run: async () => ({ ok: true }) },
     agentRegistry: null, memoryStore: null, taskStore: null,
   });
-  sp.providerForProfile = (id) => id === "nvidia"
-    ? { provider: nvStub, providerId: "nvidia", baseUrl: NV2_BASE, model: "nv-a", usable: true }
-    : { provider: null, usable: false };
-  const out = await sp.spawn({ task: "do z", model: "open-a", timeoutMs: 30000, context: {} });
-  ok(out.status === "completed", "explicit model retargeted to its endpoint and ran");
+  const out = await sp.spawn({ task: "do z", model: "other/model", provider: "nvidia", timeoutMs: 30000, context: {} });
+  ok(out.status === "completed", "spawn completes on the parent binding");
   const binding = events.find((e) => e.event === "subagent.binding");
-  ok(binding && binding.payload.providerId === "" && binding.payload.model === "open-a" && binding.payload.source === "explicit", `retarget binding logged (got ${binding?.payload?.providerId}/${binding?.payload?.model}/${binding?.payload?.source})`);
-  ok(events.some((e) => e.event === "subagent.model_fallback" && /retargeted/.test(e.payload.message || "")), "retarget warning emitted");
+  ok(binding && binding.payload.source === "inherited" && binding.payload.model === "main-ok", `binding logged as the inherited parent (got ${binding?.payload?.source}/${binding?.payload?.model})`);
+  ok(binding && binding.payload.providerId === "", "a dedicated sub-agent provider must not be used");
+  ok(seen.length > 0 && seen.every((m) => m === "main-ok" || m === "(none)"), `child only ever ran the main model (saw ${JSON.stringify(seen)})`);
+  const done = [...sp.completedAgents.values()].pop();
+  ok(done?.binding?.model === "main-ok" && done?.binding?.source === "inherited", `actual rung recorded as inherited (got ${done?.binding?.source}/${done?.binding?.model})`);
+  ok(done?.requestedModel === "other/model", "the ignored argument is recorded on the child for traceability");
+  ok(!events.some((e) => e.event === "subagent.model_fallback"), "no fallback-model event: there is nothing to fall back to");
 }
 
-// 8. call-time 410 marks the model retired and the ladder finishes on parent
+// 8b. a 410 on the ONLY binding fails loudly instead of quietly completing
+// elsewhere — the user must learn that their main model is dead, not receive a
+// result from a model they never chose.
 {
   const C_BASE = "https://fake-c.test/v1";
-  let calls = 0;
   const dying = {
-    completeWithTools: async (_m, _opts) => {
-      calls += 1;
-      if (calls === 1) {
-        const err = new Error("Provider native tool request failed with status 410: {\"status\":410,\"title\":\"Gone\",\"detail\":\"The model 'gone/model' has been removed\"}");
-        err.status = 410;
-        throw err;
-      }
-      return { text: "recovered on parent", toolCalls: [] };
+    completeWithTools: async () => {
+      const err = new Error("Provider native tool request failed with status 410: {\"status\":410,\"title\":\"Gone\",\"detail\":\"The model has been removed\"}");
+      err.status = 410;
+      throw err;
     },
     getInfo: () => ({ id: "t", model: "main-ok", baseUrl: C_BASE, ready: true }),
-    listModels: async () => [{ id: "gone/model" }, { id: "main-ok" }],
+    listModels: async () => [{ id: "main-ok" }],
   };
   const events = [];
   const sp = new SubAgentSpawner({
     agentRuntime: { rootDir: tmpRoot, provider: dying, gateway: { addEvent: (e, p) => events.push({ event: e, payload: p }) } },
-    configStore: { getConfig: () => ({ runtime: { subAgents: { model: "gone/model" } }, provider: {} }) },
+    configStore: { getConfig: () => ({ runtime: { subAgents: {} }, provider: {} }) },
     toolRegistry: { getAll: () => [], run: async () => ({ ok: true }) },
     agentRegistry: null, memoryStore: null, taskStore: null,
   });
-  const out = await sp.spawn({ task: "do w", timeoutMs: 30000, context: {} });
-  ok(out.status === "completed", "410 on primary ladders to parent and completes");
-  const st = getModelState(tmpRoot, C_BASE, "gone/model");
-  ok(st && st.retired === true, "retired id recorded in registry");
-  const done = [...sp.completedAgents.values()].pop();
-  ok(done?.binding?.model === "main-ok" && done?.binding?.source === "inherited", `actual rung recorded (got ${done?.binding?.source}/${done?.binding?.model})`);
-  ok(events.some((e) => e.event === "subagent.model_ladder"), "ladder step event emitted");
+  let failure = null;
+  try { await sp.spawn({ task: "do w", timeoutMs: 30000, context: {} }); } catch (e) { failure = e; }
+  ok(failure, "a 410 on the only binding fails the delegation");
+  ok(/main agent's model and endpoint/.test(failure?.message || ""), "the error points the fix at the MAIN binding");
+  ok(!events.some((e) => e.event === "subagent.model_ladder"), "no ladder step exists to emit");
 }
 
 // 9. child session: own transcript, both-way linkage, parent sees no tool content (B2/B4)

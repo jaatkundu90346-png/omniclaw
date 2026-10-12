@@ -559,4 +559,68 @@ async function renderProviders(page) {
 
   paintList();
   paintForm();
+  paintReasoning(page, provider);
+}
+
+// Reasoning effort — how hard the model should think on every reply.
+//
+// WHY A DEFAULT AND NOT "OFF": a reasoning-capable model left at its own
+// default usually picks the cheapest thinking budget, which is the difference
+// between a one-shot wrong answer and a correct one on real engineering work.
+// OmniClaw's whole job is that work, so the shipped default is HIGH. The user
+// can drop it, and providers that reject the parameter are handled in the
+// provider layer (one stripped retry, remembered), so this can never wedge a
+// non-reasoning provider.
+const REASONING_LEVELS = [
+  ["off", "Off"],
+  ["low", "Low"],
+  ["medium", "Medium"],
+  ["high", "High"],
+  ["xhigh", "Extra high"],
+  ["max", "Max"],
+];
+
+function currentReasoningLevel(provider) {
+  const raw = provider?.reasoning;
+  if (raw === false || raw === null || raw === undefined) return "high";
+  const value = typeof raw === "object" ? raw.effort : raw;
+  return String(value || "high").toLowerCase();
+}
+
+async function paintReasoning(page, provider) {
+  const group = h("div", { class: "set-group" },
+    h("div", { class: "set-label", text: "Reasoning effort" }),
+    h("p", {
+      class: "muted small",
+      text: "How much thinking budget the model gets before it answers. Higher is more accurate and slower. Applied to every chat.",
+    }),
+  );
+  const row = h("div", { class: "chip-row" });
+  let level = currentReasoningLevel(provider);
+  const buttons = new Map();
+  const mark = () => {
+    for (const [id, b] of buttons) {
+      b.classList.toggle("active", id === level);
+      b.setAttribute("aria-pressed", String(id === level));
+    }
+  };
+  for (const [id, label] of REASONING_LEVELS) {
+    const b = h("button", { class: "chip-btn", type: "button", text: label });
+    b.addEventListener("click", async () => {
+      level = id;
+      mark();
+      try {
+        const cfg = await setConfig({ provider: { reasoning: id === "off" ? null : id } });
+        store.set({ config: cfg || store.get().config || {} });
+        toast(`Reasoning effort: ${label}`, "success");
+      } catch (e) {
+        toast(`Could not save reasoning effort: ${e.message}`, "error");
+      }
+    });
+    buttons.set(id, b);
+    row.append(b);
+  }
+  mark();
+  group.append(row);
+  page.append(group);
 }

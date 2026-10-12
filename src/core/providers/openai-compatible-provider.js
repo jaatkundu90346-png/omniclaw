@@ -1,5 +1,10 @@
 import { buildOmniClawSystemPrompt } from "../system-prompt.js";
 import { attachProviderHttpMeta } from "../retry-backoff.js";
+import {
+  DEFAULT_REASONING_EFFORT,
+  reasoningRequestFragment,
+  isUnsupportedReasoningError,
+} from "../reasoning-effort.js";
 import { StreamingThinkScrubber, scrubThinkTags } from "../think-scrubber.js";
 
 async function fetchWithTimeout(url, options = {}, timeoutMs = 45000) {
@@ -212,6 +217,9 @@ export class OpenAICompatibleProvider {
   constructor(configStore, secretStore) {
     this.configStore = configStore;
     this.secretStore = secretStore;
+    // Set once, the first time this endpoint 400s on the reasoning param, so we
+    // stop sending it. Per-provider instance, so switching providers re-tests it.
+    this.reasoningUnsupported = false;
   }
 
   getApiKeyReadiness(config = this.configStore.getConfig()) {
@@ -509,17 +517,34 @@ export class OpenAICompatibleProvider {
     // other OpenAI-compatible servers may reject the param, so gate it.
     const wantsStreamUsage = streaming && /openrouter\.ai/i.test(String(providerConfig.provider.baseUrl || ""));
 
-    // Opt-in reasoning/thinking request. Object -> OpenRouter `reasoning`
-    // ({ effort } | { max_tokens }); string -> OpenAI o-series `reasoning_effort`.
-    // Default absent so providers that 400 on unknown params are unaffected.
-    // (Reasoning CAPTURE below works regardless — DeepSeek/OpenRouter thinking
-    // models stream reasoning without any request flag.)
-    // input.reasoning === false is the "/no-think" sentinel: force-disable the
-    // request flag even if config sets one. Otherwise: per-call override, then
-    // config default, then absent.
+    // Reasoning/thinking request. The wire SHAPE is provider-dialect specific
+    // (`reasoning:{effort}` on OpenRouter, `reasoning_effort` on OpenAI), so
+    // reasoningRequestFragment owns both the dialect choice and the shipped
+    // default. input.reasoning === false is the "/no-think" sentinel: force it
+    // off even if config sets one. Otherwise: per-call override, then config,
+    // then the shipped default.
+    //
+    // `reasoningUnsupported` is the safety net that makes a HIGH default safe:
+    // a plain non-reasoning endpoint 400s on an unknown request param, which
+    // would otherwise kill every message. When that happens we remember it for
+    // the process and stop sending the param, so the user pays one failed
+    // request once rather than forever. (Reasoning CAPTURE below works
+    // regardless — thinking models stream reasoning without any request flag.)
+    // `??` CANNOT be used to fall back to the default here. `null` is the
+    // meaningful "off" value, and `x ?? y` treats null as absent — so an
+    // explicit "turn reasoning off" would silently resolve to the shipped high
+    // default, and the Settings row would appear to save while doing nothing.
+    // Presence of the KEY is the only thing that distinguishes "not configured"
+    // from "configured to off".
+    const configuredReasoning = providerConfig.provider.reasoning;
     const reasoningOption = input.reasoning === false
       ? null
-      : (input.reasoning ?? providerConfig.provider.reasoning ?? null);
+      : (input.reasoning !== undefined
+        ? input.reasoning
+        : (configuredReasoning === undefined ? DEFAULT_REASONING_EFFORT : configuredReasoning));
+    const reasoningFragment = this.reasoningUnsupported
+      ? null
+      : reasoningRequestFragment({ effort: reasoningOption, baseUrl: providerConfig.provider.baseUrl });
 
     let response;
     // Inner controller so THIS layer can abort the in-flight request on a
@@ -541,8 +566,7 @@ export class OpenAICompatibleProvider {
           max_tokens: Number(input.maxTokens || providerConfig.provider.plannerMaxTokens || 700),
           stream: streaming,
           ...(wantsStreamUsage ? { stream_options: { include_usage: true } } : {}),
-          ...(reasoningOption && typeof reasoningOption === "object" ? { reasoning: reasoningOption } : {}),
-          ...(typeof reasoningOption === "string" && reasoningOption ? { reasoning_effort: reasoningOption } : {}),
+          ...(reasoningFragment || {}),
           tool_choice: input.toolChoice || "auto",
           // C5: explicitly ask for parallel tool calls. OpenAI-compatible
           // endpoints that support it return multiple tool_calls in one round;
@@ -559,7 +583,18 @@ export class OpenAICompatibleProvider {
     }
 
     if (!response.ok) {
-      throw attachProviderHttpMeta(new Error(`Provider native tool request failed with ${await this.parseProviderError(response)}`), response);
+      const errText = await this.parseProviderError(response);
+      // One stripped retry: the endpoint rejected the reasoning PARAMETER (not
+      // the request). Without this a shipped "high" default would hard-fail
+      // every message on any endpoint that doesn't accept it. We retry once
+      // immediately — the caller already treats a thrown error as a dead round,
+      // so paying a single round here beats failing the whole conversation.
+      if (reasoningFragment && response.status === 400
+          && isUnsupportedReasoningError(errText) && !this.reasoningUnsupported) {
+        this.reasoningUnsupported = true;
+        return this.completeWithTools(input);
+      }
+      throw attachProviderHttpMeta(new Error(`Provider native tool request failed with ${errText}`), response);
     }
 
     if (streaming) {

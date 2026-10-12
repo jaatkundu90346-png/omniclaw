@@ -1871,6 +1871,10 @@ export class OmniClawAgent {
       run,
       enqueuedAt,
       wasQueued,
+      // Kept on the JOB, not the run record: attachments are per-request and
+      // carry base64-sized payloads that must never be persisted or broadcast on
+      // the gateway event stream.
+      attachments: Array.isArray(options.attachments) ? options.attachments : [],
     });
   }
 
@@ -2526,6 +2530,10 @@ export class OmniClawAgent {
   async executeMessageRun(job) {
     this.provider = createProvider(this.config, this.secrets);
     const { session, run, enqueuedAt, wasQueued } = job;
+    // Attachment descriptors from the composer. Only consumed to attach images
+    // natively when the active model supports vision; a blind model keeps the
+    // text note and calls describe_image.
+    const attachments = Array.isArray(job.attachments) ? job.attachments : [];
     // `message` may be rewritten by a leading slash CONTROL command below.
     let message = job.message;
     // Slash CONTROL commands (/think, /fast, /verbose, /reasoning, /steer) —
@@ -3268,6 +3276,7 @@ export class OmniClawAgent {
           contextBundle: modelToolLoopContext,
           session,
           run,
+          attachments,
         });
     modelToolLoop.report.runtimePlanAgentLoop = runtimeLoopController.getReport();
     plan.modelToolLoop = modelToolLoop.report;
@@ -6281,6 +6290,7 @@ export class OmniClawAgent {
     contextBundle,
     session,
     run,
+    attachments = [],
   }) {
     // OmniLoop takes over when enabled: transcript-based native tool calling
     // (Claude Code / Codex style) replaces the JSON-prompt round loop.
@@ -6295,6 +6305,7 @@ export class OmniClawAgent {
           run,
           tools,
           contextBundle,
+          attachments,
         });
       } catch (error) {
         this.gateway.addEvent("omni_loop.failed", {

@@ -2369,40 +2369,34 @@ async function renderSettings(box) {
         </div>
       </div>
     </div>
-    <div class="section-row-title" style="margin-top:26px"><span>Sub-agents</span><span class="badge">${esc(config.config?.runtime?.subAgents?.model || "main model")}</span></div>
+    <div class="section-row-title" style="margin-top:26px"><span>Reasoning effort</span></div>
     <div class="card" style="max-width:660px">
-      <p>Sub-agents (delegate_task / best_of_n / research fan-out) ka apna model — main agent se alag, taaki uska quota na jale. Same flow: provider → models fetch → test → save. Khali chhodo = main agent wala model.</p>
-      <div style="display:grid;gap:10px;margin-top:12px">
-        <label class="set-label">1. Model source (provider) — sub-agents run on THIS provider's key
-          <select id="sub-profile" class="agent-select" style="width:100%;max-width:100%">
-            ${profileIds.map((id) => `<option value="${esc(id)}"${id === (config.config?.runtime?.subAgents?.provider || activeProfileId) ? " selected" : ""}>${esc(id)}${id === activeProfileId ? " (same as main)" : ""}</option>`).join("")}
-          </select>
+      <p>Model ko jawab dene se pehle kitna sochna hai. Jitna zyada, utna accurate aur utna slow. Ye har chat par lagta hai. Default: High.</p>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px">
+        <select id="set-reasoning" class="agent-select" style="width:220px">
+          ${["off:Off", "low:Low", "medium:Medium", "high:High", "xhigh:Extra high", "max:Max"].map((o) => {
+            const [v, label] = o.split(":");
+            const cur = config.config?.provider?.reasoning;
+            const curLevel = cur === null || cur === undefined || cur === false ? "off" : String((typeof cur === "object" ? cur.effort : cur) || "high");
+            return `<option value="${esc(v)}"${v === curLevel ? " selected" : ""}>${esc(label)}</option>`;
+          }).join("")}
+        </select>
+        <button class="mini-button primary" id="set-reasoning-save">Save</button>
+        <span class="muted small" id="set-reasoning-status"></span>
+      </div>
+    </div>
+    <div class="section-row-title" style="margin-top:26px"><span>Sub-agents</span></div>
+    <div class="card" style="max-width:660px">
+      <p>Sub-agents (delegate_task / best_of_n / research fan-out) ALWAYS run on the main agent's model and endpoint — there is no separate one to pick. What you can set here is how many may run at once.</p>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px">
+        <label class="set-label" style="flex:none">Max concurrent
+          <input id="set-sub-conc" type="number" min="1" max="8" value="${esc(String(config.config?.runtime?.subAgents?.maxConcurrent || 3))}" style="width:80px;min-height:34px;padding:0 10px;border:1px solid var(--border);border-radius:8px;background:var(--panel-soft);color:var(--text);outline:0" />
         </label>
-        <div class="muted small" id="sub-provider-meta"></div>
-        <label class="set-label">2. Sub-agent model
-          <div style="display:flex;gap:8px">
-            <select id="sub-model" class="agent-select" style="flex:1;width:auto;max-width:100%">
-              <option value="">${esc(config.config?.runtime?.subAgents?.model || "same as main agent")}</option>
-            </select>
-            <button class="mini-button" id="sub-fetch-models">Fetch models</button>
-          </div>
+        <label class="set-label" style="flex:none">Max per hour
+          <input id="set-sub-hour" type="number" min="1" max="200" value="${esc(String(config.config?.runtime?.subAgents?.maxPerHour || 30))}" style="width:90px;min-height:34px;padding:0 10px;border:1px solid var(--border);border-radius:8px;background:var(--panel-soft);color:var(--text);outline:0" />
         </label>
-        <label class="set-label">3. Fallback model (sub-agent rate-limit par isse retry karega)
-          <select id="sub-fallback" class="agent-select" style="width:100%;max-width:100%">
-            <option value="">${esc(config.config?.runtime?.subAgents?.fallbackModel || "none")}</option>
-          </select>
-        </label>
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <button class="mini-button" id="sub-test">4. Test model</button>
-          <label class="set-label" style="flex:none">Max concurrent
-            <input id="set-sub-conc" type="number" min="1" max="8" value="${esc(String(config.config?.runtime?.subAgents?.maxConcurrent || 3))}" style="width:80px;min-height:34px;padding:0 10px;border:1px solid var(--border);border-radius:8px;background:var(--panel-soft);color:var(--text);outline:0" />
-          </label>
-          <label class="set-label" style="flex:none">Max per hour
-            <input id="set-sub-hour" type="number" min="1" max="200" value="${esc(String(config.config?.runtime?.subAgents?.maxPerHour || 30))}" style="width:90px;min-height:34px;padding:0 10px;border:1px solid var(--border);border-radius:8px;background:var(--panel-soft);color:var(--text);outline:0" />
-          </label>
-          <button class="mini-button primary" id="set-sub-save">5. Save sub-agent settings</button>
-        </div>
-        <div class="muted small" id="set-sub-status"></div>
+        <button class="mini-button primary" id="set-sub-save">Save sub-agent limits</button>
+        <span class="muted small" id="set-sub-status"></span>
       </div>
     </div>
     <div class="section-row-title" style="margin-top:26px"><span>Runtime</span></div>
@@ -2504,62 +2498,27 @@ async function renderSettings(box) {
     }
   });
 
-  // ── Sub-agent flow: provider → fetch → test → save (main-agent parity) ──
+  // ── Reasoning effort ──
+  const reasoningStatus = box.querySelector("#set-reasoning-status");
+  box.querySelector("#set-reasoning-save")?.addEventListener("click", async () => {
+    const value = box.querySelector("#set-reasoning").value;
+    reasoningStatus.textContent = "Saving…";
+    try {
+      await api("/api/config", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: { reasoning: value === "off" ? null : value } }),
+      });
+      reasoningStatus.textContent = "✓ Saved.";
+    } catch (error) {
+      reasoningStatus.textContent = `Save failed: ${error.message}`;
+    }
+  });
+
+  // ── Sub-agents: LIMITS ONLY ──
+  // The provider → fetch → test → save flow used to live here. It is gone with
+  // the sub-agent model feature: there is no longer an endpoint or a model to
+  // pick and validate, so every control it drove had nothing left to control.
   const subStatus = box.querySelector("#set-sub-status");
-  const subProfileSel = box.querySelector("#sub-profile");
-  const subModelSel = box.querySelector("#sub-model");
-  const subFallbackSel = box.querySelector("#sub-fallback");
-  const subMetaEl = box.querySelector("#sub-provider-meta");
-  const savedSubModel = config.config?.runtime?.subAgents?.model || "";
-  const savedSubFallback = config.config?.runtime?.subAgents?.fallbackModel || "";
-  const refreshSubProviderView = (pid) => {
-    const p = profiles[pid] || {};
-    const kp = keyProviderOf(pid);
-    const key = keyStatusFor(kp);
-    const sameAsActive = pid === activeProfileId;
-    subMetaEl.innerHTML = `Endpoint: <code>${esc(p.baseUrl || "(local/cli)")}</code> · key: ${key.configured ? `<span class="badge ok">set</span>` : `<span class="badge bad">missing — is provider ki key add karo (upar Provider section / Custom provider se)</span>`} · ${sameAsActive ? "same as your active provider" : "sub-agents will run on THIS provider (its own key), separate from the main agent"}. Pick a model valid on this endpoint.`;
-  };
-  refreshSubProviderView(subProfileSel.value);
-  subProfileSel.addEventListener("change", () => refreshSubProviderView(subProfileSel.value));
-
-  box.querySelector("#sub-fetch-models")?.addEventListener("click", async () => {
-    subStatus.textContent = "Fetching models…";
-    try {
-      const result = await api("/api/provider/models", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ profileId: subProfileSel.value }),
-      });
-      if (result.ok === false) { subStatus.textContent = `Fetch failed: ${result.error || "check API key"}`; return; }
-      const models = result.models || [];
-      const optionsFor = (selected) => [
-        `<option value=""${!selected ? " selected" : ""}>${selected ? "same as main agent" : "same as main agent (default)"}</option>`,
-        ...models.map((m) => `<option value="${esc(m.id)}"${m.id === selected ? " selected" : ""}>${esc(m.id)}</option>`),
-      ].join("");
-      subModelSel.innerHTML = optionsFor(savedSubModel);
-      subFallbackSel.innerHTML = optionsFor(savedSubFallback).replace("same as main agent (default)", "no fallback");
-      subStatus.textContent = `${models.length} models loaded — ab model chuno, test karo, phir save.`;
-    } catch (error) {
-      subStatus.textContent = `Fetch failed: ${error.message}`;
-    }
-  });
-
-  box.querySelector("#sub-test")?.addEventListener("click", async () => {
-    const model = subModelSel.value;
-    if (!model) { subStatus.textContent = "Test ke liye pehle ek model chuno (ya default hi rakhna hai to test zaroori nahi)."; return; }
-    subStatus.textContent = `Testing ${model}…`;
-    try {
-      const result = await api("/api/provider/test", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ profileId: subProfileSel.value, model, live: true }),
-      });
-      subStatus.textContent = result.ok
-        ? `✓ Sub-agent model test passed: ${model}${result.live?.responsePreview ? ` — "${result.live.responsePreview.slice(0, 40)}"` : ""}`
-        : `✗ Test failed: ${result.message || result.error || "unknown"}`;
-    } catch (error) {
-      subStatus.textContent = `Test failed: ${error.message}`;
-    }
-  });
-
   box.querySelector("#set-sub-save")?.addEventListener("click", async () => {
     subStatus.textContent = "Saving…";
     try {
@@ -2568,16 +2527,13 @@ async function renderSettings(box) {
         body: JSON.stringify({
           runtime: {
             subAgents: {
-              provider: subProfileSel.value.trim(),
-              model: subModelSel.value.trim(),
-              fallbackModel: subFallbackSel.value.trim(),
               maxConcurrent: Math.max(1, Math.min(8, Number(box.querySelector("#set-sub-conc").value) || 3)),
               maxPerHour: Math.max(1, Math.min(200, Number(box.querySelector("#set-sub-hour").value) || 30)),
             },
           },
         }),
       });
-      subStatus.textContent = `✓ Saved — sub-agents ab "${subModelSel.value || "main model"}" par chalenge (next spawn se).`;
+      subStatus.textContent = "✓ Saved. Sub-agents still run on the main agent's model.";
     } catch (error) {
       subStatus.textContent = `Save failed: ${error.message}`;
     }

@@ -101,10 +101,8 @@ button.ctx-pill:hover { background: var(--bg-hover); color: var(--text); }
 .model-pill:hover { background: var(--bg-hover); color: var(--text); }
 .model-pill.busy { opacity: 0.6; }
 
-/* The sub-agent model pill: visually secondary to the main model pill, so the
-   two do not read as two competing pickers in row 3. */
-.model-pill.sub-pill { opacity: 0.85; font-size: 11.5px; }
-.model-pill.sub-pill:hover { opacity: 1; }
+/* (The secondary sub-agent model pill's rules lived here, for the removed
+   sub-agent model picker.) */
 
 .menu-search {
   width: 100%;

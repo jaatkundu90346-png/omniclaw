@@ -9,7 +9,7 @@ import { icons } from "../icons.js";
 import { store } from "../store.js";
 import {
   getConfig, setConfig, getAgents, getGit, gitStatus, uploadFile,
-  pinSessionToolsets, setSubAgentModel, getModelRegistry,
+  pinSessionToolsets,
 } from "../api.js";
 import { openPopover, closePopover } from "./popover.js";
 import { openModelMenu, modelMark, modelPillText as pillText, modelPillTitle as pillTitle } from "./modelmenu.js";
@@ -103,10 +103,8 @@ export function mountComposer(container, opts = {}) {
     "aria-haspopup": "menu", "aria-expanded": "false",
   });
   const spacer = h("div", { class: "spacer" });
-  const subPill = h("button", {
-    class: "model-pill sub-pill", type: "button", title: "Sub-agent model (applies to all chats)",
-    "aria-haspopup": "menu", "aria-expanded": "false",
-  });
+  // (The secondary sub-agent model pill lived here. Sub-agents always run on the
+  // main agent's model, so there was nothing left for it to choose.)
   const modelPill = h("button", {
     class: "model-pill", type: "button", title: "",
     "aria-haspopup": "menu", "aria-expanded": "false",
@@ -119,7 +117,7 @@ export function mountComposer(container, opts = {}) {
   const sendBtn = h("button", {
     class: "send-btn", type: "button", title: "Send (Enter)", "aria-label": "Send", html: SEND_SVG,
   });
-  row.append(plusBtn, modePill, spacer, subPill, modelPill, stopBtn, sendBtn);
+  row.append(plusBtn, modePill, spacer, modelPill, stopBtn, sendBtn);
   island.append(strip, tray, input, row);
   box.append(island);
   container.append(box);
@@ -345,79 +343,13 @@ export function mountComposer(container, opts = {}) {
     openModelMenu(modelPill, (busy) => modelPill.classList.toggle("busy", !!busy), { running });
   });
 
-  // ── Sub-agent model pill (D3) ──
-  // Default reads "Inherit from main" (parent's full binding: endpoint AND
-  // model). Explicit options come from saved profiles; registry-retired ids
-  // are shown struck-out and disabled (D4), never selectable.
-  function subModel() {
-    const m = String(store.get().config?.runtime?.subAgents?.model || "").trim();
-    return (!m || m.toLowerCase() === "inherit" || m.toLowerCase() === "auto") ? "" : m;
-  }
-  function paintSub() {
-    const cur = subModel();
-    subPill.innerHTML = "";
-    subPill.append(
-      h("span", { class: "model-mark brand-custom", text: "S" }),
-      h("span", { class: "truncate", text: cur ? `Sub: ${cur}` : "Sub: Inherit" }),
-      h("span", { html: icons.chevronDown }));
-    subPill.title = cur
-      ? `Sub-agents run on ${cur} (click to change; endpoint travels with the model)`
-      : "Sub-agents inherit the main model + endpoint (click to change)";
-  }
-  function openSubMenu() {
-    const cfg = store.get().config || {};
-    const profiles = cfg.providerProfiles || {};
-    const cur = subModel();
-    getModelRegistry().catch(() => ({})).then((reg) => {
-      const states = (reg && reg.models) || {};
-      const body = h("div", null, h("div", { class: "pop-label", text: "Sub-agent model" }));
-      const addRow = ({ value, label, hint, checked, disabled, disabledHint }) => {
-        const b = h("button", {
-          class: "pop-item", role: "menuitemradio", "aria-checked": String(!!checked),
-          ...(disabled ? { disabled: true } : {}),
-        }, h("span", { class: "truncate", text: label }));
-        b.title = disabled ? (disabledHint || hint || label) : (hint || label);
-        if (checked) b.append(h("span", { class: "check", html: icons.check }));
-        if (disabled) b.classList.add("is-disabled");
-        if (!disabled) {
-          b.addEventListener("click", async () => {
-            closePopover();
-            try {
-              await setSubAgentModel(value);
-              const fresh = await getConfig();
-              store.set({ config: fresh || {} });
-              paintSub();
-              toast(value === "inherit" ? "Sub-agents inherit the main binding" : `Sub-agent model: ${value}`, "success");
-            } catch (e) {
-              toast(`Sub-agent model failed: ${e.message}`, "error");
-            }
-          });
-        }
-        body.append(b);
-      };
-      addRow({ value: "inherit", label: "Inherit from main", hint: "Endpoint AND model follow the parent run (default)", checked: !cur });
-      const seen = new Set();
-      const consider = (id, base, via) => {
-        const mid = String(id || "").trim();
-        if (!mid || seen.has(mid)) return;
-        seen.add(mid);
-        const key = `${String(base || "").trim().replace(/\/+$/, "").toLowerCase()}::${mid}`;
-        const st = states[key];
-        const retired = Boolean(st && (st.retired || st.status === "retired"));
-        addRow({
-          value: mid, label: mid, hint: `${via}${st && st.status ? ` · registry: ${st.status}` : ""}`,
-          checked: cur === mid, disabled: retired,
-          disabledHint: retired ? `${mid} is retired on this endpoint — excluded` : undefined,
-        });
-      };
-      if (cfg.provider && cfg.provider.model) consider(cfg.provider.model, cfg.provider.baseUrl, "main model");
-      for (const [pid, p] of Object.entries(profiles)) {
-        if (p && p.model) consider(p.model, p.baseUrl, `profile ${pid}`);
-      }
-      openPopover(subPill, body);
-    });
-  }
-  subPill.addEventListener("click", (e) => { e.stopPropagation(); openSubMenu(); });
+  // ── Sub-agent model ──
+  // REMOVED. This pill let you point sub-agents at a different model/provider
+  // than the one you were chatting with. Since sub-agents now always inherit the
+  // main model, the picker had no decision left to offer — it could only ever
+  // show the inherited value. Keeping a dead control next to the live model
+  // pill reads as "these are two different things" and invites the question of
+  // why the second one is stuck.
 
   // ── Agents ──
   async function getAgentList() {
@@ -686,7 +618,6 @@ export function mountComposer(container, opts = {}) {
     }
     paintStrip();
     paintModel();
-    paintSub();
     const wsPath = store.get().workspace.activePath || "";
     if (wsPath !== branchFor) {
       branchFor = wsPath;
@@ -721,7 +652,6 @@ export function mountComposer(container, opts = {}) {
   paintStrip();
   paintPill();
   paintModel();
-  paintSub();
   loadDraft();
   refreshBranch();
 

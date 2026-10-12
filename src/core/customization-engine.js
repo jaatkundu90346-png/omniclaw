@@ -1,5 +1,6 @@
 import { OpenAICompatibleProvider } from "./providers/openai-compatible-provider.js";
 import { CodexCliProvider } from "./providers/codex-cli-provider.js";
+import { REASONING_EFFORTS } from "./reasoning-effort.js";
 
 export class CustomizationEngine {
   constructor({ configStore, skillRegistry, secretStore }) {
@@ -156,22 +157,53 @@ export class CustomizationEngine {
       };
     }
 
-    // Sub-agent runtime settings (Settings UI "Sub-agents" card): provider,
-    // model, fallbackModel, maxConcurrent, maxPerHour, timeoutMs — sanitized here
-    // so arbitrary runtime keys still can't be written through this endpoint.
+    // Reasoning effort (Settings UI "Reasoning effort" row). Additive, and
+    // deliberately validated against a fixed list rather than passed through:
+    // this value goes straight into a provider request body, so an unvalidated
+    // string from the browser would be an injection point into the API call.
+    //
+    // NOTE the `!== undefined` check is load-bearing. `null` is the MEANINGFUL
+    // "off" value (stop asking the model to think harder), so it must survive
+    // the patch — an `if (reasoning)` guard would silently drop it and the UI
+    // would claim success while the setting never changed.
+    const reasoning = input.reasoning !== undefined ? input.reasoning : p.reasoning;
+    if (reasoning !== undefined) {
+      if (reasoning === null || reasoning === false) {
+        patch.provider = { ...(patch.provider || {}), reasoning: null };
+      } else {
+        const effort = typeof reasoning === "object" && reasoning !== null
+          ? reasoning.effort
+          : reasoning;
+        const level = String(effort || "").trim().toLowerCase();
+        if (!REASONING_EFFORTS.includes(level)) {
+          throw new Error(
+            `provider.reasoning must be one of: ${REASONING_EFFORTS.join(", ")} (or null to turn it off).`,
+          );
+        }
+        patch.provider = { ...(patch.provider || {}), reasoning: level };
+      }
+    }
+
+    // Sub-agent LIMITS (Settings UI "Sub-agents" card): maxConcurrent, maxPerHour,
+// timeoutMs — sanitized here so arbitrary runtime keys still can't be written
+    // through this endpoint.
+    //
+    // There is deliberately NO provider/model/fallbackModel writer any more.
+    // Silently ignoring them is not enough on its own, so each is REJECTED
+    // outright: a stale client that still sends {model: "x"} gets an error
+    // naming the truth ("sub-agents always use the main model") instead of a
+    // cheerful 200 that quietly discarded what it was told. A silent drop here
+    // is how a removed setting comes back three versions later.
     const sub = input.runtime?.subAgents || input.subAgents;
     if (sub && typeof sub === "object") {
-      const subPatch = {};
-      // Dedicated sub-agent provider: only accept a known providerProfiles id
-      // (or empty = inherit the main provider). This is what lets sub-agents run
-      // on a SEPARATE connection/key from the main agent.
-      if (sub.provider !== undefined) {
-        const pid = String(sub.provider || "").trim();
-        const knownProfiles = this.configStore.getConfig().providerProfiles || {};
-        subPatch.provider = (!pid || knownProfiles[pid]) ? pid : "";
+      for (const gone of ["provider", "model", "fallbackModel"]) {
+        if (sub[gone] !== undefined) {
+          throw new Error(
+            `runtime.subAgents.${gone} was removed — sub-agents always run on the main agent's model and endpoint.`,
+          );
+        }
       }
-      if (sub.model !== undefined) subPatch.model = String(sub.model || "").trim();
-      if (sub.fallbackModel !== undefined) subPatch.fallbackModel = String(sub.fallbackModel || "").trim();
+      const subPatch = {};
       if (sub.maxConcurrent !== undefined) subPatch.maxConcurrent = Math.max(1, Math.min(8, Number(sub.maxConcurrent) || 3));
       if (sub.maxPerHour !== undefined) subPatch.maxPerHour = Math.max(1, Math.min(200, Number(sub.maxPerHour) || 30));
       if (sub.timeoutMs !== undefined) subPatch.timeoutMs = Math.max(30000, Math.min(1800000, Number(sub.timeoutMs) || 300000));

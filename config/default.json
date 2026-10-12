@@ -92,9 +92,6 @@
       "nativeToolTimeoutMs": 60000
     },
     "subAgents": {
-      "provider": "",
-      "model": "inherit",
-      "fallbackModel": "",
       "maxConcurrent": 3,
       "maxPerHour": 30,
       "timeoutMs": 300000,
@@ -253,7 +250,7 @@
     "maxTokens": 8000,
     "plannerMaxTokens": 900,
     "timeoutMs": 180000,
-    "reasoning": null,
+    "reasoning": "high",
     "codexCommand": "codex",
     "codexSandbox": "read-only",
     "codexLiveEnabled": false,

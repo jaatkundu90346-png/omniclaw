@@ -55,18 +55,6 @@ async function fetchEndpointModels(provider) {
   }
 }
 
-// Values of runtime.subAgents.model (and the delegate_task model arg) that
-// mean "inherit the parent's FULL provider binding" (A2/A4).
-function isInheritWord(value) {
-  const v = String(value || "").trim().toLowerCase();
-  return v === "" || v === "inherit" || v === "auto";
-}
-
-function vendorOf(modelId) {
-  const s = String(modelId || "");
-  return s.includes("/") ? s.split("/")[0].toLowerCase() : "";
-}
-
 function describeBinding(binding = {}) {
   const model = String(binding.model || "").trim() || "(provider default)";
   const where = binding.providerId
@@ -113,23 +101,20 @@ export class SubAgentSpawner extends EventEmitter {
   // Config-driven limits (Settings → runtime.subAgents). The old hardcoded
   // maxTotal=20 was a LIFETIME cap — after 20 spawns the gateway could never
   // delegate again until restart. Now it's a rolling per-hour budget.
+  //
+  // NOTE what is NOT here any more: defaultModel, fallbackModel, provider. Those
+  // let a sub-agent run on something other than the main agent's model, which is
+  // exactly the surprise this feature was removed for. What remains is purely
+  // about HOW MANY sub-agents run and HOW LONG each may run — resource limits
+  // that say nothing about which model answers.
   getLimits() {
     const cfg = this.configStore?.getConfig?.()?.runtime?.subAgents || {};
-    const provider = this.configStore?.getConfig?.()?.provider || {};
     return {
       maxConcurrent: Math.max(1, Math.min(8, Number(cfg.maxConcurrent || 3))),
       maxPerHour: Math.max(1, Math.min(200, Number(cfg.maxPerHour || 30))),
-      // Default model for ALL sub-agents. "" / "inherit" (the default) means
-      // INHERIT THE PARENT'S FULL BINDING — endpoint AND model as one unit
-      // (A2). An explicit id is validated against its endpoint before spawn
-      // (A3) and falls down the ladder on failure (A5), never split across
-      // endpoints. Research fan-out can name a cheaper model here.
-      defaultModel: String(cfg.model || "").trim(),
-      // On a provider rate-limit inside a sub-agent, retry once on this model.
-      fallbackModel: String(cfg.fallbackModel || provider.compactionModel || "").trim(),
       timeoutMs: Math.max(30000, Math.min(1800000, Number(cfg.timeoutMs || this.defaultTimeoutMs))),
-      // Transcript char budget for a sub-agent run. Lower this when sub-agents
-      // run on a small-context local model (e.g. 32k window ≈ 100000 chars).
+      // Transcript char budget for a sub-agent run. Lower this when the main
+      // model runs on a small-context window (e.g. 32k ≈ 100000 chars).
       contextChars: Math.max(30000, Math.min(2000000, Number(cfg.contextChars || 240000))),
     };
   }
@@ -162,8 +147,6 @@ export class SubAgentSpawner extends EventEmitter {
       maxConcurrent: limits.maxConcurrent,
       maxPerHour: limits.maxPerHour,
       spawnedThisHour: this.spawnTimestamps.filter((t) => t > hourAgo).length,
-      defaultModel: limits.defaultModel || "(same as main agent)",
-      fallbackModel: limits.fallbackModel || "(none)",
       active,
       recentCompleted: completed,
     };
@@ -206,22 +189,17 @@ export class SubAgentSpawner extends EventEmitter {
       parentAgentId,
       task: String(task).trim(),
       tools: Array.isArray(tools) ? tools : [],
-      model: String(model || "").trim() || limits.defaultModel || this.configStore?.getConfig?.()?.provider?.mode || "",
-      // Per-spawn model override, falling back to the configured sub-agent
-      // default (runtime.subAgents.model) — so ALL sub-agents can run on a
-      // cheaper/less-rate-limited model than the main agent.
-      modelOverride: String(model || "").trim() || limits.defaultModel,
-      // Raw explicit model (before default fallback), so validation can fail
-      // fast on a user-named bad id while a stale CONFIGURED default merely
-      // warns and inherits the main model instead of killing the delegation.
-      explicitModel: String(model || "").trim(),
-      // Optional per-call provider profile id (delegate_task `provider` arg).
-      // Empty = configured dedicated provider, else the parent binding.
+      // The spawn `model`/`provider` arguments are IGNORED on purpose. They used
+      // to let a caller put the child on a different model than the main agent,
+      // which is the behaviour this feature removal is about. They are kept in
+      // the signature so existing callers keep working, and recorded here so a
+      // stale caller is visible in the child's own record rather than silently
+      // dropped.
+      requestedModel: String(model || "").trim(),
       requestedProvider: String(provider || "").trim(),
       // Resolved binding {provider, providerId, baseUrl, model, source} plus
       // the ordered fallback ladder — filled by resolveSubAgentBinding before
-      // the first provider call (A2/A5). modelOverride always mirrors the
-      // ACTIVE rung's model ("" = provider default).
+      // the first provider call. modelOverride mirrors the ACTIVE rung's model.
       binding: null,
       ladder: [],
       ladderIndex: 0,
@@ -230,7 +208,6 @@ export class SubAgentSpawner extends EventEmitter {
       // unavailable (tests) — every session op below is best-effort.
       childSessionId: "",
       childRunId: id,
-      fallbackModel: limits.fallbackModel,
       timeoutMs: Number(timeoutMs) || limits.timeoutMs,
       systemPrompt: String(systemPrompt || "").trim(),
       status: "starting",
@@ -589,185 +566,49 @@ export class SubAgentSpawner extends EventEmitter {
     return null;
   }
 
-  // Resolve the ordered fallback ladder for one spawn (A2/A4/A5).
-  // Rung 0 is the primary; every rung is a COMPLETE binding (endpoint+model).
-  // Returns {ladder, primary}. Throws ONLY for an explicitly requested model
-  // that is invalid everywhere it could run (A3 fail-fast with alternatives).
-  async resolveSubAgentBinding({ model = "", provider = "", context = {}, subagentId = "" } = {}) {
-    const gateway = this.agentRuntime?.gateway;
-    const rootDir = this.agentRuntime?.rootDir;
-    const cfg = this.configStore?.getConfig?.() || {};
-    const sub = cfg.runtime?.subAgents || {};
-    const explicit = String(model || "").trim();
-    const explicitProviderId = String(provider || "").trim();
-    const configured = String(sub.model || "").trim();
-    const dedicatedId = String(sub.provider || "").trim();
+  // Resolve the binding a sub-agent runs on.
+  //
+  // THERE IS EXACTLY ONE ANSWER NOW: the parent's own binding, verbatim.
+  //
+  // This used to be a ~160-line ladder — explicit per-call model, a configured
+  // default, a dedicated provider profile, a fallback model for rate-limits, a
+  // loopback probe — each rung validated against its endpoint, each able to
+  // silently pick a DIFFERENT model than the one the user was looking at. That
+  // complexity had one real cost and no real benefit: a sub-agent reviewing a
+  // diff or writing a patch could be running on a model the user never chose,
+  // so quality was unpredictable and "which model ran this?" had no honest
+  // answer. Sub-agents exist to add parallelism and context isolation, not to
+  // change the model. So the feature is gone, not defaulted.
+  //
+  // The return shape ({ladder, primary}) is KEPT because callers still walk a
+  // ladder — there is just now only ever one rung in it. That keeps the retry
+  // and recovery paths intact instead of forcing a rewrite of the run loop to
+  // delete a concept.
+  async resolveSubAgentBinding(context = {}) {
+    // context matters: parentBinding reads the RUN-scoped model, so a run
+    // launched on an explicit model spawns its sub-agents on that same model
+    // rather than silently dropping back to the configured default.
     const parent = this.parentBinding(context);
-    const ladder = [];
-    const seen = new Set();
-    const pushRung = (rung) => {
-      if (!rung || !rung.provider) return false;
-      const key = `${rung.providerId || ""}::${rung.model || ""}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      ladder.push(rung);
-      return true;
+    if (!parent.provider) {
+      throw new Error(
+        "No provider available for sub-agent execution — the main agent has no provider binding either.",
+      );
+    }
+    const primary = {
+      provider: parent.provider,
+      providerId: "",
+      baseUrl: parent.baseUrl,
+      model: parent.model,
+      source: "inherited",
     };
-    const warn = (message, extra = {}) => {
-      try {
-        gateway?.addEvent?.("subagent.model_fallback", {
-          subagentId: subagentId || extra.subagentId || "",
-          model: extra.model || "",
-          message,
-        });
-      } catch { /* best effort */ }
-    };
-
-    // 1. Explicit per-call model: the endpoint follows the model (never split).
-    //    explicit provider > dedicated > parent; valid elsewhere ⇒ retarget
-    //    with a warning; invalid everywhere ⇒ immediate clear failure (A3).
-    if (explicit) {
-      const targets = [];
-      if (explicitProviderId) {
-        const t = this.providerForProfile(explicitProviderId);
-        if (!t.usable || !t.provider) {
-          throw new Error(`Sub-agent provider "${explicitProviderId}" is not usable (${t.warning || "missing key or unknown profile"}). Fix: apply the profile in Settings, or omit provider to inherit the parent binding.`);
-        }
-        targets.push({ ...t, strict: true });
-      } else {
-        if (dedicatedId) {
-          const t = this.providerForProfile(dedicatedId);
-          if (t.usable && t.provider) targets.push(t);
-        }
-        if (parent.provider) {
-          targets.push({ provider: parent.provider, providerId: "", baseUrl: parent.baseUrl, model: "", usable: true });
-        }
-      }
-      if (targets.length === 0) {
-        throw new Error(`Sub-agent model "${explicit}" has no endpoint to run on (dedicated provider unusable and no parent provider). Fix: apply a provider profile in Settings.`);
-      }
-      let primary = null;
-      let firstAlternatives = [];
-      let retiredSomewhere = false;
-      const triedNotes = [];
-      for (const target of targets) {
-        const check = await this.checkModelOnEndpoint(target.provider, target.baseUrl, explicit);
-        const label = target.providerId ? `provider "${target.providerId}"` : "parent endpoint";
-        triedNotes.push(`${label}: ${check.ok ? "valid" : check.reason}`);
-        if (check.ok) { primary = { target, strict: Boolean(target.strict) }; break; }
-        if (check.reason === "retired") {
-          retiredSomewhere = true;
-          markModelRetired(rootDir, target.baseUrl, explicit, "explicit model retired on endpoint");
-          continue;
-        }
-        if (firstAlternatives.length === 0 && check.alternatives) firstAlternatives = check.alternatives;
-      }
-      if (!primary) {
-        const scope = explicitProviderId
-          ? `provider profile "${explicitProviderId}"`
-          : `the active endpoint (${triedNotes.join("; ") || "unreachable"})`;
-        const alts = firstAlternatives.length ? ` Valid models there: ${firstAlternatives.join(", ")}.` : "";
-        const retiredNote = retiredSomewhere ? ` Model "${explicit}" is RETIRED and will never work again.` : "";
-        throw new Error(`Sub-agent model "${explicit}" is not a valid model id on ${scope}.${retiredNote}${alts} Fix: pass a valid model, omit model to inherit the parent binding (${parent.model || "provider default"} on ${parent.baseUrl || "main endpoint"}), or omit provider to let the endpoint follow the model.`);
-      }
-      if (!primary.strict && primary.target !== targets[0]) {
-        const fromLabel = targets[0].providerId ? `provider "${targets[0].providerId}"` : "the first endpoint";
-        const toLabel = primary.target.providerId ? `provider "${primary.target.providerId}"` : "the parent binding";
-        warn(`explicit model "${explicit}" is not on ${fromLabel} — retargeted to ${toLabel} so model and endpoint stay together`, { model: explicit });
-      }
-      pushRung({ provider: primary.target.provider, providerId: primary.target.providerId || "", baseUrl: primary.target.baseUrl, model: explicit, source: "explicit" });
-    } else if (!isInheritWord(configured)) {
-      // 2. Configured default: forgiving — warn and ladder on (a stale value
-      //    must not kill the delegation).
-      const target = dedicatedId
-        ? this.providerForProfile(dedicatedId)
-        : { provider: parent.provider, providerId: "", baseUrl: parent.baseUrl, model: "", usable: Boolean(parent.provider) };
-      if (!target.usable || !target.provider) {
-        warn(`configured sub-agent model "${configured}" has no usable endpoint (${target.warning || "dedicated provider unusable"}) — using the parent binding`, { model: configured });
-      } else {
-        const check = await this.checkModelOnEndpoint(target.provider, target.baseUrl, configured);
-        if (check.ok) {
-          pushRung({ provider: target.provider, providerId: target.providerId || "", baseUrl: target.baseUrl, model: configured, source: "configured" });
-        } else {
-          if (check.reason === "retired") markModelRetired(rootDir, target.baseUrl, configured, "configured default retired");
-          warn(`configured sub-agent model "${configured}" is ${check.reason === "retired" ? "RETIRED" : "not valid"} on ${target.providerId ? `provider "${target.providerId}"` : "the parent endpoint"} — inheriting the parent binding for this run (fix runtime.subAgents.model in Settings)`, { model: configured });
-        }
-      }
-    }
-    // 3. Dedicated provider default — ONLY when that exact (endpoint, model)
-    //    validates. A blind profile default is how a retired model 410s at
-    //    call time with the endpoint kept and the model dropped.
-    if (dedicatedId) {
-      const target = this.providerForProfile(dedicatedId);
-      if (target.usable && target.model) {
-        const check = await this.checkModelOnEndpoint(target.provider, target.baseUrl, target.model);
-        if (check.ok) {
-          pushRung({ provider: target.provider, providerId: target.providerId, baseUrl: target.baseUrl, model: target.model, source: "dedicated-default" });
-        } else {
-          if (check.reason === "retired") markModelRetired(rootDir, target.baseUrl, target.model, "dedicated default retired");
-          warn(`dedicated provider "${dedicatedId}" default model "${target.model}" is ${check.reason === "retired" ? "RETIRED" : "not valid"} there — the dedicated endpoint is skipped for this run`, { model: target.model });
-        }
-      }
-    }
-    // 4. No explicit choice: the parent full binding is the primary
-    //    (inherit = endpoint AND model as one unit). A chosen primary from
-    //    steps 1-3 keeps its position ahead of this.
-    if (ladder.length === 0 && parent.provider) {
-      pushRung({ provider: parent.provider, providerId: "", baseUrl: parent.baseUrl, model: parent.model, source: "inherited" });
-    }
-    // 5. Configured fallback rung (A5): anchored on the primary rung.
-    //    Validation decides when the endpoint list is available (multi-vendor
-    //    endpoints like OpenRouter serve many prefixes from one connection, so
-    //    a vendor guess must never overrule a successful validation). The
-    //    vendor heuristic applies ONLY when blind (no list): a cross-vendor
-    //    fallback then likely turns a rate-limit into an invalid-model.
-    {
-      const anchor = ladder[0] || null;
-      const primaryModel = String((ladder[0] && ladder[0].model) || parent.model || "");
-      const fallback = String(sub.fallbackModel || cfg.provider?.compactionModel || "").trim();
-      if (anchor && fallback && fallback !== String((ladder[0] && ladder[0].model) || "")) {
-        const check = await this.checkModelOnEndpoint(anchor.provider, anchor.baseUrl, fallback);
-        if (check.ok) {
-          pushRung({ provider: anchor.provider, providerId: anchor.providerId || "", baseUrl: anchor.baseUrl, model: fallback, source: "fallback" });
-        } else if (check.reason === "retired") {
-          markModelRetired(rootDir, anchor.baseUrl, fallback, "fallback model retired");
-        } else if (check.unlisted) {
-          const mismatch = primaryModel && vendorOf(fallback) && vendorOf(primaryModel) && vendorOf(fallback) !== vendorOf(primaryModel);
-          if (!mismatch) {
-            pushRung({ provider: anchor.provider, providerId: anchor.providerId || "", baseUrl: anchor.baseUrl, model: fallback, source: "fallback" });
-          } else {
-            warn(`fallback model "${fallback}" looks cross-vendor to "${primaryModel}" and the endpoint list is unavailable — skipping it rather than turning a rate-limit into an invalid-model`, { model: fallback });
-          }
-        }
-      }
-    }
-    // 6. Parent full binding as a ladder rung when it is not already the
-    //    primary (dedupes to a no-op when inherited above).
-    if (parent.provider) {
-      pushRung({ provider: parent.provider, providerId: "", baseUrl: parent.baseUrl, model: parent.model, source: "inherited" });
-    }
-    // 7. Local loopback last resort (probed with a short timeout, never fatal).
-    {
-      const exclude = new Set(ladder.map((r) => String(r.model || "")).filter(Boolean));
-      const local = await this.probeLocalBinding(exclude);
-      if (local) pushRung(local);
-    }
-    if (ladder.length === 0) {
-      throw new Error("No provider available for sub-agent execution.");
-    }
-    return { ladder, parent };
+    return { ladder: [primary], parent };
   }
 
   async runAgent(agent, context) {
     const gateway = this.agentRuntime?.gateway;
-    // Binding-first (A2/A3/A5): resolve the COMPLETE ordered ladder before
-    // the first provider call — endpoint+model as one unit, pre-validated.
-    const { ladder } = await this.resolveSubAgentBinding({
-      model: agent.explicitModel,
-      provider: agent.requestedProvider,
-      context,
-      subagentId: agent.id,
-    });
+    // Resolve the binding BEFORE the first provider call so the child is
+    // attached to a known model from the start (its events report it).
+    const { ladder } = await this.resolveSubAgentBinding(context);
     agent.ladder = ladder;
     agent.ladderIndex = 0;
     agent.binding = ladder[0];
@@ -960,16 +801,19 @@ When the task is complete (or genuinely blocked), reply with final text only and
         // Ladder exhausted: ACTIONABLE reason naming the real binding — model
         // AND endpoint as one unit, never a "(main model)" placeholder.
         const tried = (agent.ladder || []).map((r) => describeBinding(r)).join(" → ") || describeBinding(agent.binding);
+        // Sub-agents run on ONE binding, so "every configured endpoint" would be
+        // a lie — there is no other endpoint to have failed on. Say what actually
+        // happened instead of implying a search that never happened.
         const reason = classified.reason === "billing"
           ? "out of credits / payment required on the active endpoint"
           : classified.isRateLimit
-            ? "rate-limited on every configured endpoint"
+            ? "rate-limited on the active endpoint"
             : (classified.isModelGone
               ? "rejected as an invalid/retired model on the active endpoint"
               : (classified.reason === "auth"
                 ? "rejected — the active endpoint's API key is missing or invalid"
                 : (classified.userMessage || "the provider request failed")));
-        const hint = `Sub-agent binding ${describeBinding(agent.binding)} failed: ${reason}${activeBinding.baseUrl ? ` (endpoint: ${activeBinding.baseUrl})` : ""}. Ladder tried: ${tried}. Fix: give the child a model that is valid on its endpoint (delegate_task {model} + {provider}), or set runtime.subAgents.model to "inherit" so the child runs exactly where the parent runs. Raw: ${String(error?.message || "").slice(0, 200)}`;
+        const hint = `Sub-agent binding ${describeBinding(agent.binding)} failed: ${reason}${activeBinding.baseUrl ? ` (endpoint: ${activeBinding.baseUrl})` : ""}. Ladder tried: ${tried}. Sub-agents always run on the main agent's model and endpoint, so the fix is on the main binding: switch to a model that is valid on this endpoint, or fix its API key. Raw: ${String(error?.message || "").slice(0, 200)}`;
         const wrapped = new Error(hint);
         wrapped.cause = error;
         wrapped.subagentModel = String((agent.binding && agent.binding.model) || "");

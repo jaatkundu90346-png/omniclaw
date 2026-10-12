@@ -155,7 +155,10 @@ const makeRegistry = (onRun) => ({
   const limits = spawner.getLimits();
   assert.equal(limits.maxConcurrent, 2, "maxConcurrent from config");
   assert.equal(limits.maxPerHour, 5, "maxPerHour from config");
-  assert.equal(limits.defaultModel, "cheap/model-a", "default sub-agent model from config");
+  // The config still carries the OLD model/fallbackModel keys on purpose: they
+  // must be ignored, not honoured. (See subagent-inherit-model-smoke.mjs.)
+  assert.ok(!("defaultModel" in limits), "sub-agent model is no longer a configurable limit");
+  assert.ok(!("fallbackModel" in limits), "sub-agent fallback model is gone too");
   // 25+ sequential spawns must NOT hit any lifetime cap (old maxTotal=20 bug)
   for (let i = 0; i < 4; i += 1) {
     const r = await spawner.spawn({ task: `task ${i}` });
@@ -167,14 +170,19 @@ const makeRegistry = (onRun) => ({
   let hourErr = "";
   try { await spawner.spawn({ task: "task 6" }); } catch (e) { hourErr = e.message; }
   assert.ok(/max 5\/hour/.test(hourErr) && /Settings/.test(hourErr), "per-hour budget error is actionable");
-  // completed map pruned, spawn default model applied
+  // completed map pruned, spawn used the MAIN agent's model
   assert.ok(spawner.completedAgents.size <= 20, "completed map bounded");
   const anyDone = [...spawner.completedAgents.values()][0];
-  assert.equal(anyDone.modelOverride, "cheap/model-a", "config default model used for spawns");
-  ok("config-driven limits: rolling window, no lifetime cap, default model");
+  assert.ok(!anyDone.modelOverride, "the stale configured sub-agent model must not be applied");
+  ok("config-driven limits: rolling window, no lifetime cap, no sub-agent model");
 }
 
-// ── 7. rate-limit → fallback model retry inside the sub-agent ──────────────
+// ── 7. rate-limit → reported honestly instead of switching models ──────────
+// This used to assert "retried on the fallback model". It no longer does: there
+// is no fallback model, by design. A rate-limited sub-agent now FAILS, and says
+// so, instead of quietly completing on a model the user never chose. That is
+// the correct trade — a silently downgraded delegation produced a result the
+// user would read as authoritative.
 {
   let calls = 0;
   const models = [];
@@ -183,27 +191,35 @@ const makeRegistry = (onRun) => ({
       rootDir: "C:/proj",
       gateway: { addEvent: () => {} },
       provider: {
+        getInfo: () => ({ model: "main/model-x", baseUrl: "https://main.example/v1" }),
         completeWithTools: async (_messages, opts) => {
           calls += 1;
           models.push(opts.model || "(main)");
-          if (calls === 1) {
-            const err = new Error("Provider native tool request failed with 429 rate limit exceeded");
-            err.status = 429;
-            throw err;
-          }
-          return { text: "done on fallback.", toolCalls: [] };
+          const err = new Error("Provider native tool request failed with 429 rate limit exceeded");
+          err.status = 429;
+          throw err;
         },
       },
     },
-    configStore: { getConfig: () => ({ provider: {}, runtime: { subAgents: { fallbackModel: "cheap/fallback-model" } } }) },
+    configStore: { getConfig: () => ({ provider: {}, runtime: { subAgents: {} } }) },
     toolRegistry: makeRegistry(() => ({ ok: true })),
   });
-  const result = await spawner.spawn({ task: "research kar" });
-  assert.equal(result.status, "completed", "delegation survives the rate limit");
-  assert.equal(models[1], "cheap/fallback-model", "retried on the fallback model");
-  assert.match(String(result.result), /^status: completed/m, "structured report carries completed status");
-  assert.match(String(result.result), /done on fallback\./, "fallback result returned to parent (inside bounded report)");
-  ok("sub-agent rate-limit -> automatic fallback-model retry");
+  // spawn() THROWS on a provider failure (the caller sees the error), so assert
+  // on the thrown message rather than a returned report.
+  let failure = null;
+  try { await spawner.spawn({ task: "research kar" }); } catch (e) { failure = e; }
+  assert.ok(failure, "a rate-limited sub-agent must fail, not silently switch models");
+  assert.equal(failure.subagentStatus, "failed", "the failure is tagged as a failed sub-agent");
+  assert.ok(calls >= 1, "the provider was actually called");
+  assert.ok(!models.some((m) => m && m !== "main/model-x"),
+    `the sub-agent tried a model other than the main one: ${models.join(", ")}`);
+  assert.match(failure.message, /main agent's model and endpoint/,
+    "the failure must say the fix is on the MAIN binding");
+  assert.match(failure.message, /rate-limited on the active endpoint/i,
+    "the failure must name the real reason");
+  assert.ok(!/every configured endpoint/.test(failure.message),
+    "with one binding there is no other endpoint; the message must not imply a search that never happened");
+  ok("sub-agent rate-limit -> reported, never silently downgraded");
 }
 
 // ── 8. settings endpoint sanitizes runtime.subAgents patch ─────────────────
@@ -213,12 +229,21 @@ const makeRegistry = (onRun) => ({
   const engine = new CustomizationEngine({
     configStore: { updateUserConfig: (patch) => { written = patch; return patch; }, getConfig: () => ({}) },
   });
-  engine.updateRuntimeSettings({ runtime: { subAgents: { model: " m/x ", fallbackModel: "m/y", maxConcurrent: 99, maxPerHour: 9999, evilKey: "nope" } } });
-  assert.equal(written.runtime.subAgents.model, "m/x", "model trimmed + saved");
+  // The removed keys must be REJECTED, not silently dropped — a stale client
+  // needs to learn the setting is gone, otherwise the same value comes back.
+  for (const gone of ["model", "provider", "fallbackModel"]) {
+    assert.throws(
+      () => engine.updateRuntimeSettings({ runtime: { subAgents: { [gone]: "m/x" } } }),
+      /always run on the main agent/,
+      `runtime.subAgents.${gone} must be rejected, not ignored`,
+    );
+  }
+  engine.updateRuntimeSettings({ runtime: { subAgents: { maxConcurrent: 99, maxPerHour: 9999, evilKey: "nope" } } });
   assert.equal(written.runtime.subAgents.maxConcurrent, 8, "maxConcurrent clamped to 8");
   assert.equal(written.runtime.subAgents.maxPerHour, 200, "maxPerHour clamped to 200");
   assert.equal(written.runtime.subAgents.evilKey, undefined, "unknown keys dropped");
-  ok("settings endpoint sanitizes sub-agent config");
+  assert.equal(written.runtime.subAgents.model, undefined, "no model key is ever written");
+  ok("settings endpoint rejects sub-agent model keys, sanitizes limits");
 }
 
 console.log(`\nsubagent-smoke: ${passed} checks passed, 0 failed`);

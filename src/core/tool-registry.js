@@ -5618,7 +5618,7 @@ export class ToolRegistry {
         run: async ({ text }) => this.mediaNotConfigured("tts", text),
       },
       delegate_task: {
-        description: "Delegate ONE self-contained subtask to an isolated sub-agent (own context+loop: files, shell, web, browser). REQUIRED: task — full standalone spec with exact chat-root-relative paths, acceptance criteria, and what NOT to touch (the child sees NOTHING else). OPTIONAL: tools, model, provider, timeoutMs, systemPrompt. Model+endpoint resolve as ONE binding: omit both to inherit the parent's full binding (endpoint AND model — the default); an explicit model is validated on its endpoint before spawn and falls down the ladder (fallback → parent → local) on failure. Returns a bounded report {status:completed|incomplete|failed, done, notDone, filesTouched, transcriptPath} — incomplete is NOT success, re-plan or retry. Multiple delegate_task calls in ONE turn fan out in parallel. Example: {\"task\":\"In web-next/js/ui/thread.js add a context-meter div; verify with npm run build. Do NOT touch provider keys.\"}.",
+        description: "Delegate ONE self-contained subtask to an isolated sub-agent (own context+loop: files, shell, web, browser). REQUIRED: task — full standalone spec with exact chat-root-relative paths, acceptance criteria, and what NOT to touch (the child sees NOTHING else). OPTIONAL: tools, timeoutMs, systemPrompt. The child always runs on the SAME model and endpoint as this agent — there is no per-call model choice, so a delegated result is comparable to doing the work here. Returns a bounded report {status:completed|incomplete|failed, done, notDone, filesTouched, transcriptPath} — incomplete is NOT success, re-plan or retry. Multiple delegate_task calls in ONE turn fan out in parallel. Example: {\"task\":\"In web-next/js/ui/thread.js add a context-meter div; verify with npm run build. Do NOT touch provider keys.\"}.",
         permission: "allowTaskWrite",
         group: "delegation",
         schema: {
@@ -5627,8 +5627,6 @@ export class ToolRegistry {
           properties: {
             task: { type: "string", description: "REQUIRED. Standalone spec: goal + exact file paths + acceptance check + boundaries. Min 20 chars. The child cannot see this chat." },
             tools: { type: "array", items: { type: "string" }, description: "OPTIONAL. Tool ids for the child. Omit = file/shell/web/browser core set." },
-            model: { type: "string", description: "OPTIONAL. Model id for the child. Omit = inherit the parent binding. An explicit id is validated on its endpoint first; invalid ids fail immediately naming valid alternatives." },
-            provider: { type: "string", description: "OPTIONAL. Provider profile id (Settings → providers) for the child. Omit = configured sub-agent provider, else the parent endpoint. The endpoint always travels with the model." },
             timeoutMs: { type: "number", description: "OPTIONAL. Child timeout ms (default 300000, min 30000)." },
             systemPrompt: { type: "string", description: "OPTIONAL. Extra system instructions for the child." },
             // ── AGENT-TO-AGENT HANDOFF (leave all three unset for a sub-agent) ──
@@ -5638,6 +5636,13 @@ export class ToolRegistry {
           },
         },
         run: async ({ task, tools, model, provider, timeoutMs, systemPrompt, targetAgentId, title, prompt } = {}, context) => {
+          // `model`/`provider` are accepted but IGNORED: sub-agents run on this
+          // agent's model. Swallowing them silently (rather than erroring) is
+          // deliberate — a model that still remembers the old schema, or a user
+          // who hand-writes a tool call, should still get the work done on the
+          // correct model instead of a validation error that blocks the turn.
+          void model;
+          void provider;
           // ── AGENT-TO-AGENT mode ─────────────────────────────────────────
           // When the caller names a TARGET AGENT (or supplies `prompt`), this is
           // no longer a sub-agent spawn: it hands a task to another agent that
@@ -5669,8 +5674,8 @@ export class ToolRegistry {
             task: String(task || "").trim(),
             parentAgentId: this.getAgentId(context),
             tools: Array.isArray(tools) ? tools : [],
-            model: String(model || "").trim(),
-            provider: String(provider || "").trim(),
+            // No model/provider: the child inherits this agent's binding. The
+            // ignored tool args are recorded on the child for traceability.
             timeoutMs: Number(timeoutMs) || 0,
             systemPrompt: String(systemPrompt || "").trim(),
             context,
@@ -5739,11 +5744,12 @@ export class ToolRegistry {
               parentAgentId: this.getAgentId(context),
               tools: ["read_file", "list_files", "search_text", "exec", "grep_files"],
               systemPrompt: "You are a rigorous, independent QA reviewer. Be specific and skeptical. Never rubber-stamp. Prefer running the verification over reasoning about it.",
-              // Use a separate reviewer model when configured (worker != checker
-              // AND ideally worker-model != checker-model, to resist self-bias).
-              // Falls back to the cheap compaction model: review is not
-              // user-facing work and must never bill the main model by default.
-              model: String(this.configStore.getConfig()?.provider?.reviewerModel || this.configStore.getConfig()?.provider?.compactionModel || "").trim(),
+              // No reviewer model override — the reviewer is a sub-agent, and
+              // sub-agents run on this agent's model. Independence still holds,
+              // just along a different axis: the reviewer gets a FRESH context
+              // that never saw the worker's reasoning, which is what actually
+              // stops it from inheriting a conclusion. Swapping the model on top
+              // mostly bought a worse review of the same files.
               context,
             });
             return {
@@ -5760,7 +5766,7 @@ export class ToolRegistry {
         },
       },
       provider_keys: {
-        description: "List which provider API keys are configured (MASKED — never full keys), the active provider/model, and the sub-agent model config. Use when rate-limited to see what you can switch to (then list_provider_models + switch_model).",
+        description: "List which provider API keys are configured (MASKED — never full keys), the active provider/model, and the sub-agent limits. Use when rate-limited to see what you can switch to (then list_provider_models + switch_model).",
         permission: null,
         group: "provider",
         run: async () => {
@@ -5772,19 +5778,19 @@ export class ToolRegistry {
             activeProvider: { id: info.id || config.provider?.apiKeyProviderId || "", model: info.model || config.provider?.model || "", ready: info.ready !== false },
             compactionModel: config.provider?.compactionModel || "(none — main model used)",
             subAgents: {
-              model: config.runtime?.subAgents?.model || "(same as main)",
-              fallbackModel: config.runtime?.subAgents?.fallbackModel || config.provider?.compactionModel || "(none)",
+              // Sub-agents have no model setting: they run on activeProvider.model.
+              model: `${info.model || config.provider?.model || "(unknown)"} (inherited — sub-agents always use the main model)`,
               maxConcurrent: config.runtime?.subAgents?.maxConcurrent || 3,
               maxPerHour: config.runtime?.subAgents?.maxPerHour || 30,
             },
             configuredKeys: keys, // [{providerId, configured, masked}]
             availableProfiles: Object.keys(profiles).map((id) => ({ id, baseUrl: profiles[id].baseUrl || "", keyProvider: profiles[id].apiKeyProviderId || id, defaultModel: profiles[id].model || "" })),
-            hint: "Rate-limited? Pick a model on the SAME provider with switch_model {model, scope}. scope: 'main' (your model), 'subagents' (all sub-agents), 'compaction' (summaries). Different provider needs the user to apply a profile in Settings.",
+            hint: "Rate-limited? Pick a model on the SAME provider with switch_model {model, scope}. scope: 'main' (your model — sub-agents follow it) or 'compaction' (summaries). Different provider needs the user to apply a profile in Settings.",
           };
         },
       },
       switch_model: {
-        description: "Switch the active model at runtime (same provider/key). scope 'main' = the primary agent model, 'subagents' = default model for all sub-agents, 'compaction' = cheap model for summaries/learning. Use after a rate limit or to put research sub-agents on a cheaper model. Verify the model id first via list_provider_models.",
+        description: "Switch the active model at runtime (same provider/key). scope 'main' = the primary agent model (sub-agents follow it automatically), 'compaction' = cheap model for summaries/learning. Use after a rate limit. Verify the model id first via list_provider_models.",
         permission: "allowConfigWrite",
         group: "provider",
         schema: {
@@ -5792,17 +5798,24 @@ export class ToolRegistry {
           required: ["model"],
           properties: {
             model: { type: "string", description: "Exact model id the provider accepts (e.g. from list_provider_models)." },
-            scope: { type: "string", description: "'main' (default), 'subagents', or 'compaction'." },
+            scope: { type: "string", description: "'main' (default) or 'compaction'." },
           },
         },
         run: async ({ model, scope } = {}) => {
           const target = String(model || "").trim();
           if (!target) return { ok: false, error: "model is required." };
           const normalizedScope = String(scope || "main").toLowerCase();
-          const before = this.configStore.getConfig();
+          // A stale caller still passing scope:'subagents' must not silently write
+          // to the main model either — that would be a far worse surprise than
+          // reporting the scope is gone. Say so, and point at the one that works.
           if (normalizedScope === "subagents") {
-            this.configStore.updateUserConfig({ runtime: { subAgents: { model: target } } });
-          } else if (normalizedScope === "compaction") {
+            return {
+              ok: false,
+              error: "scope 'subagents' no longer exists — sub-agents always run on the main agent's model. Use scope 'main' to change it for everything.",
+            };
+          }
+          const before = this.configStore.getConfig();
+          if (normalizedScope === "compaction") {
             this.configStore.updateUserConfig({ provider: { compactionModel: target } });
           } else {
             this.configStore.updateUserConfig({ provider: { model: target } });
@@ -5816,13 +5829,13 @@ export class ToolRegistry {
             ok: true,
             scope: normalizedScope,
             model: target,
-            previous: normalizedScope === "subagents" ? (before.runtime?.subAgents?.model || "") : normalizedScope === "compaction" ? (before.provider?.compactionModel || "") : (before.provider?.model || ""),
-            note: normalizedScope === "main" ? "New rounds/runs use this model on the same provider+key." : "Applies to the next spawn/summary.",
+            previous: normalizedScope === "compaction" ? (before.provider?.compactionModel || "") : (before.provider?.model || ""),
+            note: normalizedScope === "main" ? "New rounds/runs use this model on the same provider+key, and sub-agents follow it." : "Applies to the next summary.",
           };
         },
       },
       subagents: {
-        description: "List active and recently completed sub-agents (with limits + models), or cancel a running sub-agent.",
+        description: "List active and recently completed sub-agents (with limits), or cancel a running sub-agent. Sub-agents always run on the main agent's model.",
         permission: null,
         group: "delegation",
         run: async ({ action, agentId } = {}) => {

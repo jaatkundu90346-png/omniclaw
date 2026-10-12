@@ -25,7 +25,7 @@ function warnMalformed(line) {
   console.warn("sse: ignoring malformed packet", line.slice(0, 120));
 }
 
-export function streamChat({ message, sessionId, label, agentId, workspacePath }, handlers = {}, signal) {
+export function streamChat({ message, sessionId, label, agentId, workspacePath, attachments }, handlers = {}, signal) {
   const h = handlers;
   // Same headers/body as neo.js:903-911. No mode fields (C1/C2).
   // workspacePath binds a NEW chat to the client's project folder; existing
@@ -34,6 +34,11 @@ export function streamChat({ message, sessionId, label, agentId, workspacePath }
   if (sessionId) body.sessionId = sessionId;
   if (label) body.label = label;
   if (workspacePath) body.workspacePath = workspacePath;
+  // Attachment descriptors let the SERVER attach the image natively when the
+  // active model has vision. Without them the model only sees the file path in
+  // text and has to call describe_image — which fails outright when no vision
+  // backend is configured. The server re-validates every path.
+  if (Array.isArray(attachments) && attachments.length) body.attachments = attachments;
 
   let runId = "";
   let reader = null;

@@ -1548,7 +1548,7 @@ function setStepDetail(rec, detail) {
     const ctrl = new AbortController();
     liveAbort = ctrl;
     streamChat(
-      { message: msg, sessionId: sessionId || undefined, label: pendingLabel || undefined, agentId, workspacePath: opts.workspacePath || undefined },
+      { message: msg, sessionId: sessionId || undefined, label: pendingLabel || undefined, agentId, workspacePath: opts.workspacePath || undefined, attachments: Array.isArray(opts.attachments) ? opts.attachments : [] },
       {
         onRunId: (id) => { liveRunId = id; },
         onEvent: (record) => { if (!destroyed) handleRecord(turn, record); },

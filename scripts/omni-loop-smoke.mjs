@@ -441,9 +441,22 @@ const baseTools = [
   await providerStr.completeWithTools([{ role: "user", content: "hi" }], { tools: toolSchema, stream: false });
   assert(captured && captured.reasoning_effort === "high", "scenario6: string reasoning -> reasoning_effort");
 
-  const providerNone = new OpenAICompatibleProvider(makeConfigStore(), secretStore);
+  const providerNone = new OpenAICompatibleProvider(makeConfigStore({ reasoning: null }), secretStore);
   await providerNone.completeWithTools([{ role: "user", content: "hi" }], { tools: toolSchema, stream: false });
-  assert(captured && !("reasoning" in captured) && !("reasoning_effort" in captured), "scenario6: no reasoning fields when unset");
+  assert(captured && !("reasoning" in captured) && !("reasoning_effort" in captured), "scenario6: no reasoning fields when explicitly off");
+
+  // With NOTHING configured the shipped default must still ask for effort —
+  // that is the whole point of the default. This case used to assert "no
+  // reasoning fields"; it is the behaviour that was silently costing quality.
+  const providerDefault = new OpenAICompatibleProvider(makeConfigStore(), secretStore);
+  await providerDefault.completeWithTools([{ role: "user", content: "hi" }], { tools: toolSchema, stream: false });
+  assert(captured && captured.reasoning_effort === "high",
+    `scenario6: unconfigured provider still asks for high effort (got ${JSON.stringify(captured?.reasoning_effort)})`);
+
+  // The "/no-think" sentinel must beat the shipped default.
+  await providerDefault.completeWithTools([{ role: "user", content: "hi" }], { tools: toolSchema, stream: false, reasoning: false });
+  assert(captured && !("reasoning_effort" in captured) && !("reasoning" in captured),
+    "scenario6: input.reasoning=false beats the shipped default");
 
   // Scenario 7: streaming reasoning deltas accumulated + forwarded on their channel.
   const sse = [
