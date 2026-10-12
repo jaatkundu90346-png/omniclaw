@@ -1,6 +1,6 @@
 {
   "name": "omniclaw",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Local-first lightweight OpenClaw-inspired assistant scaffold for Windows.",
   "private": true,
   "type": "module",

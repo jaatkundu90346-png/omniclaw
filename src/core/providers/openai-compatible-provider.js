@@ -530,10 +530,13 @@ export class OpenAICompatibleProvider {
     // the process and stop sending the param, so the user pays one failed
     // request once rather than forever. (Reasoning CAPTURE below works
     // regardless — thinking models stream reasoning without any request flag.)
-    // `resolveReasoningEffort` owns the three-state logic (unset -> default,
-    // "off" -> nothing, level -> level). It is deliberately NOT `??`-chained
-    // here: `x ?? y` treats null as absent, and null means "no preference",
-    // which must resolve to the shipped default rather than to "off".
+    // This line is the ONLY place the three states are decided, and it is
+    // deliberately not `??`-chained: `x ?? y` treats null as absent, and null
+    // means "no preference", which must resolve to the shipped default rather
+    // than to "off". (An earlier version put this in an exported helper — which
+    // esbuild then tree-shook out of the shipped bundle, leaving tests
+    // validating logic production never ran. Inline it stays, and the smokes
+    // assert the request BODY instead.)
     const configured = input.reasoning !== undefined ? input.reasoning : providerConfig.provider.reasoning;
     // Only the "did the user express a preference?" decision is resolved here.
     // An OBJECT value is deliberately passed through UNRESOLVED: the object form

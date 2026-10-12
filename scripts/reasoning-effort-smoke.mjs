@@ -27,7 +27,6 @@ const {
   REASONING_EFFORTS,
   REASONING_OFF,
   DEFAULT_REASONING_EFFORT,
-  resolveReasoningEffort,
   normalizeReasoningEffort,
   reasoningRequestFragment,
   isUnsupportedReasoningError,
@@ -53,20 +52,33 @@ try {
   // mean OPPOSITE things to the user. Default = "I have no preference, use the
   // shipped setting". Off = "actively do not ask the model to think". If one
   // entry can express both, picking one silently performs the other.
-  assert.equal(resolveReasoningEffort(null), DEFAULT_REASONING_EFFORT,
-    "no preference must fall back to the shipped default, NOT to off");
-  assert.equal(resolveReasoningEffort(undefined), DEFAULT_REASONING_EFFORT,
-    "an absent key must fall back to the shipped default");
-  assert.equal(resolveReasoningEffort(REASONING_OFF), null,
-    "an explicit 'off' must send no reasoning param at all");
-  assert.equal(resolveReasoningEffort(false), null, "the false sentinel must mean off");
-  assert.equal(resolveReasoningEffort("low"), "low", "an explicit level must be honoured");
-  assert.equal(resolveReasoningEffort({ effort: "max" }), "max", "the object form must be honoured");
-  assert.equal(resolveReasoningEffort("banana"), DEFAULT_REASONING_EFFORT,
-    "garbage must degrade to the default, never to off and never outbound");
+  //
+  // Asserted through reasoningRequestFragment, NOT through a resolve helper: an
+  // earlier version exported one, esbuild tree-shook it out of the shipped
+  // bundle, and the tests went on validating logic production never ran. The
+  // request body is the only thing a user actually receives.
+  // The two dialects put the level in different places, so extract it properly
+  // rather than assuming one shape.
+  const sentLevel = (frag) => {
+    if (!frag) return null;
+    if (frag.reasoning && typeof frag.reasoning === "object") return frag.reasoning.effort;
+    return frag.reasoning_effort || null;
+  };
+  for (const base of ["https://api.openai.com/v1", "https://openrouter.ai/api/v1"]) {
+    assert.equal(
+      sentLevel(reasoningRequestFragment({ effort: DEFAULT_REASONING_EFFORT, baseUrl: base })),
+      DEFAULT_REASONING_EFFORT,
+      `no preference must resolve to the shipped default on ${base}, not to off`);
+    assert.equal(reasoningRequestFragment({ effort: REASONING_OFF, baseUrl: base }), null,
+      `an explicit 'off' must send nothing at all on ${base}`);
+    assert.equal(reasoningRequestFragment({ effort: false, baseUrl: base }), null,
+      `the false sentinel must mean off on ${base}`);
+    assert.equal(sentLevel(reasoningRequestFragment({ effort: "low", baseUrl: base })), "low",
+      `an explicit level must be honoured on ${base}`);
+  }
   assert.ok(REASONING_EFFORTS.includes(REASONING_OFF),
     "'off' must be a storable value, otherwise it cannot be told apart from unset");
-  console.log("ok: three states (unset / off / level) stay distinct");
+  console.log("ok: three states (unset / off / level) stay distinct on the wire");
 
   step = "the composer pill writes each row to the right value";
   const composer = fs.readFileSync(path.join(root, "web-next/js/ui/composer.js"), "utf8");

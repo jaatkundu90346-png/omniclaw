@@ -9,7 +9,15 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const exe = path.join(root, "dist", "windows-portable", "omniclaw-gateway.exe");
+// Follow the build's output dir (OMNICLAW_PORTABLE_DIR), same as the build
+// script and the packaged-artifact gate. Hardcoding dist/windows-portable made
+// this spawn ENOENT whenever the build went anywhere else — and the default
+// path can be held by a stale Windows handle, which is a real situation on this
+// machine, not a hypothetical.
+const portableDir = process.env.OMNICLAW_PORTABLE_DIR
+  ? path.resolve(root, process.env.OMNICLAW_PORTABLE_DIR)
+  : path.join(root, "dist", "windows-portable");
+const exe = path.join(portableDir, "omniclaw-gateway.exe");
 const dataDir = path.join(root, ".tmp-exe-e2e-data");
 const PORT = 3211;
 const MOCK_PORT = 3212;

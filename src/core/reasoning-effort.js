@@ -41,24 +41,6 @@ export const REASONING_EFFORTS = Object.freeze([
 export const DEFAULT_REASONING_EFFORT = "high";
 
 /**
- * Resolve the effort to actually SEND for one request.
- *
- * Returns a level string, or null when no reasoning param should be sent.
- * Keeping this in one place is what stops "off" and "default" from being
- * confused at the call site — they look identical (`null`) and mean opposite
- * things.
- */
-export function resolveReasoningEffort(value) {
-  if (value === REASONING_OFF || value === false) return null;
-  // null / undefined / unrecognised = no expressed preference -> ship default.
-  const effort = typeof value === "object" && value !== null ? value.effort : value;
-  const level = String(effort ?? "").trim().toLowerCase();
-  if (!level) return DEFAULT_REASONING_EFFORT;
-  if (level === REASONING_OFF) return null;
-  return REASONING_EFFORTS.includes(level) ? level : DEFAULT_REASONING_EFFORT;
-}
-
-/**
  * Normalize any stored/incoming value to a storable level string.
  * Returns null for "off"/false, and the level itself otherwise. Used by the
  * settings writer to validate before persisting.
