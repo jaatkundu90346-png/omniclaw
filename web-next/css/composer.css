@@ -1,0 +1,212 @@
+/* Minimal floating composer island (full version in Phase 3). */
+
+.composer-zone {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: center;
+  padding: 10px 16px 16px;
+  background: transparent;
+}
+
+.composer {
+  width: min(760px, 100%);
+  background: var(--bg-elevated, var(--surface));
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-l);
+  box-shadow: var(--shadow-pop);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.composer textarea {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  resize: none;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+  max-height: calc(1.5em * 8 + 4px);
+  overflow-y: auto;
+}
+
+.composer textarea::placeholder { color: var(--muted); }
+.composer:focus-within { border-color: var(--accent); }
+.composer textarea:focus { outline: none; }
+
+/* P2: Row 3 never overlaps send at main-column widths ≥ 900px. */
+.composer-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.composer-row > * { flex: 0 0 auto; min-width: 0; }
+.composer-row .spacer { flex: 1 1 auto; }
+.composer-row .model-pill { flex: 0 1 auto; min-width: 0; max-width: 260px; }
+.composer-row .model-pill .truncate { min-width: 0; }
+
+/* Row 1: context strip (12.5px muted). */
+.ctx-strip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--muted);
+  flex-wrap: wrap;
+}
+
+.ctx-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 220px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: var(--muted);
+}
+
+button.ctx-pill:hover { background: var(--bg-hover); color: var(--text); }
+.ctx-pill.static { cursor: default; }
+
+/* Attach tray above the textarea. */
+.attach-tray { display: flex; gap: 8px; flex-wrap: wrap; }
+.attach-tray[hidden] { display: none; }
+
+.att-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  padding: 3px 6px;
+  font-size: 12px;
+  max-width: 180px;
+}
+
+.att-chip img { width: 40px; height: 40px; object-fit: cover; border-radius: 4px; }
+.att-chip button { color: var(--muted); font-size: 14px; line-height: 1; }
+.att-chip button:hover { color: var(--text); }
+
+/* Model pill (row 3 right). */
+.model-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 260px;
+  font-size: 12px;
+  color: var(--muted);
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  padding: 4px 10px;
+}
+
+.model-pill:hover { background: var(--bg-hover); color: var(--text); }
+.model-pill.busy { opacity: 0.6; }
+
+/* The sub-agent model pill: visually secondary to the main model pill, so the
+   two do not read as two competing pickers in row 3. */
+.model-pill.sub-pill { opacity: 0.85; font-size: 11.5px; }
+.model-pill.sub-pill:hover { opacity: 1; }
+
+.menu-search {
+  width: 100%;
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  padding: 6px 10px;
+  margin-bottom: 6px;
+}
+
+.pop-sticky { position: sticky; top: 0; background: var(--surface); }
+
+/* (.cmi-badge was removed: no JS creates that class any more.) */
+
+/* Workspace picker modal: 640×480, two columns. */
+.ws-modal { width: min(640px, 100%); }
+.ws-crumbs { display: flex; flex-wrap: wrap; gap: 2px; align-items: center; margin-bottom: 8px; }
+.crumb {
+  font-size: 12px;
+  color: var(--text-dim);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.crumb:hover { background: var(--bg-hover); }
+.crumb-sep { color: var(--muted); font-size: 12px; }
+.ws-cols { display: flex; gap: 12px; min-height: 300px; max-height: 480px; }
+.ws-list { flex: 3; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.ws-recents { flex: 2; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; border-left: 1px solid var(--line-soft); padding-left: 12px; }
+.ws-row { text-align: left; padding: 6px 8px; border-radius: var(--radius-s); font-size: 13px; }
+.ws-row:hover { background: var(--bg-hover); }
+
+.send-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--surface-3);
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.send-btn.ready { background: var(--accent); color: #fff; }
+.send-btn.stop { background: var(--down); color: #fff; }
+.send-btn.steer { background: var(--surface-3); color: var(--text); }
+.send-btn:disabled { opacity: 0.45; cursor: default; }
+
+/* Explicit display beats the UA [hidden] rule — re-hide manually. */
+.send-btn[hidden] { display: none; }
+
+/* Permission-mode pill (C2: global, applies to all chats). */
+.mode-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  padding: 4px 10px;
+}
+
+.mode-pill:hover { background: var(--bg-hover); color: var(--text); }
+.mode-pill svg { flex: 0 0 auto; }
+
+.mode-row { align-items: flex-start; }
+.mode-text { display: flex; flex-direction: column; align-items: flex-start; }
+.mode-text strong { font-size: 13px; font-weight: 700; }
+.mode-text small { font-size: 12px; color: var(--muted); }
+
+/* Subtle pulse on the send button while an approval/question card pends. */
+.composer.pulse .send-btn {
+  animation: oc-pulse 1.6s ease-in-out infinite;
+}
+
+/* Goal-ring: circular live context meter at the end of the ctx strip. */
+.ctx-ring {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  margin-left: auto;
+  border-radius: 50%;
+  color: var(--muted);
+}
+.ctx-ring:hover { background: var(--bg-hover); color: var(--text); }
+.ctx-ring.warn { color: var(--warn, #d97706); }
+.ctx-ring.hot { color: var(--down, #dc2626); }
+.ctx-ring svg { position: absolute; inset: 2px; }
+.ctx-ring-pct {
+  font-size: 8.5px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--text-dim);
+}
+.ctx-pop-line { font-size: 12.5px; padding: 2px 0; }
+.ctx-pop-line.muted { color: var(--muted); }
+
+@keyframes oc-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 transparent; }
+  50% { box-shadow: 0 0 0 4px var(--accent-soft, rgba(59, 130, 246, 0.18)); }
+}

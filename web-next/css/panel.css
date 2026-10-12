@@ -1,0 +1,279 @@
+/* Right panel: tab strip + shortcut menu. Resizable 30%–60% of viewport. */
+
+.panel {
+  width: var(--panel-w);
+  height: 100vh;
+  overflow-y: auto;
+  background: var(--surface);
+  border-left: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.panel-tabs {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  padding: 0 8px;
+  height: 36px;
+  border-bottom: 1px solid var(--line-soft);
+  overflow-x: auto;
+  flex: 0 0 auto;
+}
+
+.panel-tabwrap { display: inline-flex; align-items: center; flex: 0 0 auto; }
+
+.panel-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 150px;
+  height: 28px;
+  padding: 0 4px 0 8px;
+  border-radius: var(--radius-s);
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.panel-tab:hover { background: var(--bg-hover); color: var(--text); }
+.panel-tab.active { background: var(--bg-active); color: var(--text); }
+.panel-tab.plus { padding: 0 8px; font-size: 14px; }
+
+.panel-x {
+  font-size: 13px;
+  color: var(--muted);
+  border-radius: 4px;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.panel-x:hover { background: var(--bg-hover); color: var(--text); }
+
+.panel-host { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.panel-page { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+
+.tab-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--line-soft);
+  flex: 0 0 auto;
+}
+
+.tab-title { font-size: 13px; font-weight: 600; }
+.tab-actions { margin-left: auto; display: inline-flex; gap: 4px; align-items: center; }
+
+.panel-empty { margin: auto; text-align: center; color: var(--muted); padding: 24px; }
+.panel-empty.small { font-size: 12px; }
+
+.mini-btn {
+  font-size: 12px;
+  color: var(--text-dim);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  padding: 3px 9px;
+  white-space: nowrap;
+}
+
+.mini-btn:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
+.mini-btn:disabled { opacity: 0.45; }
+
+.mini-icon {
+  font-size: 13px;
+  color: var(--muted);
+  border-radius: 4px;
+  padding: 1px 5px;
+  line-height: 1.4;
+}
+
+.mini-icon:hover { background: var(--bg-hover); color: var(--text); }
+
+/* Review */
+.rev { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+/* The scroll container that holds .rev-top + .rev-split. It is the flex child
+   that lets `.rev-split { flex: 1 }` actually fill the panel — without a rule
+   here the split had no sizing parent and the diff could not grow. */
+.rev-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.rev-top { display: flex; align-items: center; gap: 8px; padding: 8px 10px; flex: 0 0 auto; flex-wrap: wrap; }
+.branch-pill {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 12px; border: 1px solid var(--line);
+  border-radius: 999px; padding: 2px 9px;
+}
+.diff-sum.add, .diff-sum { font-size: 12px; color: var(--ok); font-family: var(--font-mono); }
+.rev-split { flex: 1; min-height: 0; display: flex; }
+.rev-files { flex: 0 0 220px; min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--line-soft); }
+.rev-files > input {
+  margin: 6px 8px; background: var(--bg-soft); border: 1px solid var(--line);
+  border-radius: var(--radius-s); padding: 5px 8px; font-size: 12px; color: var(--text);
+}
+.rev-list { flex: 1; overflow-y: auto; padding: 0 4px 8px; }
+.rev-file {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 6px; border-radius: var(--radius-s);
+  font-size: 12px; cursor: pointer;
+}
+.rev-file:hover { background: var(--bg-hover); }
+.rev-file.active { background: var(--bg-active); }
+.st-badge {
+  flex: 0 0 auto; width: 18px; height: 18px; border-radius: 4px;
+  font-size: 11px; font-weight: 700; display: inline-flex;
+  align-items: center; justify-content: center;
+}
+.st-badge.mod { background: rgba(251,191,36,.15); color: var(--warn); }
+.st-badge.add { background: rgba(74,222,128,.15); color: var(--ok); }
+.st-badge.del { background: rgba(248,113,113,.15); color: var(--down); }
+.st-badge.ren { background: rgba(96,165,250,.15); color: var(--info); }
+.st-badge.conf { background: rgba(248,113,113,.25); color: var(--down); }
+.st-badge.new { background: rgba(74,222,128,.12); color: var(--ok); }
+.rev-file .truncate { flex: 1; min-width: 0; }
+.rev-file input[type="checkbox"] { flex: 0 0 auto; accent-color: var(--accent); }
+.rev-hov { display: none; gap: 2px; flex: 0 0 auto; }
+.rev-file:hover .rev-hov, .rev-file:focus-within .rev-hov { display: inline-flex; }
+.rev-diff { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.diff-bar { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--line-soft); flex: 0 0 auto; }
+.diff-bar strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.diff-view { flex: 1; overflow: auto; padding: 8px 0 16px; }
+.hunk { margin-bottom: 8px; }
+.hunk-head {
+  position: sticky; top: 0; background: var(--surface);
+  color: var(--muted); font-size: 11px; font-family: var(--font-mono);
+  padding: 2px 10px;
+}
+.dl { display: flex; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.5; }
+.dl .gutter { flex: 0 0 34px; text-align: right; padding-right: 8px; color: var(--muted); user-select: none; }
+.dl .code { flex: 1; white-space: pre; padding-right: 10px; }
+.dl.add { background: rgba(34,197,94,.12); color: #4ade80; }
+.dl.del { background: rgba(239,68,68,.12); color: #f87171; }
+.dl.ctx { color: var(--muted); }
+.trunc-banner { margin: 4px 10px; font-size: 12px; color: var(--warn); }
+
+/* Files + editor */
+.files { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.files-split { flex: 1; min-height: 0; display: flex; }
+.files-tree { flex: 0 1 220px; min-width: 140px; display: flex; flex-direction: column; border-right: 1px solid var(--line-soft); }
+.files-tree > input {
+  margin: 6px 8px; background: var(--bg-soft); border: 1px solid var(--line);
+  border-radius: var(--radius-s); padding: 5px 8px; font-size: 12px; color: var(--text);
+}
+.tree-host { flex: 1; overflow-y: auto; padding: 0 4px 8px; }
+.tree-row { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-radius: var(--radius-s); font-size: 12px; cursor: pointer; }
+.tree-row:hover { background: var(--bg-hover); }
+.tree-row .chev { flex: 0 0 auto; display: inline-flex; color: var(--muted); }
+.tree-row .chev svg { width: 12px; height: 12px; }
+.tree-row .chev-sp { flex: 0 0 12px; }
+.tree-row .t-ic { flex: 0 0 auto; display: inline-flex; color: var(--muted); }
+.tree-row .truncate { flex: 1; min-width: 0; }
+.files-ed { flex: 1; min-width: 0; display: flex; }
+.ed { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.ed-tabs { display: flex; gap: 2px; padding: 4px 8px 0; overflow-x: auto; flex: 0 0 auto; }
+.ed-tabwrap { display: inline-flex; align-items: center; flex: 0 0 auto; }
+.ed-tab {
+  display: inline-flex; align-items: center; max-width: 150px;
+  font-size: 12px; color: var(--muted); padding: 4px 4px 4px 8px;
+  border-radius: var(--radius-s) var(--radius-s) 0 0;
+}
+.ed-tab:hover { background: var(--bg-hover); }
+.ed-tab.active { background: var(--bg-soft); color: var(--text); }
+.ed-tab.dirty { color: var(--warn); }
+.ed-x { color: var(--muted); border-radius: 4px; padding: 0 4px; font-size: 13px; }
+.ed-x:hover { background: var(--bg-hover); color: var(--text); }
+.ed-head { padding: 2px 10px; border-bottom: 1px solid var(--line-soft); display: flex; gap: 2px; overflow-x: auto; white-space: nowrap; }
+/* The breadcrumb row inside .ed-head: it is the flex child that holds the path
+   and must be allowed to shrink + scroll rather than push the header wide. */
+.ed-crumbs { display: flex; align-items: center; gap: 2px; min-width: 0; overflow: hidden; }
+.ed-head .crumb { flex: 0 0 auto; }
+.crumb { font-size: 12px; color: var(--text-dim); padding: 1px 4px; border-radius: 4px; }
+.crumb:hover { background: var(--bg-hover); }
+.crumb-sep { color: var(--muted); font-size: 12px; }
+.ed-sub { display: flex; align-items: center; gap: 8px; padding: 4px 10px; }
+.ed-meta { display: inline-flex; gap: 8px; align-items: center; }
+.dot-dirty { width: 7px; height: 7px; border-radius: 50%; background: var(--warn); }
+.ed-actions { margin-left: auto; display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.ed-warn {
+  display: flex; align-items: center; gap: 8px; margin: 0 10px; padding: 6px 10px;
+  background: rgba(251,191,36,.1); border: 1px solid var(--warn);
+  border-radius: var(--radius-s); font-size: 12px;
+}
+.ed-warn[hidden] { display: none; }
+.ed-body { flex: 1; min-height: 0; display: flex; margin: 6px 10px 10px; border: 1px solid var(--line-soft); border-radius: var(--radius-s); overflow: hidden; }
+.ed-gutter {
+  flex: 0 0 auto; overflow: hidden; padding: 8px 6px 8px 10px; text-align: right;
+  font-family: var(--font-mono); font-size: 12.5px; line-height: 1.5;
+  color: var(--muted); background: var(--bg-soft); white-space: pre; user-select: none;
+}
+.ed-area {
+  flex: 1; min-width: 0; border: 0; background: var(--bg);
+  color: var(--text); font-family: var(--font-mono); font-size: 12.5px; line-height: 1.5;
+  padding: 8px 10px; resize: none; white-space: pre; overflow: auto;
+}
+.ed-area:disabled { opacity: 0.6; }
+
+/* Terminal log */
+.term { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.term-filter {
+  margin: 6px 10px 0; background: var(--bg-soft); border: 1px solid var(--line);
+  border-radius: var(--radius-s); padding: 5px 8px; font-size: 12px; color: var(--text);
+}
+.term-feed { flex: 1; overflow-y: auto; padding: 8px 10px; display: flex; flex-direction: column; gap: 10px; }
+.term-block { border: 1px solid var(--line-soft); border-radius: var(--radius-s); padding: 6px 8px; }
+.term-cmd { font-family: var(--font-mono); font-size: 12px; font-weight: 700; word-break: break-all; }
+.term-meta { display: flex; gap: 8px; align-items: center; font-size: 11px; margin: 2px 0 4px; }
+.exit-badge { font-family: var(--font-mono); border-radius: 4px; padding: 0 6px; }
+.exit-badge.ok { background: rgba(74,222,128,.14); color: var(--ok); }
+.exit-badge.bad { background: rgba(248,113,113,.14); color: var(--down); }
+.term-out { font-family: var(--font-mono); font-size: 12px; white-space: pre-wrap; word-break: break-word; margin: 0; max-height: 300px; overflow: auto; }
+.term-foot { padding: 6px 10px 10px; flex: 0 0 auto; }
+.term-foot input { width: 100%; background: var(--bg-soft); border: 1px solid var(--line); border-radius: var(--radius-s); padding: 6px 10px; font-size: 12px; }
+
+/* Browser: the live tab uses the brw-* namespace (panel/browser.js). The old
+   .br-* rules that used to live here were left behind when browser.js was
+   rewritten and styled nothing. */
+
+/* Walkthrough */
+.walk { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.walk-body { flex: 1; overflow-y: auto; padding: 10px 14px; font-size: 13px; }
+.walk-md p { margin: 0 0 8px; }
+.walk-md ul { padding-left: 20px; margin: 0 0 8px; }
+.walk-md code { font-family: var(--font-mono); font-size: 12px; background: var(--surface-2); padding: 0 4px; border-radius: 3px; }
+.walk-md a { color: var(--accent); }
+.walk-md blockquote { border-left: 2px solid var(--line); margin: 0 0 8px; padding-left: 10px; color: var(--text-dim); }
+
+.panel-shortcuts {
+  margin: auto;
+  width: min(300px, 90%);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 24px 0;
+}
+
+.shortcut-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: var(--radius-s);
+  color: var(--text-dim);
+  font-size: 13px;
+  text-align: left;
+}
+
+.shortcut-row:hover { background: var(--bg-hover); color: var(--text); }
+.shortcut-row svg { flex: 0 0 auto; color: var(--muted); }
+.shortcut-row kbd {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}

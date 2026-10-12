@@ -1,0 +1,125 @@
+/* Unified picker: flex column capped by the popover's own max-height —
+   search/filter/footer stay pinned while ONLY the results scroll. */
+.model-picker { display: flex; flex-direction: column; max-height: inherit; min-height: 0; }
+.model-picker > .menu-search, .model-picker > .model-filter-row,
+.model-picker > .model-connect, .model-picker > .pop-sep { flex: 0 0 auto; }
+.model-results { flex: 1 1 auto; min-height: 80px; max-height: none; overflow-y: auto; overscroll-behavior: contain; }
+
+/* Anchored popover menu. */
+.model-picker { width: min(320px, calc(100vw - 48px)); }
+
+/* Slim chat picker: 320–380px, compact rows, pinned chrome. */
+.model-picker.slim { width: min(360px, calc(100vw - 48px)); }
+.model-filter-row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); margin: 2px 0 6px; flex: 0 0 auto; }
+.model-filter {
+  flex: 1; min-width: 0; background: var(--bg-soft); color: var(--text);
+  border: 1px solid var(--line); border-radius: var(--radius-s);
+  padding: 5px 8px; font: inherit; font-size: 12.5px;
+}
+.pop-item.model-row.slim { min-height: 38px; }
+.model-row-wrap { display: flex; align-items: center; gap: 2px; min-width: 0; }
+.model-row-wrap > .pop-item { flex: 1 1 auto; min-width: 0; }
+.row-icons { display: flex; flex: 0 0 auto; }
+.row-icon {
+  width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-s); color: var(--muted); font-size: 14px; flex: 0 0 auto;
+}
+.row-icon:hover { background: var(--bg-hover); color: var(--text); }
+.row-icon[aria-pressed="true"] { color: var(--warn); }
+.model-detail {
+  font-size: 12px; color: var(--text-dim); line-height: 1.55;
+  border-left: 2px solid var(--line); margin: 2px 0 6px 20px; padding: 4px 0 4px 10px;
+  overflow-wrap: anywhere;
+}
+.model-detail code { font-family: var(--font-mono); font-size: 11.5px; }
+.model-picker .menu-search { width: 100%; margin: 8px 0; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg-soft); color: var(--text); }
+.model-picker .model-row { min-height: 58px; }
+.model-row[aria-checked="true"] { background: var(--bg-active); }
+.model-copy { display: flex; flex-direction: column; min-width: 0; gap: 4px; }
+.model-copy strong { font-size: 12px; font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-copy small { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-mark { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 22px; width: 22px; height: 22px; border-radius: 6px; background: var(--bg-active); color: var(--text); font-size: 17px; }
+/* Model marks are `brand-<family>` (brands.js). Only three families have a
+   bespoke colour; everything else — including the explicit `brand-custom` case
+   and any local/openai/openrouter/google id — falls back to the neutral
+   `.model-mark` colour above. Only name the families that actually have one,
+   so an unstyled provider cannot look like a bug. */
+.brand-claude { color: #d99578; }
+.brand-gemini { color: #8eafff; }
+.brand-deepseek { color: #7099ff; }
+.model-connect { margin-top: 4px; }
+
+.popover {
+  position: fixed;
+  z-index: 50;
+  min-width: 200px;
+  max-width: 320px;
+  max-height: min(480px, calc(100vh - 24px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+  box-shadow: var(--shadow-pop);
+  padding: 6px;
+}
+
+.popover::-webkit-scrollbar { width: 6px; }
+.popover::-webkit-scrollbar-thumb { background: var(--line); border-radius: 6px; }
+
+.pop-sticky {
+  position: sticky;
+  top: -6px;
+  background: var(--surface);
+  z-index: 1;
+}
+
+.menu-search {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+/* P1: model list rows — 30px, 13px mono id. */
+.pop-item.model-row { min-height: 30px; }
+.pop-item .mono-id { font-family: var(--font-mono); font-size: 13px; }
+
+/* A retired/unsupported model. The button also carries the native `disabled`
+   attribute; this makes it read as greyed out rather than merely inert. */
+.pop-item.is-disabled,
+.pop-item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Unified picker: the provider filter is a .model-filter-row (a <select> row)
+   styled at the top of this file. The old .model-filters chip-row rules were
+   removed — no JS builds that class any more. */
+
+.pop-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 32px;
+  padding: 7px 10px;
+  border-radius: var(--radius-s);
+  font-size: 13px;
+  color: var(--text-dim);
+  text-align: left;
+}
+
+.pop-item:hover { background: var(--bg-hover); color: var(--text); }
+.pop-item .check { margin-left: auto; color: var(--text-secondary); display: inline-flex; }
+
+.pop-sep { height: 1px; background: var(--line-soft); margin: 5px 4px; }
+
+.pop-label {
+  padding: 6px 10px 2px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}

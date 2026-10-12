@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OmniClaw</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23171a20'/%3E%3Ctext x='32' y='41' text-anchor='middle' font-family='Segoe UI' font-size='22' font-weight='700' fill='%23ffffff'%3EOC%3C/text%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="/neo.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <!-- Sidebar -->
+      <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+          <div class="brand">
+            <span class="brand-mark">OC</span>
+            <div>
+            <strong>OmniClaw <span class="brand-live-dot"></span></strong>
+            <small>Coding agent workspace</small>
+            </div>
+          </div>
+          <button class="icon-button" id="theme-toggle" title="Toggle theme"><span class="icon-sun"></span></button>
+        </div>
+
+        <button class="new-chat-button" id="new-chat"><span class="line-icon plus"></span>New task</button>
+
+        <div class="session-pane">
+          <label class="search-field">
+            <span class="line-icon search"></span>
+            <input id="sidebar-search" type="text" placeholder="Search chat history" spellcheck="false" />
+          </label>
+          <p class="section-title">Chat history</p>
+          <div id="session-list" class="session-list"></div>
+        </div>
+
+        <section class="workspace-context" aria-label="Current project">
+          <div class="workspace-context-label">PROJECT</div>
+          <div class="workspace-context-main"><span class="project-glyph">OC</span><div><strong>OmniClaw</strong><small id="workspace-path">Local workspace · main</small></div></div>
+          <div class="workspace-context-status"><span class="status-dot ready"></span><span>Workspace connected</span></div>
+        </section>
+
+        <nav class="main-nav">
+          <button class="nav-item active" data-view="chat"><span class="line-icon chat"></span>Chat</button>
+          <button class="nav-item" data-view="skills"><span class="line-icon spark"></span>Skills &amp; Tools</button>
+          <button class="nav-item" data-view="plugins"><span class="line-icon grid"></span>Plugins</button>
+          <button class="nav-item" data-view="agents"><span class="line-icon agent"></span>Agents</button>
+          <button class="nav-item" data-view="messaging"><span class="line-icon inbox"></span>Messaging</button>
+          <button class="nav-item" data-view="automations"><span class="line-icon clock"></span>Automations</button>
+          <button class="nav-item" data-view="memory"><span class="line-icon memory"></span>Memory</button>
+        </nav>
+
+        <div class="sidebar-utility">
+          <p class="section-title">Workspace</p>
+          <button class="nav-item utility-item" data-view="settings"><span class="line-icon settings"></span>Settings</button>
+        </div>
+
+        <div class="sidebar-footer">
+          <a href="/classic/index.html" target="_blank" rel="noopener">Classic dashboard</a>
+          <div id="provider-pill" class="provider-pill">
+            <span class="status-dot"></span>
+            <span id="provider-pill-text" class="grow">Checking provider</span>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Main -->
+      <main class="main">
+        <header class="topbar">
+          <button class="icon-button" id="sidebar-toggle" title="Toggle sidebar"><span class="line-icon menu"></span></button>
+          <div class="title-stack">
+            <div class="workspace-breadcrumb">
+              <strong>OmniClaw</strong>
+              <span>/</span>
+              <span id="workspace-project-name">main project</span>
+              <span class="branch-pill">main</span>
+            </div>
+            <div class="topbar-status-row">
+              <strong id="main-title-text">New session</strong>
+              <span class="topbar-dot">·</span>
+              <small id="main-subtitle"><span class="topbar-pulse"></span><span id="run-summary">Ready to collaborate</span></small>
+            </div>
+          </div>
+          <div class="topbar-actions">
+            <span class="conn-pill" id="conn-pill" title="Backend connection"><span class="conn-dot" id="conn-dot"></span><span id="conn-text">Connecting</span></span>
+            <span class="topbar-pill" id="task-status-pill" data-state="idle" title="Task lifecycle state">Idle</span>
+            <span class="topbar-pill mono" id="task-elapsed" title="Elapsed task time" hidden>0s</span>
+            <div class="cognitive-steps-mini" id="cognitive-stage" data-state="idle" title="Agent execution phase">
+              <span data-phase="plan">Plan</span><i></i><span data-phase="act">Act</span><i></i><span data-phase="verify">Verify</span>
+            </div>
+            <span class="topbar-pill mono" id="topbar-model" title="Active model">model</span>
+            <span class="topbar-pill" id="topbar-perm" title="Permission mode">Full Access</span>
+            <select id="agent-select" class="agent-select" title="Active agent"></select>
+            <button class="icon-button topbar-settings" data-view="settings" title="Settings"><span class="line-icon settings"></span></button>
+            <button class="icon-button" id="dock-toggle" title="Live computer workspace"><span class="line-icon panel"></span></button>
+          </div>
+        </header>
+
+        <!-- Compact collapsible run strip -->
+        <section class="run-context compact-run" id="run-context" aria-live="polite">
+          <div class="run-context-main">
+            <span class="run-core-mini" id="run-core-mini"><span>OC</span></span>
+            <div>
+              <span class="run-kicker">AGENT THREAD</span>
+              <strong id="run-state-text">Ready for your next task</strong>
+            </div>
+          </div>
+          <div class="run-context-stats" id="run-context-stats">
+            <span class="run-count-detail"><b id="run-task-count">0</b> tasks</span>
+            <span class="run-count-detail"><b id="run-file-count">0</b> files</span>
+            <span class="run-count-detail"><b id="run-tool-count">0</b> actions</span>
+          </div>
+          <button class="run-context-action" id="run-inspector-btn" title="Open task details"><span class="line-icon panel"></span><span>Details</span></button>
+        </section>
+
+        <!-- Chat view -->
+        <section class="view active" id="view-chat">
+          <div class="task-header" id="task-header" hidden>
+            <div class="task-header-main">
+              <strong id="task-header-title">Task</strong>
+              <span class="task-header-meta"><span id="task-header-status">Working</span><span>·</span><span id="task-header-elapsed" class="mono">0s</span><span>·</span><span id="task-header-session" class="mono"></span></span>
+            </div>
+            <div class="task-header-actions">
+              <button class="mini-button" id="retry-btn" title="Retry last task">Retry</button>
+              <button class="mini-button" id="continue-btn" title="Continue task">Continue</button>
+            </div>
+          </div>
+          <div class="chat-scroll" id="chat-scroll">
+            <div class="welcome-panel" id="chat-hero">
+              <p class="eyebrow">OmniClaw Agent</p>
+              <h1>Build with an<br />agent in control.</h1>
+              <p>Plan, inspect, change, test, and review — OmniClaw keeps the work visible while it operates inside your project.</p>
+              <div class="starter-grid">
+                <button class="starter-card" data-prompt="workspace ki files inspect karke project ka current status aur structure batao">
+                  <span class="app-icon blue">PR</span>
+                  <div class="starter-card-body">
+                    <strong>Inspect workspace</strong>
+                    <small>Project files, context, and current implementation</small>
+                  </div>
+                </button>
+                <button class="starter-card" data-prompt="ek modern responsive landing page banao output/landing/ me, phir verify karke preview do">
+                  <span class="app-icon green">WB</span>
+                  <div class="starter-card-body">
+                    <strong>Implement a feature</strong>
+                    <small>Plan the work, edit files, and run the right checks</small>
+                  </div>
+                </button>
+                <button class="starter-card" data-prompt="web research karke latest AI agent developments ka summary do with source links">
+                  <span class="app-icon violet">RS</span>
+                  <div class="starter-card-body">
+                    <strong>Review changes</strong>
+                    <small>Inspect diffs, files touched, and verification evidence</small>
+                  </div>
+                </button>
+                <button class="starter-card" data-prompt="/doctor">
+                  <span class="app-icon amber">DR</span>
+                  <div class="starter-card-body">
+                    <strong>Run verification</strong>
+                    <small>Build, tests, runtime health, and failure recovery</small>
+                  </div>
+                </button>
+              </div>
+            </div>
+            <div class="thread" id="thread"></div>
+          </div>
+
+          <!-- Antigravity-style floating composer island -->
+          <div class="composer-wrap">
+            <div class="slash-palette" id="slash-palette" hidden></div>
+
+            <!-- Popovers for context, model, and environment -->
+            <div class="popover-menu context-popover" id="context-popover" hidden>
+              <div class="popover-header">Add Context</div>
+              <button class="popover-item" id="ctx-opt-media">
+                <span class="popover-icon">&#128444;</span>
+                <span class="popover-label">Media</span>
+              </button>
+              <button class="popover-item" id="ctx-opt-mention">
+                <span class="popover-icon">@</span>
+                <span class="popover-label">Mentions</span>
+              </button>
+              <button class="popover-item" id="ctx-opt-actions">
+                <span class="popover-icon">&#9745;</span>
+                <span class="popover-label">Actions</span>
+              </button>
+              <button class="popover-item" id="ctx-opt-browser">
+                <span class="popover-icon">&#127760;</span>
+                <span class="popover-label">Browser</span>
+              </button>
+            </div>
+
+            <div class="popover-menu model-popover" id="model-popover" hidden>
+              <div class="popover-header">Model</div>
+              <div class="model-list" id="model-list">
+                <button class="popover-item model-item active" data-model="gemini-3.8-flash">
+                  <span class="model-check">&#10003;</span>
+                  <span class="model-name">Gemini 3.8 Flash</span>
+                  <span class="model-badge fast">Fast &#9432;</span>
+                </button>
+                <button class="popover-item model-item" data-model="gemini-3.1-pro">
+                  <span class="model-check"></span>
+                  <span class="model-name">Gemini 3.1 Pro</span>
+                  <span class="model-badge low">Low</span>
+                </button>
+                <button class="popover-item model-item" data-model="claude-sonnet-4-6">
+                  <span class="model-check"></span>
+                  <span class="model-name">Claude Sonnet 4.6</span>
+                  <span class="model-badge thinking">Thinking</span>
+                </button>
+                <button class="popover-item model-item" data-model="claude-opus-4-6">
+                  <span class="model-check"></span>
+                  <span class="model-name">Claude Opus 4.6</span>
+                  <span class="model-badge thinking">Thinking</span>
+                </button>
+                <button class="popover-item model-item" data-model="gpt-oss-120b">
+                  <span class="model-check"></span>
+                  <span class="model-name">GPT-OSS 120B</span>
+                  <span class="model-badge medium">Medium</span>
+                </button>
+              </div>
+              <div class="popover-divider"></div>
+              <div class="usage-section">
+                <div class="usage-head">
+                  <span class="usage-title">Usage &amp; Rate Limits</span>
+                  <span class="usage-value">100% remaining</span>
+                </div>
+                <div class="usage-bar-track">
+                  <div class="usage-bar-fill" style="width: 100%;"></div>
+                </div>
+                <small class="usage-sub">OmniClaw gateway provider limits active</small>
+              </div>
+            </div>
+
+            <div class="popover-menu env-popover" id="env-popover" hidden>
+              <button class="popover-item env-item active" data-env="local">
+                <span class="popover-icon">&#128452;</span>
+                <span class="popover-label">Local</span>
+              </button>
+              <button class="popover-item env-item" data-env="worktree">
+                <span class="popover-icon">&#10514;</span>
+                <span class="popover-label">New Worktree</span>
+              </button>
+            </div>
+
+            <div class="composer">
+              <!-- Workspace Breadcrumb Pill on top -->
+              <div class="composer-top-row">
+                <button class="chip chip-folder-btn" id="chip-workspace" title="Workspace folder — click to switch project">
+                  <span class="chip-folder">&#128193;</span>
+                  <span id="composer-workspace">Codex</span>
+                  <span class="chip-caret">&#9662;</span>
+                </button>
+                <div class="composer-top-spacer"></div>
+              </div>
+
+              <!-- Sleek thumbnail attachments strip -->
+              <div class="attach-tray" id="attach-tray" hidden></div>
+
+              <!-- Main Input Textarea -->
+              <textarea id="composer-input" rows="1" placeholder="Ask anything. @ to mention, / for actions" spellcheck="false"></textarea>
+
+              <!-- Bottom Bar Controls -->
+              <div class="composer-bar">
+                <div class="composer-tools">
+                  <button class="icon-button plus-button" id="context-btn" title="Add context (+)">
+                    <span class="line-icon plus"></span>
+                  </button>
+                  <button class="chip chip-interactive" id="chip-model" title="Active model — click to switch">
+                    <span id="composer-model">Gemini 3.8 Flash High</span>
+                    <span class="chip-caret">&#9662;</span>
+                  </button>
+                  <button class="chip chip-interactive" id="chip-env" title="Select Environment (Ctrl+.)">
+                    <span class="chip-dot-env">&#128452;</span>
+                    <span id="chip-env-label">Local</span>
+                    <span class="chip-caret">&#9652;</span>
+                  </button>
+                  <button class="chip chip-mode-btn" id="chip-mode" title="Access mode — click to toggle">
+                    <span class="chip-dot" id="chip-mode-dot"></span>
+                    <span id="chip-mode-text">Full Access</span>
+                  </button>
+                  <input id="attach-input" type="file" accept="image/*,.pdf,.txt,.md,.csv,.json,.log,audio/*" multiple hidden />
+                </div>
+
+                <div class="composer-actions">
+                  <button class="icon-button" id="voice-btn" title="Voice input"><span class="line-icon mic"></span></button>
+                  <button class="icon-button danger" id="stop-btn" title="Stop run" hidden><span class="line-icon stop"></span></button>
+                  <button class="send-button" id="send-btn" title="Send (Enter)"><span class="line-icon send"></span></button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Data panel view -->
+        <section class="view" id="view-panel">
+          <div class="panel-scroll">
+            <div class="panel-layout" id="panel-content"></div>
+          </div>
+        </section>
+      </main>
+
+      <!-- Right dock -->
+      <aside class="dock" id="dock">
+        <!-- Drag the left edge to resize the whole dock. -->
+        <div class="dock-grip" id="dock-grip" title="Drag to resize"></div>
+        <!-- "OmniClaw's computer" header. It AUTO-FOLLOWS the agent: whatever
+             tool runs next takes over the pane and names itself here, with the
+             exact target (URL, command, file) in monospace underneath. The user
+             should never have to hunt for the right tab to see what is
+             happening. -->
+        <div class="computer-head">
+          <span class="computer-avatar">OC</span>
+          <div class="computer-titles">
+            <strong id="live-context-state">OmniClaw's computer</strong>
+            <span id="live-context-url" class="live-context-url">Idle — awaiting tool execution</span>
+          </div>
+          <button class="computer-live live" id="computer-live" title="Live: synced with agent activity.">
+            <span class="computer-live-dot"></span><span id="computer-live-label">Live</span>
+          </button>
+          <button class="icon-button" id="dock-expand" title="Expand live workspace"><span class="line-icon expand"></span></button>
+          <button class="icon-button dock-close" id="dock-close" title="Close panel"><span class="line-icon close"></span></button>
+        </div>
+        <div class="dock-tabs">
+          <button class="dock-tab active" data-tab="workspace">Files &amp; Changes</button>
+          <button class="dock-tab" data-tab="mybrowser">Browser</button>
+          <button class="dock-tab" data-tab="browser">Preview</button>
+          <button class="dock-tab" data-tab="terminal">Terminal</button>
+          <button class="dock-tab" data-tab="code">Editor</button>
+          <button class="dock-tab" data-tab="activity">Activity</button>
+          <span class="dock-spacer"></span>
+          <span class="computer-step" id="computer-step">no step yet</span>
+        </div>
+        <div class="dock-pane active" id="pane-workspace">
+          <div class="inspector-head"><div><span class="inspector-kicker">LIVE INSPECTOR</span><h3>Workspace context</h3><p>What OmniClaw is touching and why.</p></div><span class="inspector-orbit"><span>OC</span></span></div>
+          <div class="inspector-tabs"><button class="active">Context</button><button>Files</button><button>Changes</button></div>
+          <div class="inspector-stack">
+            <article class="inspector-card inspector-current"><span class="inspector-card-label">CURRENT TASK</span><strong id="inspector-task">Waiting for the next instruction</strong><p>Every request becomes a reviewable execution thread with observable activity.</p></article>
+            <article class="inspector-card"><div class="inspector-card-head"><span class="inspector-card-label">TOOL ACTIVITY</span><span class="inspector-count" id="inspector-tool-count">0</span></div><div class="inspector-empty" id="inspector-tools">No tools running</div></article>
+            <article class="inspector-card"><div class="inspector-card-head"><span class="inspector-card-label">FILES TOUCHED</span><span class="inspector-count" id="inspector-file-count">0</span></div><div class="inspector-empty" id="inspector-files">No files changed in this thread</div><div class="file-groups" id="file-groups" hidden><div class="file-group"><div class="file-group-head">Changed</div><div class="file-list" id="files-changed"></div></div><div class="file-group"><div class="file-group-head">Created</div><div class="file-list" id="files-created"></div></div><div class="file-group"><div class="file-group-head">Read</div><div class="file-list" id="files-read"></div></div></div></article>
+            <article class="inspector-card"><div class="inspector-card-head"><span class="inspector-card-label">REPOSITORY</span><span class="inspector-count" id="inspector-git-count"></span></div><div class="inspector-empty mono" id="inspector-git">Git status loading…</div><div class="file-list" id="inspector-branches"></div><div class="git-change-list" id="inspector-changes" aria-label="Working tree changes"></div></article>
+            <article class="inspector-card"><span class="inspector-card-label">PERMISSION MODE</span><div class="permission-row"><span class="permission-dot"></span><strong id="inspector-permission">Full Access</strong><span class="muted">controlled</span></div><p>Sensitive actions remain visible and approval-oriented.</p></article>
+          </div>
+          <div class="inspector-foot"><span class="status-dot ready"></span><span>Local runtime online</span><span class="grow"></span><span class="mono">session scoped</span></div>
+        </div>
+        <div class="dock-pane" id="pane-browser">
+          <div class="dock-urlbar">
+            <input id="dock-url" type="text" placeholder="output/watch-store/index.html" spellcheck="false" />
+            <button class="icon-button" id="dock-go" title="Open"><span class="line-icon send"></span></button>
+            <button class="icon-button" id="dock-reload" title="Reload"><span class="line-icon refresh"></span></button>
+          </div>
+          <iframe id="dock-frame" class="dock-frame" title="Artifact preview"></iframe>
+          <div class="dock-editrow">
+            <input id="dock-edit-input" type="text" placeholder="Describe a change for this page" />
+            <button class="mini-button" id="dock-edit-send">Edit</button>
+          </div>
+        </div>
+        <!-- Live view of the user's OWN Chrome over CDP. -->
+        <div class="dock-pane" id="pane-mybrowser">
+          <div class="mb-connect" id="mb-connect">
+            <!-- Route 1: Default signed-in browser -->
+            <div class="mb-route mb-route-primary">
+              <div class="mb-route-head">
+                <strong>Attach Chrome Profile</strong>
+                <span class="mb-badge">Signed-in session</span>
+              </div>
+              <ol class="mb-steps" id="mb-steps"></ol>
+              <div class="dock-urlbar">
+                <input id="mb-inspect-url" type="text" value="chrome://inspect/#remote-debugging" spellcheck="false" readonly title="Paste into Chrome address bar" />
+                <button class="mini-button" id="mb-copy-inspect" title="Copy to clipboard">Copy</button>
+              </div>
+              <p class="mb-why" id="mb-why"></p>
+              <div class="dock-urlbar">
+                <button class="mini-button primary" id="mb-connect-btn">Connect</button>
+                <label class="mb-toggle" title="Auto-detect debug port when open">
+                  <input type="checkbox" id="mb-autowatch" checked /> Auto-detect
+                </label>
+                <span class="mb-watch" id="mb-watch"></span>
+              </div>
+            </div>
+
+            <!-- Route 2: Fallback dedicated profile -->
+            <details class="mb-route mb-route-alt">
+              <summary>Launch dedicated isolated Chrome</summary>
+              <p class="mb-hint" id="mb-launch-hint">
+                OmniClaw will launch a persistent browser profile with isolated cookies and sessions.
+              </p>
+              <div class="dock-urlbar">
+                <button class="mini-button" id="mb-launch-btn">Launch separate browser</button>
+              </div>
+            </details>
+
+            <div class="dock-urlbar mb-advanced">
+              <input id="mb-host" type="text" value="localhost" spellcheck="false" title="CDP host" />
+              <input id="mb-port" type="text" value="9222" spellcheck="false" title="CDP port" />
+            </div>
+          </div>
+
+          <div class="mb-live" id="mb-live" hidden>
+            <div class="dock-urlbar">
+              <select id="mb-tabs" class="mb-tabs" title="Open tabs"></select>
+              <span class="mb-badge" id="mb-profile" hidden></span>
+              <button class="icon-button" id="mb-refresh" title="Reconnect the stream"><span class="line-icon refresh"></span></button>
+              <label class="mb-toggle" title="Jump to whichever tab the agent is working in">
+                <input type="checkbox" id="mb-follow" checked /> Follow
+              </label>
+            </div>
+            <div class="dock-urlbar">
+              <input id="mb-url" type="text" placeholder="URL — Enter se navigate" spellcheck="false" />
+              <button class="icon-button" id="mb-go" title="Go"><span class="line-icon send"></span></button>
+            </div>
+            <div class="mb-view" id="mb-view">
+              <img id="mb-shot" alt="Live view of your browser" hidden />
+              <!-- The agent's pointer. CDP dispatches synthetic input, so no real
+                   cursor exists in the captured frames and it has to be drawn. -->
+              <div class="mb-cursor" id="mb-cursor" hidden>
+                <span class="mb-cursor-dot"></span>
+                <span class="mb-cursor-label" id="mb-cursor-label"></span>
+              </div>
+              <p class="mb-placeholder" id="mb-placeholder">Live view shuru ho raha hai…</p>
+              <span class="mb-fps" id="mb-fps"></span>
+            </div>
+            <div class="dock-editrow">
+              <input id="mb-type" type="text" placeholder="View me field click karo, phir yahan type karke Enter" />
+              <button class="mini-button" id="mb-disconnect">Disconnect</button>
+            </div>
+          </div>
+
+          <p class="mb-error" id="mb-error" hidden></p>
+        </div>
+        <div class="dock-pane" id="pane-terminal">
+          <div class="live-pane-head"><div><span class="live-kicker">LOCAL COMPUTER</span><strong>Terminal</strong></div><div class="live-pane-actions"><button class="live-action" id="terminal-copy" title="Copy terminal output">Copy</button><button class="live-action" id="terminal-search" title="Search terminal output">Find</button><button class="live-action" id="terminal-maximize" title="Maximize terminal">Max</button><span class="live-state-dot" id="terminal-state-dot"></span></div></div>
+          <div class="terminal-live" id="terminal-live"><div class="terminal-live-empty">No command is running. When OmniClaw executes a command, the live output will appear here.</div></div>
+        </div>
+        <div class="dock-pane" id="pane-code">
+          <div class="live-pane-head"><div><span class="live-kicker">PROJECT FILE</span><strong id="code-live-title">Code workspace</strong></div><div class="live-pane-actions"><button class="live-action" id="code-motion" title="Code reveal mode">Animated</button><button class="live-action" id="code-copy" title="Copy code">Copy</button><span class="live-code-badge">LIVE</span></div></div>
+          <!-- A unified diff already contains both sides, so Original/Modified
+               are derived from it rather than fetched again — the view never
+               disagrees with the change the agent actually made. -->
+          <div class="code-view-tabs" id="code-view-tabs">
+            <button class="code-view-tab active" data-view="diff">Diff</button>
+            <button class="code-view-tab" data-view="original">Original</button>
+            <button class="code-view-tab" data-view="modified">Modified</button>
+          </div>
+          <div class="code-live-tree" id="code-live-tree"><span>workspace</span><span>└─ waiting for file activity</span></div>
+          <pre class="code-live-output" id="code-live-output"><code>Select a file activity event to inspect the code or diff OmniClaw is working on.</code></pre>
+        </div>
+        <div class="dock-pane" id="pane-activity">
+          <div id="activity-feed" class="activity-feed"></div>
+        </div>
+
+        <!-- Timeline scrubber. Every observable computer action is recorded, so
+             the user can step back through what happened instead of having to
+             watch it in real time or lose it. Scrubbing drops out of live mode;
+             the badge above says which mode you are in. -->
+        <div class="computer-timeline">
+          <button class="icon-button" id="timeline-prev" title="Pichla step">&#9198;</button>
+          <button class="icon-button" id="timeline-next" title="Agla step">&#9197;</button>
+          <div class="timeline-track" id="timeline-track" title="Kisi bhi step par jao">
+            <div class="timeline-fill" id="timeline-fill"></div>
+          </div>
+          <span class="timeline-count mono" id="timeline-count">0 / 0</span>
+          <button class="mini-button" id="timeline-live-btn" hidden>Live</button>
+        </div>
+      </aside>
+    </div>
+
+    <footer class="statusbar">
+      <span id="status-gateway"><span class="status-dot"></span>&nbsp;Gateway</span>
+      <span id="status-agents">Agents</span>
+      <span id="status-cron">Cron</span>
+      <span class="grow"></span>
+      <span id="status-model" class="mono"></span>
+      <span id="status-version" class="mono"></span>
+    </footer>
+
+    <!-- Workspace picker. OmniClaw used to be stuck inside its own install
+         folder; this lets the user point the agent at any project folder and
+         keeps that choice across restarts. -->
+    <div class="ws-backdrop" id="ws-backdrop" hidden>
+      <div class="ws-modal" role="dialog" aria-modal="true" aria-label="Select workspace folder">
+        <header class="ws-head">
+          <div>
+            <h2 class="ws-title">Select workspace</h2>
+            <p class="ws-sub">Agent sirf isi folder ke andar kaam karega</p>
+          </div>
+          <button class="icon-button" id="ws-close" title="Band karo">&#10005;</button>
+        </header>
+
+        <div class="ws-current">
+          <span class="ws-label">Active</span>
+          <span class="ws-current-path mono" id="ws-current-path">—</span>
+        </div>
+
+        <div class="ws-recents" id="ws-recents"></div>
+
+        <div class="ws-browser">
+          <div class="ws-pathbar">
+            <button class="icon-button" id="ws-up" title="Parent folder">&#8593;</button>
+            <input class="ws-path-input mono" id="ws-path-input" spellcheck="false" />
+            <button class="mini-button" id="ws-go">Go</button>
+          </div>
+          <div class="ws-list" id="ws-list"></div>
+        </div>
+
+        <footer class="ws-foot">
+          <span class="ws-error" id="ws-error"></span>
+          <span class="grow"></span>
+          <button class="mini-button" id="ws-cancel">Cancel</button>
+          <button class="ws-primary" id="ws-select">Select this folder</button>
+        </footer>
+      </div>
+    </div>
+
+    <script type="module" src="/neo.js"></script>
+  </body>
+</html>

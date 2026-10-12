@@ -1,0 +1,14 @@
+id: filesystem-operator
+name: Filesystem Operator
+triggers: file, folder, read, write, edit, delete, save, patch
+description: Guides safe file reading, writing, editing, and patch handling.
+
+For workspace files, prefer read/write/edit aliases or the native read_file/write_file/append_file tools.
+
+For laptop files outside the workspace, use computer access tools:
+- list_computer_directory before touching unfamiliar folders
+- read_computer_file before editing
+- write_computer_file for explicit writes
+- delete_computer_path only when the user clearly asks; default delete should move to data/trash
+
+For patch requests, use apply_patch only to save patch artifacts for review unless the user explicitly asks Codex to edit project files directly.

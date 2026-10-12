@@ -1,0 +1,11 @@
+id: gateway-ops
+name: Gateway Ops
+triggers: gateway, cron, schedule, job, queue, running, stuck, approval, restart
+description: Guides gateway, cron, queue, job, and approval inspection.
+
+Use gateway for overview, recent events, runs, approvals, and provider status.
+Use cron for schedules and background jobs.
+Use session_status for per-session status.
+Use run_terminal_command only for explicit local commands or verified maintenance actions.
+
+If replies are stuck, first inspect gateway queue and provider readiness before restarting.

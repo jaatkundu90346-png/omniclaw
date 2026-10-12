@@ -1,0 +1,99 @@
+/* Global approvals (4B.1): banner + pending tray + sidebar dot. Tokens only. */
+
+#appr-banner[hidden] { display: none; }
+
+.appr-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 16px;
+  background: rgba(251, 191, 36, 0.1);
+  border-bottom: 1px solid var(--warn);
+  font-size: 12.5px;
+  color: var(--text);
+}
+
+.appr-banner[hidden] { display: none; }
+
+.appr-banner-ic { color: var(--warn); flex: 0 0 auto; }
+
+.appr-banner-tx {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.appr-banner-time {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--warn);
+}
+
+.appr-banner .mini-btn.primary {
+  background: var(--warn);
+  border-color: var(--warn);
+  color: #111;
+  font-weight: 700;
+}
+
+/* Per-thread pending tray (top of view). Empty = no box at all. */
+.pending-tray-host:empty { display: none; }
+
+/* The host IS the tray wrapper: it stacks its rows. `.pending-tray-wrap` is the
+   same element (added by approvals.js), so both names style the same box. */
+.pending-tray-host,
+.pending-tray-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Each row is a countdown beside the card host that receives the real card. */
+.pending-tray-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+#pending-tray {
+  margin: 10px 12px 0;
+  border: 1px solid var(--warn);
+  border-radius: var(--radius-m);
+  background: rgba(251, 191, 36, 0.06);
+  padding: 10px 12px;
+}
+
+#pending-tray.flash { outline: 2px solid var(--warn); }
+
+.pending-tray-head {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--warn);
+  margin-bottom: 4px;
+}
+
+.pending-tray-row { margin-top: 6px; }
+
+.pending-tray-cd {
+  font-size: 11.5px;
+  color: var(--muted);
+  margin-bottom: 2px;
+}
+
+.pending-tray-cd span { font-family: var(--font-mono); color: var(--warn); }
+
+/* Sidebar amber dot for sessions with pending items. */
+.sess-slot .appr-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--warn);
+  display: inline-block;
+  margin-right: 6px;
+  flex: 0 0 auto;
+}

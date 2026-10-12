@@ -1,0 +1,164 @@
+{
+  "runs": 50,
+  "stopDist": {
+    "model-final-ready": 12,
+    "model-final-from-reasoning": 1,
+    "max_rounds": 2,
+    "budget-exhausted": 1,
+    "cancelled": 7,
+    "provider-rate-limited": 6,
+    "provider-auth-error": 5,
+    "provider-error": 6,
+    "NONE": 3,
+    "stuck-no-progress": 4,
+    "provider-billing": 1,
+    "provider-model-not-found": 1,
+    "finish-tool": 1
+  },
+  "rounds": {
+    "med": 2,
+    "p90": 16,
+    "avg": 5.36
+  },
+  "toolCalls": {
+    "med": 1,
+    "p90": 26,
+    "avg": 6.8
+  },
+  "failed": {
+    "med": 0,
+    "p90": 8,
+    "avg": 2.24
+  },
+  "failingTools": [
+    {
+      "tool": "read_file",
+      "count": 39,
+      "topMessages": [
+        [
+          "❌ TOOL ERROR: File not found: PROGRESS.md (attempted absolute path: C:\\Users\\PATEL COMPUTERS\\Desktop\\new window\\PROGRESS.md; project root: C:\\Users\\PATEL COMPUT",
+          4
+        ],
+        [
+          "❌ TOOL ERROR: File not found: feature_list.json (attempted absolute path: C:\\Users\\PATEL COMPUTERS\\Desktop\\new window\\feature_list.json; project root: C:\\Users\\",
+          4
+        ],
+        [
+          "❌ TOOL ERROR: File not found: js/main.js (attempted absolute path: C:\\Users\\PATEL COMPUTERS\\Desktop\\new window\\js\\main.js; project root: C:\\Users\\PATEL COMPUTER",
+          4
+        ]
+      ]
+    },
+    {
+      "tool": "load_toolset",
+      "count": 7,
+      "topMessages": [
+        [
+          "❌ TOOL ERROR: Unknown toolset: popular-web-designs. Call list_toolsets for names. {\"error\":true,\"message\":\"Unknown toolset: popular-web-designs. Call list_tools",
+          4
+        ],
+        [
+          "❌ TOOL ERROR: Unknown toolset: browser-game-testing. Call list_toolsets for names. {\"error\":true,\"message\":\"Unknown toolset: browser-game-testing. Call list_too",
+          2
+        ],
+        [
+          "⛔ TOOL BLOCKED: Missing required argument(s): name (string). load_toolset was called with EMPTY/incomplete arguments — that call did nothing. load_toolset requi",
+          1
+        ]
+      ]
+    },
+    {
+      "tool": "apply_patch",
+      "count": 4,
+      "topMessages": [
+        [
+          "❌ TOOL ERROR: Patch must include *** Begin Patch and *** End Patch. {\"error\":true,\"message\":\"Patch must include *** Begin Patch and *** End Patch.\"}",
+          4
+        ]
+      ]
+    },
+    {
+      "tool": "update_plan",
+      "count": 4,
+      "topMessages": [
+        [
+          "⛔ TOOL BLOCKED: Missing required argument(s): steps (array). update_plan was called with EMPTY/incomplete arguments — that call did nothing. update_plan require",
+          4
+        ]
+      ]
+    },
+    {
+      "tool": "write_file",
+      "count": 2,
+      "topMessages": [
+        [
+          "⛔ TOOL BLOCKED: \"C:\\Users\\PATEL COMPUTERS\\Desktop\\new window\\index.html\" already exists. Read it with read_file first (so you don't wipe content you haven't see",
+          1
+        ],
+        [
+          "❌ TOOL ERROR: Path is outside the allowed workspace. Attempted: C:\\Users\\PATEL COMPUTERS\\Downloads\\openbot_research.md — project root: C:\\Users\\PATEL COMPUTERS\\",
+          1
+        ]
+      ]
+    },
+    {
+      "tool": "edit",
+      "count": 1,
+      "topMessages": [
+        [
+          "❌ TOOL ERROR: Find text not found in file (tried exact + fuzzy matching). Re-read the file (read_file shows line numbers) and copy the current text. {\"agentId\":",
+          1
+        ]
+      ]
+    }
+  ],
+  "compaction": {
+    "compactRuns": 0,
+    "summaryRuns": 0,
+    "digestRuns": 15,
+    "overflowRuns": 0,
+    "followups": []
+  },
+  "finish": {
+    "finishRuns": 0,
+    "finishCalls": 0
+  },
+  "nudges": {
+    "spinNudges": 0,
+    "diagnoseNudges": 0,
+    "actionNudges": 1,
+    "verificationNudges": 0,
+    "reverifyNudges": 0,
+    "actNowNudges": 1,
+    "observationNudges": 1,
+    "buildVerifyNudges": 1,
+    "degenerateNudges": 0,
+    "regressionNudges": 0,
+    "budgetWarned": 3,
+    "lengthCutBlocks": 0,
+    "reasoningLengthCuts": 5,
+    "readBeforeEditBlocks": 1,
+    "staleFileBlocks": 0,
+    "editStrategySwitches": 0
+  },
+  "nudgeRuns": 9,
+  "providers": {
+    "openai-compatible:inclusionai/ling-3.0-flash-vl:free": 10,
+    "openai-compatible:nex-agi/nex-n2.5-mini:free": 1,
+    "openai-compatible:thinkingmachines/inkling-small:free": 1,
+    "openai-compatible:nvidia/nemotron-3-ultra-550b-a55b": 7,
+    "openai-compatible:z-ai/glm-5.3": 1,
+    "?:?": 3,
+    "openai-compatible:z-ai/glm-5.3-flashx": 1,
+    "openai-compatible:mercury-2.5": 1,
+    "openai-compatible:claude-fable-5.1[1m]": 1,
+    "openai-compatible:glm-5.3-flash": 2,
+    "openai-compatible:nex-agi/nex-n2.5-pro:free": 9,
+    "openai-compatible:inclusionai/ling-3.0-flash-sante:free": 12,
+    "openai-compatible:nvidia/nemotron-3.5-lightning:free": 1
+  },
+  "recovered": 1,
+  "argRepairs": 0,
+  "reasonRuns": 31,
+  "reasonTotal": 97767
+}

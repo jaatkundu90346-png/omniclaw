@@ -1,0 +1,17 @@
+{
+  "id": "http-webhook",
+  "name": "HTTP Webhook",
+  "type": "webhook",
+  "transport": "http",
+  "direction": "inbound",
+  "defaultEnabled": true,
+  "description": "Accepts external HTTP webhook payloads and turns them into OmniClaw sessions.",
+  "capabilities": [
+    "inbound-message",
+    "token-auth",
+    "agent-routing"
+  ],
+  "requiredSecrets": [],
+  "defaultAgentId": "main",
+  "docsHint": "POST /api/connectors/webhook"
+}

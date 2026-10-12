@@ -1,0 +1,83 @@
+{
+  "features": [
+    {
+      "id": "M1",
+      "behavior": "Basic 3D world + player movement: Vite + TypeScript + Three.js setup, procedural city ground, third-person player controller with WASD, mouse camera, sprint, jump, health/stamina, smooth follow camera, collision with buildings",
+      "verification": "npm run build && test -f dist/index.html",
+      "state": "active",
+      "evidence": "",
+      "deps": []
+    },
+    {
+      "id": "M2",
+      "behavior": "Roads/buildings + minimap: Procedural city with roads, buildings, alleys, parks, 3 zones (Downtown, Industrial, Beach), landmarks, fog, skybox, day/night cycle, weather toggle, minimap with roads/player",
+      "verification": "npm run build && test -f dist/index.html",
+      "state": "not_started",
+      "evidence": "",
+      "deps": [
+        "M1"
+      ]
+    },
+    {
+      "id": "M3",
+      "behavior": "Vehicles enter/exit/driving: 3 drivable vehicles (car, bike, van/truck), enter/exit, vehicle physics (acceleration, braking, steering, reverse, drift), driving camera, vehicle damage, traffic AI with road-following",
+      "verification": "npm run build && test -f dist/index.html",
+      "state": "not_started",
+      "evidence": "",
+      "deps": [
+        "M2"
+      ]
+    },
+    {
+      "id": "M4",
+      "behavior": "NPCs + traffic: Pedestrian NPCs on paths, avoidance behavior, traffic cars on road nodes, crowd flee behavior, daily life animations",
+      "verification": "npm run build && test -f dist/index.html",
+      "state": "not_started",
+      "evidence": "",
+      "deps": [
+        "M3"
+      ]
+    },
+    {
+      "id": "M5",
+      "behavior": "Wanted/police system: Wanted level 0-5, increases on crashes/attacks, police spawn/chase at level 2+, more police at high levels, cooldown when escaping LOS, minimap markers for police/player",
+      "verification": "npm run build && test -f dist/index.html",
+      "state": "not_started",
+      "evidence": "",
+      "deps": [
+        "M4"
+      ]
+    },
+    {
+      "id": "M6",
+      "behavior": "Missions: 5 missions (Delivery, Taxi, Chase, Escape, Exploration), mission UI with objective/timer/progress, mission markers in world/minimap, data-driven from JSON/TS config",
+      "verification": "npm run build && test -f dist/index.html",
+      "state": "not_started",
+      "evidence": "",
+      "deps": [
+        "M5"
+      ]
+    },
+    {
+      "id": "M7",
+      "behavior": "Phone UI + save/load: Phone menu (P key) with Map, Missions, Stats, Vehicles, Settings, social feed, save/load to localStorage (position, money, missions, vehicle, time), reset save",
+      "verification": "npm run build && test -f dist/index.html",
+      "state": "not_started",
+      "evidence": "",
+      "deps": [
+        "M6"
+      ]
+    },
+    {
+      "id": "M8",
+      "behavior": "Optimization + README: Instanced meshes, LOD/distance culling, FPS counter, debug panel (teleport, spawn vehicle, set wanted, start mission, toggle day/night/rain/fog), complete README with controls, features, folder structure, limitations, dev log",
+      "verification": "npm run build && test -f dist/index.html",
+      "state": "not_started",
+      "evidence": "",
+      "deps": [
+        "M7"
+      ]
+    }
+  ],
+  "updatedAt": "2026-07-07T05:20:39.172Z"
+}

@@ -1,0 +1,13 @@
+{
+  "servers": {
+    "composio": {
+      "transport": "http",
+      "url": "https://backend.composio.dev/v3/mcp/33b8d4d6-7234-49de-9efd-51afc4f43f2c?user_id=omniclaw-main",
+      "headers": {
+        "x-api-key": "ak_FIUn3UceSNXIlyKwX9kC"
+      },
+      "disabled": false,
+      "_comment": "Composio hosted MCP (omniclaw-search server, 21 web/travel/shopping/finance/news search tools, NO_AUTH). Tools appear to the model as mcp_composio_COMPOSIO_SEARCH_*. To add more apps (Gmail/GitHub/etc): connect them in Composio under THIS api key's project, create an MCP server including their toolkits, then swap the url's server-id. The ?user_id= scopes the session per end-user. Config is read live at runtime; restart to auto-connect or call mcp_connect_all. NOTE: connect.composio.dev/mcp (Composio Connect, 1000+ apps) needs an AuthKit JWT Bearer token, NOT the raw x-api-key — so it cannot be used with just this api key."
+    }
+  }
+}

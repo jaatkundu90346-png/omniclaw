@@ -1,0 +1,19 @@
+{
+  "rules": [
+    {
+      "id": "no-dynamic-node-import-in-core",
+      "description": "Hot-path core code must use static top-of-file imports, not dynamic await import() of node builtins — dynamic import throws inside the packaged .exe and silently drops OmniLoop to the legacy loop.",
+      "glob": "src/core/**/*.js",
+      "forbidden": "await import\\(\"node:",
+      "fix": "Replace the dynamic `await import(\"node:...\")` with a static `import ... from \"node:...\"` at the top of the file. Dynamic builtin imports work under `node` from source but FAIL in the pkg exe."
+    },
+    {
+      "id": "git-pretty-format-word",
+      "description": "git commands must not use the literal 'format:' prefix — the shell policy blocks the word 'format'.",
+      "glob": "src/core/**/*.js",
+      "forbidden": "--pretty=format:",
+      "fix": "Use a --pretty value that starts with % (e.g. --pretty=%h%x09%s) instead of --pretty=format:... — the shell safety policy blocks the word 'format'."
+    }
+  ],
+  "updatedAt": "2026-06-14T18:38:32.353Z"
+}

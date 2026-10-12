@@ -1,0 +1,37 @@
+PROMPT DUMP — LATE ROUND (round 5), run_1790150170368_elangm
+Same caveats as prompt_round1.txt. Round-5 payload: 22485 tokens (~90k chars),
+from report.roundInputTokens[4]. Per-round inputs: r1 17995 / r2 19083 /
+r3 21227 / r4 21894 / r5 22485 (linear growth, no compaction fired:
+transcriptCompactions=0, transcriptSummaries=0, digestRounds=0).
+
+MEASURED FINAL-ROUND BREAKDOWN (report.contextBreakdown, exact):
+  prefixChars (ZoneA+ZoneB+ZoneC) 37917 (~9.5k tokens)
+  schemasChars (tool schemas)     20677 (~5.2k tokens)
+  historyChars                    16978 (~4.2k tokens)
+  toolResultChars (10 calls)       5527 (~1.4k tokens)
+  ledgerChars                         0
+  totalChars                      89938 (~22.5k tokens)
+  window: 1048576 tokens (source: model), meter 2% — compaction never triggered.
+
+TOOL RESULTS present in round-5 prompt (10 calls, from transcript toolOutputs):
+  update_plan(ok) / list_files nexus-lab -> count 0 / list_files . -> 8 entries /
+  read_file HEARTBEAT.md -> ERROR File not found (absolute attempt shown) /
+  load_toolset progress -> ok+pinned / load_toolset popular-web-designs ->
+    ERROR Unknown toolset / update_plan(ok) / feature_list -> exists:false /
+  load_toolset browser -> ok+pinned / list_toolsets -> full catalog.
+  Reasoning totals: rounds 434/207/925/542 tokens; run total 2108 (usage) ;
+  thinking-to-action ratios per round: 434 / 41.4 / 925 / 180.7.
+
+PLAN REMINDER re-injected every round (2 steps, 1 in_progress) + inherited-plan
+note absent (no prior plan). No nudge messages fired this run (all nudge
+counters 0). No steer. No images (no browser actions ran).
+
+ROUND 5 OUTCOME: provider call hit "OmniLoop round timed out after 180000ms"
+(roundTimeoutMs hard timeout in the code version live at 2026-09-23 08:13;
+current code uses idle+hard-cap semantics). stoppedReason provider-error;
+final answer = classified generic message + work-done list
+("Failed/blocked: read_file HEARTBEAT.md ; load_toolset").
+
+CONTRASTS round1 -> round5: +4490 tokens, all from history (+tool results +
+assistant turns). Prefix stable (zone-hash guard held). Schemas stable (menu
+rebuilt but unchanged size class). NOTHING was dropped or summarized all run.

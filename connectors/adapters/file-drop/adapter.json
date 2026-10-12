@@ -1,0 +1,18 @@
+{
+  "id": "file-drop",
+  "name": "File Drop",
+  "type": "file-drop",
+  "transport": "filesystem",
+  "direction": "inbound",
+  "defaultEnabled": true,
+  "description": "Scans data/inbox for text, markdown, and JSON files and routes them to an agent.",
+  "capabilities": [
+    "inbound-message",
+    "agent-routing",
+    "archive-policy",
+    "scheduled-scan"
+  ],
+  "requiredSecrets": [],
+  "defaultAgentId": "main",
+  "docsHint": "Drop files into data/inbox and run scan_file_drop."
+}

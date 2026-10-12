@@ -1,0 +1,88 @@
+/* App grid: [sidebar 260px|0] [main 1fr] [panel var(--panel-w)|0]. Full viewport, no page scroll. */
+
+.app {
+  height: 100vh;
+  overflow: hidden;
+}
+
+.shell {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* Collapse via 0-width tracks (NOT display:none: removing the item from the
+   grid reassigns the remaining items to the wrong tracks). Hosts clip. */
+.shell.sidebar-closed { grid-template-columns: 0 1fr auto; }
+.shell.panel-closed { grid-template-columns: auto 1fr 0; }
+.shell.sidebar-closed.panel-closed { grid-template-columns: 0 1fr 0; }
+
+#sidebar-host, #panel-host {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.view {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+#banner {
+  display: none;
+  padding: 6px 16px;
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 12px;
+  text-align: center;
+  border-bottom: 1px solid var(--line);
+}
+
+#banner.show { display: block; }
+
+html, body { overflow-x: hidden; }
+
+.view, .thread, .answer, .turn-assistant { min-width: 0; }
+.answer pre, .turn-cards pre, .s-de pre, .diff-view, .codeblock {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.answer img, .turn-cards img { max-width: 100%; height: auto; }
+
+/* 1366×768 target: sidebar 260 + panel 320 leaves ~786 for chat. Narrow
+   screens shrink chrome first, never push a global horizontal scrollbar. */
+@media (max-width: 1100px) {
+  :root { --sidebar-w: 220px; --panel-w: 280px; }
+  .thread { padding: 16px 16px 32px; }
+}
+@media (max-width: 760px) {
+  :root { --sidebar-w: 200px; --panel-w: 260px; }
+  .composer-zone { padding: 8px 10px 12px; }
+  .composer { width: 100%; }
+  .thread { padding: 12px 12px 28px; }
+  .user-bubble { max-width: 100%; }
+}
+
+/* Panel resize handle: 6px grab strip on the panel's left edge */
+.panel-resize {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  background: transparent;
+  z-index: 2;
+}
+
+.panel-resize:hover, .panel-resize.dragging { background: var(--bg-active); }

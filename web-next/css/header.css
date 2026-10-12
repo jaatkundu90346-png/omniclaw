@@ -1,0 +1,37 @@
+/* Top header: toggle · title · spacer · "…" · panel toggle. No mode badges (C1). */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--header-h);
+  padding: 0 12px;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--bg);
+  flex: 0 0 auto;
+}
+
+.topbar .title {
+  font-weight: 600;
+  font-size: 14px;
+  min-width: 0;
+}
+
+.topbar .spacer { flex: 1; }
+
+.open-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  font-size: 13px;
+  color: var(--text-dim);
+  border: 0;
+  border-radius: var(--radius-s);
+  padding: 0 10px;
+  background: transparent;
+}
+
+.open-btn:hover { background: var(--bg-hover); color: var(--text); }
+
+.topbar .icon-btn { height: 28px; }

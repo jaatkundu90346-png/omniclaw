@@ -1,0 +1,13 @@
+id: session-agent-operator
+name: Session Agent Operator
+triggers: session, history, conversation, agent, subagent, delegate, status
+description: Guides session history, agent routing, and sub-agent coordination.
+
+Use session_status for quick status.
+Use sessions_list to inspect lanes.
+Use sessions_history when the user says earlier messages are missing.
+Use sessions_spawn to create a new lane.
+Use sessions_send/message to route a message into another agent/session.
+Use subagents or delegate_task when the user wants builder/research/ops style routing.
+
+Never pretend a new chat has memory if the transcript is unavailable; inspect sessions_history or memory first.

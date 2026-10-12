@@ -1,0 +1,668 @@
+{
+  "app": {
+    "name": "OmniClaw",
+    "tagline": "Lightweight local-first assistant runtime",
+    "creator": {
+      "name": "Mankush",
+      "location": "Haryana, India",
+      "github": "https://github.com/jaatkundu90346-png/omniclaw"
+    }
+  },
+  "prompt": {
+    "v2": false
+  },
+  "loop": {
+    "guardsV2": false
+  },
+  "paths": {
+    "unified": false
+  },
+  "learning": {
+    "enabled": true
+  },
+  "runtime": {
+    "activeProfile": "balanced",
+    "heartbeat": {
+      "modelRuns": false,
+      "model": ""
+    },
+    "agentLoop": {
+      "timeoutMs": 3600000,
+      "maxSteps": 1000,
+      "maxToolCallsPerStep": 5,
+      "maxRepeatedToolCalls": 6,
+      "outputPreviewChars": 4000
+    },
+    "omniLoop": {
+      "enabled": true,
+      "maxRounds": 18,
+      "maxTokens": 8000,
+      "roundTimeoutMs": 180000,
+      "maxToolResultChars": 10000,
+      "historyMessages": 14,
+      "contextCharBudget": 120000,
+      "contextTokens": 128000,
+      "compactAtPercent": 0.8,
+      "maxTools": 30,
+      "maxToolCallsPerRound": 8,
+      "digestAfterRounds": 6,
+      "runTokenBudget": 600000,
+      "runTokenWarnAt": 0.7,
+      "toolResultBudgets": {
+        "read_file": 8000,
+        "read": 8000,
+        "read_computer_file": 8000,
+        "exec": 4000,
+        "run_terminal_command": 4000,
+        "search_text": 4000,
+        "memory_search": 4000,
+        "web_research": 6000,
+        "web_search": 6000,
+        "web_fetch": 6000,
+        "read_url": 6000,
+        "list_files": 3000,
+        "git_status": 3000,
+        "git_diff": 3000,
+        "git_log": 3000,
+        "default": 4000
+      },
+      "temperature": 0.2,
+      "providerRetries": 3,
+      "firstTokenTimeoutMs": 45000,
+      "streaming": true,
+      "parallelToolCalls": true,
+      "maxParallelToolCalls": 8,
+      "summarizeOldTurns": true,
+      "autoVerifyEdits": true
+    },
+    "modelToolLoop": {
+      "enabled": true,
+      "maxRounds": 50,
+      "maxToolCallsPerRound": 8,
+      "maxParallelToolCalls": 8,
+      "providerFirst": true,
+      "roundTimeoutMs": 90000,
+      "runWhenHeuristicHasTools": true,
+      "recoverMissingToolCalls": true,
+      "maxRepeatedToolCalls": 6,
+      "nativeToolCalling": true,
+      "nativeToolTimeoutMs": 60000
+    },
+    "subAgents": {
+      "provider": "",
+      "model": "inherit",
+      "fallbackModel": "",
+      "maxConcurrent": 3,
+      "maxPerHour": 30,
+      "timeoutMs": 300000,
+      "contextChars": 240000
+    },
+    "activeMemory": {
+      "enabled": true,
+      "agents": [
+        "main"
+      ],
+      "allowedChatTypes": [
+        "direct"
+      ],
+      "queryMode": "recent",
+      "timeoutMs": 15000,
+      "maxSummaryChars": 900,
+      "maxHits": 8,
+      "logging": true
+    },
+    "profiles": {
+      "lite": {
+        "description": "Minimum overhead for simple chat, notes, and planning.",
+        "maxRecentConversations": 6,
+        "allowToolExecution": true,
+        "enableTasks": true,
+        "enableSkillMatching": true
+      },
+      "balanced": {
+        "description": "Recommended default profile with memory, skills, tools, and tasks.",
+        "maxRecentConversations": 12,
+        "allowToolExecution": true,
+        "enableTasks": true,
+        "enableSkillMatching": true
+      },
+      "power": {
+        "description": "Richer context window for more advanced orchestration.",
+        "maxRecentConversations": 20,
+        "allowToolExecution": true,
+        "enableTasks": true,
+        "enableSkillMatching": true
+      }
+    }
+  },
+  "acp": {
+    "enabled": true,
+    "dispatch": {
+      "enabled": true
+    },
+    "backend": "local-cli",
+    "defaultAgent": "codex",
+    "allowedAgents": [
+      "claude",
+      "codex",
+      "copilot",
+      "cursor",
+      "droid",
+      "gemini",
+      "iflow",
+      "kilocode",
+      "kimi",
+      "kiro",
+      "openclaw",
+      "opencode",
+      "pi",
+      "qwen"
+    ],
+    "maxConcurrentSessions": 8,
+    "runtime": {
+      "ttlMinutes": 120
+    }
+  },
+  "codingHarness": {
+    "enabled": true,
+    "defaultAgent": "codex",
+    "allowedAgents": [
+      "omniclaw",
+      "codex",
+      "opencode",
+      "claude",
+      "gemini",
+      "qwen"
+    ],
+    "fallbackAgents": [
+      "omniclaw"
+    ],
+    "maxConcurrentSessions": 4,
+    "defaultMode": "run",
+    "timeoutSeconds": 180,
+    "maxPromptChars": 24000,
+    "maxOutputChars": 12000,
+    "agents": {
+      "omniclaw": {
+        "command": "omniclaw-internal",
+        "args": [],
+        "taskArg": "internal",
+        "internal": true,
+        "description": "Built-in OmniClaw coding harness using local file and shell tools."
+      },
+      "codex": {
+        "command": "codex",
+        "args": [
+          "exec",
+          "--skip-git-repo-check",
+          "-"
+        ],
+        "taskArg": "stdin",
+        "fallbackAgents": [
+          "omniclaw"
+        ],
+        "description": "OpenAI Codex CLI coding agent harness."
+      },
+      "opencode": {
+        "command": "opencode",
+        "args": [
+          "run"
+        ],
+        "taskArg": "append",
+        "description": "OpenCode coding agent harness."
+      },
+      "claude": {
+        "command": "claude",
+        "args": [
+          "-p"
+        ],
+        "taskArg": "append",
+        "description": "Claude Code prompt harness."
+      },
+      "gemini": {
+        "command": "gemini",
+        "args": [
+          "--prompt"
+        ],
+        "taskArg": "append",
+        "description": "Gemini CLI prompt harness."
+      },
+      "qwen": {
+        "command": "qwen",
+        "args": [
+          "--prompt"
+        ],
+        "taskArg": "append",
+        "description": "Qwen CLI prompt harness."
+      }
+    }
+  },
+  "provider": {
+    "mode": "codex-cli",
+    "baseUrl": "",
+    "model": "",
+    "compactionModel": "tencent/hy3:free",
+    "reviewerModel": "",
+    "mockDelayMs": 0,
+    "apiKeyEnv": "",
+    "apiKeyProviderId": "codex-cli",
+    "temperature": 0.2,
+    "maxTokens": 8000,
+    "plannerMaxTokens": 900,
+    "timeoutMs": 180000,
+    "reasoning": null,
+    "codexCommand": "codex",
+    "codexSandbox": "read-only",
+    "codexLiveEnabled": false,
+    "systemPrompt": "You are OmniClaw, a practical local-first assistant focused on user needs, planning, execution, safety, and clarity.",
+    "fallbacks": []
+  },
+  "fallbacks": [],
+  "providerProfiles": {
+    "openai": {
+      "mode": "openai-compatible",
+      "baseUrl": "https://api.openai.com/v1",
+      "model": "gpt-4o-mini",
+      "apiKeyProviderId": "openai"
+    },
+    "anthropic": {
+      "mode": "openai-compatible",
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "model": "anthropic/claude-3.7-sonnet",
+      "apiKeyProviderId": "openrouter",
+      "_note": "Claude via OpenRouter (OpenAI-compatible). Native api.anthropic.com uses /v1/messages, not /chat/completions, so it needs a dedicated adapter — until then Claude is routed through OpenRouter. Use Fetch models to pick a newer Claude."
+    },
+    "gemini": {
+      "mode": "openai-compatible",
+      "baseUrl": "https://generativelanguage.googleapis.com/v1beta/openai",
+      "model": "gemini-1.5-pro",
+      "apiKeyProviderId": "gemini"
+    },
+    "groq": {
+      "mode": "openai-compatible",
+      "baseUrl": "https://api.groq.com/openai/v1",
+      "model": "llama-3.1-70b-versatile",
+      "apiKeyProviderId": "groq"
+    },
+    "openrouter": {
+      "mode": "openai-compatible",
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "model": "openai/gpt-4o-mini",
+      "apiKeyProviderId": "openrouter",
+      "httpReferer": "http://localhost:3147",
+      "appTitle": "OmniClaw"
+    },
+    "nvidia": {
+      "mode": "openai-compatible",
+      "baseUrl": "https://integrate.api.nvidia.com/v1",
+      "model": "meta/llama-3.1-70b-instruct",
+      "apiKeyProviderId": "nvidia",
+      "httpReferer": "http://localhost:3147",
+      "appTitle": "OmniClaw",
+      "timeoutMs": 60000
+    },
+    "minimax": {
+      "mode": "openai-compatible",
+      "baseUrl": "https://api.minimax.io/v1",
+      "model": "MiniMax-M2.7",
+      "apiKeyProviderId": "minimax",
+      "httpReferer": "http://localhost:3147",
+      "appTitle": "OmniClaw"
+    },
+    "codex-cli": {
+      "mode": "codex-cli",
+      "baseUrl": "",
+      "model": "",
+      "apiKeyProviderId": "codex-cli",
+      "httpReferer": "",
+      "appTitle": "OmniClaw",
+      "codexCommand": "codex",
+      "codexSandbox": "read-only",
+      "timeoutMs": 120000
+    },
+    "local-compatible": {
+      "mode": "openai-compatible",
+      "baseUrl": "http://localhost:11434/v1",
+      "model": "llama3.2",
+      "apiKeyProviderId": "local-compatible"
+    },
+    "ollama": {
+      "mode": "openai-compatible",
+      "baseUrl": "http://localhost:11434/v1",
+      "model": "llama3.1",
+      "apiKeyProviderId": "ollama"
+    },
+    "mistral": {
+      "mode": "openai-compatible",
+      "baseUrl": "https://api.mistral.ai/v1",
+      "model": "mistral-small-latest",
+      "apiKeyProviderId": "mistral"
+    },
+    "deepseek": {
+      "mode": "openai-compatible",
+      "baseUrl": "https://api.deepseek.com/v1",
+      "model": "deepseek-chat",
+      "apiKeyProviderId": "deepseek"
+    },
+    "together": {
+      "mode": "openai-compatible",
+      "baseUrl": "https://api.together.xyz/v1",
+      "model": "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
+      "apiKeyProviderId": "together"
+    },
+    "fireworks": {
+      "mode": "openai-compatible",
+      "baseUrl": "https://api.fireworks.ai/inference/v1",
+      "model": "accounts/fireworks/models/llama-v3p1-8b-instruct",
+      "apiKeyProviderId": "fireworks"
+    }
+  },
+  "session": {
+    "detailMessageLimit": 80,
+    "previewChars": 140,
+    "autoResetIdleMinutes": 0,
+    "identityLinks": {}
+  },
+  "agents": {
+    "main": {
+      "name": "Main Agent",
+      "description": "Primary orchestrator for chat, memory, and routing.",
+      "profile": "power",
+      "blockedPermissions": [],
+      "channels": [
+        "webchat"
+      ]
+    },
+    "research": {
+      "name": "Research Agent",
+      "description": "Focused on planning, research memory, and evidence gathering.",
+      "profile": "balanced",
+      "blockedPermissions": [
+        "allowFileWrite",
+        "allowShellPlanning"
+      ],
+      "allowedSkillIds": [
+        "research-planner"
+      ],
+      "channels": [
+        "webchat"
+      ]
+    },
+    "builder": {
+      "name": "Builder Agent",
+      "description": "Focused on implementation work, generated artifacts, and code-facing tasks.",
+      "profile": "power",
+      "blockedPermissions": [
+        "allowShellPlanning"
+      ],
+      "channels": [
+        "webchat"
+      ]
+    },
+    "ops": {
+      "name": "Ops Agent",
+      "description": "Focused on runtime operations, approvals, and workspace inspection.",
+      "profile": "power",
+      "allowedTools": [
+        "time_now",
+        "runtime_summary",
+        "provider_status",
+        "prompt_trace",
+        "tool_trace",
+        "v2_status",
+        "v2_repair_plan",
+        "openclaw_vendor_status",
+        "openclaw_skill_scan",
+        "openclaw_skill_import",
+        "openclaw_skill_pack_import",
+        "capability_demo",
+        "layer_status",
+        "computer_access_status",
+        "computer_access_audit",
+        "list_files",
+        "read_file",
+        "list_computer_directory",
+        "read_computer_file",
+        "write_computer_file",
+        "create_computer_directory",
+        "copy_computer_path",
+        "move_computer_path",
+        "delete_computer_path",
+        "open_browser_url",
+        "run_terminal_command",
+        "sandbox_status",
+        "sandbox_run",
+        "sandbox_apply",
+        "exec",
+        "process",
+        "code_execution",
+        "browser",
+        "browser_status",
+        "browser_audit",
+        "browser_snapshot",
+        "browser_links",
+        "browser_screenshot",
+        "browser_text",
+        "web_search",
+        "x_search",
+        "web_fetch",
+        "read",
+        "write",
+        "edit",
+        "apply_patch",
+        "message",
+        "sessions_list",
+        "sessions_history",
+        "sessions_send",
+        "sessions_spawn",
+        "sessions_yield",
+        "session_status",
+        "acp_doctor",
+        "acp_install",
+        "acp_spawn",
+        "acp_status",
+        "acp_sessions",
+        "acp_cancel",
+        "acp_close",
+        "acp_set_option",
+        "subagents",
+        "agents_list",
+        "memory_search",
+        "memory_get",
+        "nodes",
+        "canvas",
+        "cron",
+        "gateway",
+        "image",
+        "image_generate",
+        "music_generate",
+        "video_generate",
+        "tts",
+        "plan_shell_command",
+        "list_tasks",
+        "run_task",
+        "list_long_term_memory",
+        "promote_memory",
+        "dream_memory_sweep",
+        "scan_file_drop",
+        "cleanup_attachment_cache",
+        "analyze_attachment_media",
+        "analyze_pending_media_attachments"
+      ],
+      "allowedSkillIds": [
+        "openclaw-tool-loop",
+        "filesystem-operator",
+        "web-browser-operator",
+        "session-agent-operator",
+        "gateway-ops",
+        "media-generation",
+        "safety-governance",
+        "reviewer"
+      ],
+      "channels": [
+        "webchat"
+      ]
+    }
+  },
+  "tools": {
+    "menuV2": false,
+    "permissions": {
+      "allowNoteWrite": true,
+      "allowTaskWrite": true,
+      "allowFileRead": true,
+      "allowDirectoryList": true,
+      "allowFileWrite": true,
+      "allowShellPlanning": true,
+      "allowWebResearch": true,
+      "allowTaskRunner": true,
+      "allowSkillWrite": true,
+      "allowConfigWrite": true,
+      "allowShellExecution": true,
+      "allowMemoryPromotion": true,
+      "allowMemoryRead": true,
+      "allowMemoryWrite": true,
+      "allowDreamSweep": true,
+      "allowConnectorWrite": true,
+      "allowComputerAccess": true,
+      "allowBrowserControl": true,
+      "allowBrowserEvaluate": true
+    },
+    "filesystem": {
+      "workspaceRoot": ".",
+      "maxReadBytes": 65536,
+      "writableRoots": [
+        ".",
+        "data/generated",
+        "docs/drafts",
+        "notes"
+      ]
+    },
+    "computerAccess": {
+      "enabled": true,
+      "allowedRoots": [
+        "~",
+        "C:/",
+        "D:/",
+        "E:/",
+        "F:/"
+      ],
+      "allowWrite": true,
+      "allowDelete": true,
+      "allowPermanentDelete": false,
+      "trashDir": "data/trash",
+      "maxReadBytes": 131072,
+      "blockedPathPatterns": [
+        "^[A-Z]:/Windows(?:/|$)",
+        "^[A-Z]:/Program Files(?:/|$)",
+        "^[A-Z]:/Program Files \\(x86\\)(?:/|$)",
+        "^[A-Z]:/ProgramData(?:/|$)",
+        "(^|/)\\.ssh(/|$)",
+        "(^|/)\\.(aws|gnupg|kube|docker|azure)(/|$)",
+        "(^|/)\\.config/gh(/|$)",
+        "(^|/)\\.(bashrc|zshrc|profile|bash_profile|zprofile|netrc|pgpass|npmrc|pypirc|gitconfig)$",
+        "(^|/)(\\.env(\\.[^/]*)?|[^/]*\\.env|secrets\\.json|[^/]*\\.pem|[^/]*\\.key)$",
+        "^/etc/(passwd|shadow|sudoers)(/|$|\\.)"
+      ]
+    },
+    "research": {
+      "provider": "tinyfish",
+      "maxResults": 8,
+      "fetchTop": 5,
+      "timeoutMs": 10000
+    },
+    "browserControl": {
+      "timeoutMs": 30000,
+      "headless": true,
+      "realBrowser": {
+        "mode": "auto",
+        "host": "localhost",
+        "port": 9222
+      }
+    },
+    "shellExecution": {
+      "cwd": ".",
+      "allowlistMode": "advisory",
+      "trustLevel": "full",
+      "allowExternalCwd": true,
+      "timeoutMs": 120000,
+      "maxOutputBytes": 256000,
+      "allowlistPatterns": [
+        "^node\\s+(-v|--version)$",
+        "^npm\\s+(-v|--version)$",
+        "^npm\\.cmd\\s+(?:run\\s+)?(build|test|portable:build|release:windows|sidecar:build)$",
+        "^pnpm\\s+(-v|--version)$",
+        "^git\\s+(status|branch|log|show|diff)\\b",
+        "^(dir|ls)(\\s+.*)?$",
+        "^Get-ChildItem\\b",
+        "^Get-Content\\b",
+        "^Select-String\\b",
+        "^New-Item\\b",
+        "^Copy-Item\\b",
+        "^Move-Item\\b",
+        "^Start-Process\\b",
+        "^python\\s+(-V|--version)$",
+        "^where\\.exe\\b",
+        "^winget\\s+search\\b",
+        "^Get-Date$",
+        "^pwd$"
+      ],
+      "blockedPatterns": [
+        "\\brm\\s+-rf\\b",
+        "\\bRemove-Item\\b[\\s\\S]*-Recurse\\b[\\s\\S]*-Force\\b",
+        "\\bdel\\s+/[sq]\\b",
+        "\\brmdir\\s+/[sq]\\b",
+        "\\bformat\\s+(?:/\\S+\\s+)*[A-Za-z]:",
+        "\\bdiskpart\\b",
+        "\\bshutdown\\b",
+        "\\bRestart-Computer\\b",
+        "\\bgit\\s+reset\\s+--hard\\b",
+        "\\bgit\\s+clean\\s+-fd\\b"
+      ]
+    },
+    "sandbox": {
+      "enabled": true,
+      "timeoutMs": 30000,
+      "maxOutputBytes": 20000,
+      "maxCopyBytes": 26214400,
+      "maxFileBytes": 2097152,
+      "defaultPaths": [
+        "."
+      ],
+      "excludePatterns": [
+        "^\\.git(?:/|$)",
+        "^node_modules(?:/|$)",
+        "^data(?:/|$)",
+        "^dist(?:/|$)",
+        "^\\.next(?:/|$)",
+        "^src-tauri/target(?:/|$)"
+      ],
+      "blockedPatterns": [
+        "\\brm\\s+-rf\\b",
+        "\\bRemove-Item\\b[\\s\\S]*-Recurse\\b[\\s\\S]*-Force\\b",
+        "\\bdel\\s+/[sq]\\b",
+        "\\brmdir\\s+/[sq]\\b",
+        "\\bformat\\s+(?:/\\S+\\s+)*[A-Za-z]:",
+        "\\bdiskpart\\b",
+        "\\bshutdown\\b",
+        "\\bRestart-Computer\\b",
+        "\\bgit\\s+reset\\s+--hard\\b",
+        "\\bgit\\s+clean\\s+-fd\\b"
+      ]
+    },
+    "toolForge": {
+      "network": {
+        "enabled": true,
+        "timeoutMs": 20000,
+        "maxResponseBytes": 5242880,
+        "allowedHosts": []
+      }
+    }
+  },
+  "pluginConfig": {},
+  "pluginState": {},
+  "security": {
+    "requireApiAuth": false,
+    "maxRequestBytes": 1000000,
+    "sessionIdleArchiveMinutes": 1440
+  }
+}

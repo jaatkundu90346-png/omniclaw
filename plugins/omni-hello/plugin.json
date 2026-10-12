@@ -1,0 +1,55 @@
+{
+  "id": "omni-hello",
+  "name": "Omni Hello",
+  "version": "1.0.0",
+  "description": "Reference plugin that runs REAL JavaScript. Proves the plugin runtime executes an entry module instead of only rendering manifest templates.",
+  "enabled": true,
+  "capabilities": [
+    "tools",
+    "config-schema"
+  ],
+  "setup": {
+    "kind": "local-manifest",
+    "summary": "Manifest + index.js entry point loaded from the plugins directory.",
+    "steps": [
+      "Load plugin.json",
+      "Resolve runtime.entry (index.js) inside the plugin directory",
+      "Dispatch each tool call to the matching exported function"
+    ]
+  },
+  "runtime": {
+    "entry": "index.js",
+    "timeoutMs": 15000,
+    "defaultToolId": "hello_ping",
+    "tools": [
+      {
+        "id": "hello_ping",
+        "description": "Return a live greeting computed in plugin code, with the plugin's own config applied.",
+        "permission": "plugin",
+        "defaultInput": {
+          "name": "world"
+        },
+        "response": "template fallback — you should never see this, the entry module handles hello_ping."
+      },
+      {
+        "id": "hello_sum",
+        "description": "Add a list of numbers. Exists to prove plugin tools compute rather than echo.",
+        "permission": "plugin",
+        "response": "template fallback — you should never see this, the entry module handles hello_sum."
+      }
+    ]
+  },
+  "configDefaults": {
+    "greeting": "Hello"
+  },
+  "configSchema": {
+    "greeting": {
+      "type": "string",
+      "label": "Greeting",
+      "description": "Word used to open the reply.",
+      "default": "Hello",
+      "minLength": 1,
+      "maxLength": 40
+    }
+  }
+}

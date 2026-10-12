@@ -1,0 +1,72 @@
+/* Plugins & Connected Apps page. Class names mirror neo's connected-app
+   styles (public/neo.css) so both UIs share one visual language. */
+
+.plugins-page { max-width: 960px; margin: 0 auto; padding: 28px 24px 48px; }
+.plugins-page h2 { margin: 0 0 4px; font-size: 18px; }
+
+.seg-tabs { display: flex; gap: 4px; margin: 16px 0 12px; flex-wrap: wrap; }
+.seg-tab {
+  padding: 6px 12px;
+  border-radius: var(--radius-s);
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.seg-tab:hover { background: var(--bg-hover); color: var(--text); }
+.seg-tab.active { background: var(--bg-active); color: var(--text); }
+
+.plugins-page .menu-search { max-width: 340px; margin: 0 0 12px; }
+
+.connected-app-intro { display: flex; align-items: baseline; gap: 18px; padding: 2px 0 12px; color: var(--muted); flex-wrap: wrap; }
+.connected-app-intro strong { color: var(--text); font-size: 15px; }
+.connected-app-intro span { font-size: 12px; max-width: 620px; }
+
+.connected-app-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 12px; }
+.connected-app-card, .computer-use-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+  background: var(--surface);
+  padding: 15px;
+}
+.connected-app-top { display: flex; align-items: flex-start; gap: 11px; }
+.connected-app-top .row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.connected-app-top .row-main small { color: var(--muted); font-size: 12px; }
+.connected-app-icon {
+  display: grid; place-items: center; flex: none;
+  width: 38px; height: 38px; border-radius: 10px;
+  background: var(--surface-2); color: var(--accent);
+  border: 1px solid var(--line);
+  font-weight: 800; font-size: 12px; letter-spacing: -0.03em;
+}
+.connected-app-icon.computer { color: #6d7cff; }
+.connected-app-meta { display: grid; gap: 4px; padding: 12px 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.connected-app-meta strong { color: var(--text); }
+.connected-app-meta code { font-family: var(--font-mono); overflow-wrap: anywhere; }
+.connected-app-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+.app-oauth-form { display: grid; gap: 9px; margin-top: 13px; padding: 12px; border: 1px dashed var(--line); border-radius: var(--radius-s); background: var(--bg-soft); }
+.app-oauth-form[hidden] { display: none; }
+.app-oauth-form label { display: grid; gap: 5px; color: var(--muted); font-size: 12px; font-weight: 600; }
+.app-oauth-form input { width: 100%; min-height: 34px; border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; background: var(--surface); color: var(--text); font: inherit; }
+.app-oauth-form input:focus { border-color: var(--accent); outline: none; }
+.app-oauth-form small { color: var(--muted); line-height: 1.45; }
+
+.catalog-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 12px; border-bottom: 1px solid var(--line-soft); font-size: 13px;
+}
+.catalog-row .row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.catalog-row .row-main small { color: var(--muted); font-size: 12px; }
+.app-icon.blue {
+  display: grid; place-items: center; flex: none;
+  width: 32px; height: 32px; border-radius: 8px;
+  background: var(--surface-2); color: var(--accent);
+  font-weight: 800; font-size: 11px;
+}
+.computer-use-card h3 { margin: 10px 0 4px; font-size: 15px; }
+.computer-use-card .btn { margin-top: 12px; }
+
+@media (max-width: 640px) {
+  .plugins-page { padding: 20px 14px 40px; }
+  .connected-app-intro { display: grid; gap: 4px; }
+  .connected-app-grid { grid-template-columns: 1fr; }
+}

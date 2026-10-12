@@ -1,0 +1,70 @@
+/* Delegation card: the agent-to-agent hand-off.
+   The card's job is honesty about WHERE the work is: a queued task is visibly
+   waiting (no spinner), a running one shows the real round counter, and a
+   finished one shows the summary and the files that changed. */
+
+.deleg-card {
+  margin: 10px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+.deleg-body { min-width: 0; }
+.deleg-title {
+  font-weight: 600;
+  margin-bottom: 6px;
+  overflow-wrap: anywhere;
+}
+.deleg-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--muted);
+}
+.deleg-note {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  font-style: italic;
+}
+.deleg-result {
+  margin-top: 8px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.deleg-files {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  overflow-wrap: anywhere;
+}
+.deleg-actions { margin-top: 10px; display: flex; gap: 8px; }
+
+/* The round counter and the "Ns ago" stamp share .deleg-meta's look. */
+.deleg-step, .deleg-ago {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.deleg-status {
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  text-transform: lowercase;
+  background: var(--surface-3);
+  color: var(--muted);
+}
+.deleg-status.s-running { color: var(--accent); }
+.deleg-status.s-done { color: var(--ok); }
+.deleg-status.s-failed { color: var(--err, #fb7185); }
+.deleg-status.s-stalled { color: var(--warn); }
+.deleg-card:has(.s-done) { border-left-color: var(--ok); }
+.deleg-card:has(.s-failed),
+.deleg-card:has(.s-cancelled) { border-left-color: var(--err, #fb7185); }
+.deleg-card:has(.s-stalled) { border-left-color: var(--warn); }
+

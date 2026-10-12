@@ -1,0 +1,105 @@
+# Dependencies
+node_modules/
+
+# Runtime state, private memory, local auth, and secrets
+data/
+.tmp-test-data/
+notes/
+logs/
+.env
+.env.*
+!.env.example
+openrouter api key/
+
+# Build outputs and packaged apps
+dist/
+src-tauri/target/
+src-tauri/binaries/
+
+# Local scratch/research artifacts
+scratch/
+.research/
+docs/drafts/*
+!docs/drafts/.gitkeep
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+
+# Test/verification scratch (generated at runtime, never source)
+tmp/
+uploads/
+.playwright-cli/
+.omniclaw/
+.tmp-*/
+config/*.backup
+
+# Agent workspace: private, per-machine memory + session state. Never source.
+workspace/
+
+# Backup copies of config/secrets (e.g. *.bak-prescrub-<timestamp>)
+*.bak
+*.bak-*
+
+# ── Release artefacts ──────────────────────────────────────────────────────
+# The EXEs are BUILD OUTPUTS, never source. They belong in GitHub Releases, not
+# in git history: an earlier commit trail carried ~80 copies of the 62 MB
+# gateway binary (~2.5 GB of .git) and every clone paid for it.
+*.exe
+*.exe.*
+omniclaw-gateway.exe
+OmniClaw.exe
+src-tauri/binaries/
+src-tauri/target/
+
+# ── Vendored third-party source (fetched by setup, not committed) ───────────
+vendor/
+
+# ── Unrelated projects that live in this working directory ─────────────────
+# These are separate products, not part of OmniClaw.
+ai-dub-studio/
+cyber-tutor/
+airforce-website/
+omniclaw-website/
+omniclaw-site/
+omni-landing/
+neon-open-world/
+neuralcore-ai/
+neox-agent/
+novamind-ai/
+omnifit-ai/
+you-bot-adapter/
+computer-control/
+cursor-clone/
+clawcore/
+amazon-site/
+fitness-site/
+fitness-website/
+flappy-bird/
+gta6-clone/
+haryana-computer/
+pillow-store/
+restaurant-website/
+snake-game/
+watch-store/
+watchstore/
+agents/
+sidecar/
+dev/
+openrouter api key/
+
+# ── Local agent scratch/runtime state ──────────────────────────────────────
+.mavis/
+.hermes/
+.freebuff/
+.omniclaw/
+.claude/
+agents/
+
+# ── Stray logs and one-off trace dumps ─────────────────────────────────────
+*.txt
+!requirements*.txt
+!LICENSE
+!README.md

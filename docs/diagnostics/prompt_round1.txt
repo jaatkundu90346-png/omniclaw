@@ -1,0 +1,60 @@
+PROMPT DUMP — ROUND 1, run_1790150170368_elangm (session_1790150170356_c8kzpj)
+Model: nex-agi/nex-n2.5-pro:free (openai-compatible). Task: NEXUS 3D website brief (1192 chars).
+Round-1 provider payload: 17995 tokens (~72k chars), from report.roundInputTokens[0].
+CAVEAT: exact per-message bytes are NOT persisted anywhere. Transcripts store
+text-only turns (no native tool_calls); gateway promptTrace stores the legacy
+context bundle, not provider messages. Below = measured totals + code-derived
+section sizes (empty-context measurement) + this run's recorded numbers.
+
+MESSAGES SENT (shape from src/core/omni-loop.js:4580 run()):
+[1] system = ZoneA + ZoneB + Agent Loop Contract
+[2..n] history (loadHistoryMessages, historyMessages=30; round 1 of a fresh
+      session: prior turns of THIS chat only; exact bytes UNVERIFIED)
+[n+1] system = Zone C (volatile tail)
+[n+2] user = 1192-char NEXUS brief (gateway run.message, 1192 chars measured)
+
+[1] SYSTEM — Zone A (stable head; measured empty-context, src/core/system-prompt.js):
+  provider.systemPrompt ("You are OmniClaw, a practical local-first assistant...") — UNVERIFIED exact chars
+  identity 2323c / creator 792c / hard_constraints 0c (no project files matched)
+  bootstrap 0c / tooling-compact ~639c + menu ids + toolset catalog
+  harness ~1281c + harness_state<=1800c / execution_bias 579c / safety 369c
+  skills ~5 skills x ~200c index (names: popular-web-designs, browser-game-testing,
+    tool-desktop_control, omniclaw-roadmap, systematic-debugging — from promptTrace.skills)
+  openclaw_control 312c / active_memory <=1800c (status ok, hitCount 8 per transcript event)
+  identity_memory 671c / workspace: 4 files (agent SOUL 1879B / IDENTITY 295B /
+    PERSONALITY 1692B / USER 190B current-on-disk; run-time sizes UNVERIFIED)
+    + heartbeat_behavior line ("Read HEARTBEAT.md if it exists...") — ALWAYS present
+    (src/core/agent.js:7314-7315 sets heartbeatPrompt unconditionally)
+  documentation 202c / sandbox 262c / runtime 641c / output_directives 537c
+  + buildEnvironmentSection + buildSelfKnowledgeSection (UNVERIFIED sizes)
+  Zone B: recent-sessions + session-work + project-state + continuationSection +
+    debugging-protocol + instincts (<=8 lines, data/instincts.json) + playbook +
+    memory-brief + code-map + evidence-ledger (empty this run: ledgerChars=0) +
+    batch-instructions + Agent Loop Contract (incl. "reply with final text only
+    and no tool calls", src/core/omni-loop.js:2940).
+  Final-round prefix measured 37917c (~9.5k tokens); round-1 prefix smaller
+  (no tool results yet, shorter history) — exact split UNVERIFIED.
+
+[2..n] HISTORY — round-1: prior chat turns only (fresh session => near-empty).
+  Final-round historyChars=16978 (~4.2k tokens), mostly accumulated turns.
+
+[n+1] SYSTEM — Zone C (src/core/omni-loop.js:2735; template, values for this run):
+  ## Current Context (volatile — fresh every turn, not cached)
+  Current date: 2026-09-23 / UTC time: 2026-09-23T... / Session:
+  session_1790150170356_c8kzpj ("chat-09-23-07-56") / Run: run_1790150170368_elangm
+  / Agent: main / Model: nex-agi/nex-n2.5-pro:free
+  Workspace: working inside folder "myNew folder" ...
+
+[n+2] USER (1192 chars, gateway run.message): "isma bna ya website Build a
+  premium, production-quality 3D animated interactive website called NEXUS ..." (truncated)
+
+TOOLS SENT round 1: native function schemas menu. Final menu recorded:
+  size 30, tokens 5169, toolsets [project browser git computer progress]
+  (report.menu). Round-1 menu = intent-matched only (no pins yet) — exact UNVERIFIED.
+  NOTE: finish NOT in menu (not in CODEX_GRADE_MODEL_TOOLS allowlist).
+  load_toolset + list_toolsets ARE core menu items.
+
+WHAT THE MODEL DID round 1: 1 tool call (update_plan, reasoning 434 tokens,
+  thinking-to-action ratio 434). Round 2: 5 calls (list_files x2, read_file
+  HEARTBEAT.md -> FILE NOT FOUND, load_toolset progress OK, load_toolset
+  popular-web-designs -> UNKNOWN TOOLSET).

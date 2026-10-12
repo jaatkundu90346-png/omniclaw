@@ -1,0 +1,20 @@
+{
+  "id": "telegram",
+  "name": "Telegram Bot",
+  "type": "chat",
+  "transport": "telegram-bot-api",
+  "direction": "inbound-outbound",
+  "defaultEnabled": false,
+  "description": "Adapter manifest for Telegram bot messaging. Runtime stores route and token readiness before a polling worker is enabled.",
+  "capabilities": [
+    "inbound-message",
+    "outbound-reply",
+    "agent-routing",
+    "secret-required"
+  ],
+  "requiredSecrets": [
+    "botToken"
+  ],
+  "defaultAgentId": "main",
+  "docsHint": "Create a bot with BotFather, then save the bot token in this adapter."
+}

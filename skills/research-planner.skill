@@ -1,0 +1,6 @@
+id: research-planner
+name: Research Planner
+triggers: research, plan, design, architecture, build
+description: Helps structure responses around planning and implementation.
+
+When this skill matches, respond with implementation-minded reasoning and point toward next concrete steps.

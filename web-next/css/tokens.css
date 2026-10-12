@@ -1,0 +1,166 @@
+/* Design tokens. :root = dark. [data-theme="light"] overrides.
+   Derived from docs/frontend-rebuild/reference-board.html (:root --bg/--panel/--accent)
+   + Codex light UI (screenshots) + neo dark UI. No MASTER PROMPT token file exists
+   in the repo, so this file IS the token source; keep all colors/spacing here. */
+
+:root {
+  color-scheme: dark;
+
+  --bg: #0f1011;
+  --bg-soft: #141516;
+  --bg-elevated: #1d1e1f;
+  --bg-sidebar: #18191a;
+  --text-primary: #f5efe6;
+  --text-muted: #aaa196;
+  --border-strong: #4a4d52;
+  --surface: #18191a;
+  --surface-2: #242526;
+  --surface-3: #2e2f31;
+
+  --text: #f5efe6;
+  --text-dim: #cfc8bc;
+  --muted: #aaa196;
+
+  --line: #343537;
+  --line-soft: #262728;
+  --border-subtle: #262728;
+
+  --text-secondary: #b5aea2;
+
+  /* F3: accent #3b82f6, ONLY for focus ring / active dot / links / primary button. */
+  --accent: #3b82f6;
+
+  --bg-active: #242526;
+  --bg-hover: #1e1f20;
+
+  --ok: #4ade80;
+  --warn: #fbbf24;
+  --warning: #fbbf24;
+  --down: #f87171;
+  --info: #4da3ff;
+
+  --sidebar-w: 260px;
+  --panel-w: 320px;
+  --header-h: 48px;
+
+  --radius-s: 6px;
+  --radius-m: 10px;
+  --radius-md: 10px;
+  --radius-l: 18px;
+
+  --font: "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
+  --font-mono: Consolas, "Cascadia Mono", monospace;
+
+  --shadow-pop: 0 18px 60px rgba(0, 0, 0, 0.5);
+}
+
+/* Theme presets: coordinated semantic tokens. neutral = base values above
+   (no overrides). Applied via <html data-preset> + data-theme. */
+:root[data-preset="ocean"] {
+  --accent: #38bdf8;
+  --bg: #0b141b; --bg-soft: #101c25; --bg-elevated: #14222c;
+  --bg-sidebar: #0e1820; --surface: #101c25; --surface-2: #182830; --surface-3: #20323d;
+  --line: #26394a; --line-soft: #1a2a36; --border-subtle: #1a2a36;
+  --bg-active: #182830; --bg-hover: #132029;
+}
+:root[data-preset="grove"] {
+  --accent: #4ade80;
+  --bg: #0d1510; --bg-soft: #111c14; --bg-elevated: #16241a;
+  --bg-sidebar: #0f1a12; --surface: #111c14; --surface-2: #182820; --surface-3: #213328;
+  --line: #274434; --line-soft: #1a2e22; --border-subtle: #1a2e22;
+  --bg-active: #182820; --bg-hover: #14211a;
+}
+:root[data-preset="ember"] {
+  --accent: #fb923c;
+  --bg: #17110b; --bg-soft: #1e1610; --bg-elevated: #261d13;
+  --bg-sidebar: #1b1410; --surface: #1e1610; --surface-2: #2a2016; --surface-3: #372a1c;
+  --line: #4a3a26; --line-soft: #2e2417; --border-subtle: #2e2417;
+  --bg-active: #2a2016; --bg-hover: #231b13;
+}
+:root[data-preset="iris"] {
+  --accent: #a78bfa;
+  --bg: #12121a; --bg-soft: #17171f; --bg-elevated: #1e1e28;
+  --bg-sidebar: #14141c; --surface: #17171f; --surface-2: #20202b; --surface-3: #2a2a38;
+  --line: #37374a; --line-soft: #232330; --border-subtle: #232330;
+  --bg-active: #20202b; --bg-hover: #1a1a24;
+}
+:root[data-preset="rose"] {
+  --accent: #fb7185;
+  --bg: #180f13; --bg-soft: #1f1419; --bg-elevated: #281a20;
+  --bg-sidebar: #1c1216; --surface: #1f1419; --surface-2: #2b1d24; --surface-3: #38262e;
+  --line: #4e3540; --line-soft: #302027; --border-subtle: #302027;
+  --bg-active: #2b1d24; --bg-hover: #241820;
+}
+
+/* High contrast: text/border emphasis only. Focus rings (accent) unchanged. */
+:root[data-contrast="high"] {
+  --text: #ffffff; --text-dim: #ece7db; --text-primary: #ffffff;
+  --text-secondary: #d8d1c1; --muted: #c9c2b2;
+  --line: #565a60; --line-soft: #3a3d42; --border-subtle: #3a3d42; --border-strong: #6a6e75;
+}
+[data-theme="light"][data-contrast="high"] {
+  --text: #000000; --text-dim: #1c1c1a; --text-primary: #000000;
+  --text-secondary: #33332f; --muted: #4c4c48;
+  --line: #b0b0a8; --line-soft: #cfcfc8; --border-subtle: #cfcfc8; --border-strong: #8a8a82;
+}
+
+/* Light variants of the presets (same accents, light surfaces). */
+[data-theme="light"][data-preset="ocean"] { --bg: #f2f8fc; --bg-soft: #e8f2f9; --bg-sidebar: #eef5fa; --surface: #ffffff; --surface-2: #e3eff7; }
+[data-theme="light"][data-preset="grove"] { --bg: #f3faf4; --bg-soft: #e7f4ea; --bg-sidebar: #eef7f0; --surface: #ffffff; --surface-2: #dff0e2; }
+[data-theme="light"][data-preset="ember"] { --bg: #fdf6ef; --bg-soft: #f9ecdd; --bg-sidebar: #fbf2e7; --surface: #ffffff; --surface-2: #f6e8d5; }
+[data-theme="light"][data-preset="iris"] { --bg: #f5f3ff; --bg-soft: #ece7fb; --bg-sidebar: #f1edfd; --surface: #ffffff; --surface-2: #e4dcf9; }
+[data-theme="light"][data-preset="rose"] { --bg: #fdf2f5; --bg-soft: #f9e5eb; --bg-sidebar: #fbeef2; --surface: #ffffff; --surface-2: #f6dde4; }
+
+/* Translucent surfaces (opacity < 100). Text is never transparent — only the
+   shell backgrounds blend. Unsupported browsers drop these declarations and
+   keep the solid backgrounds above. */
+:root[data-translucent] .popover {
+  background: color-mix(in srgb, var(--surface) calc(var(--sur-alpha, 1) * 100%), transparent);
+  backdrop-filter: blur(14px) saturate(1.25);
+}
+:root[data-translucent] .modal {
+  background: color-mix(in srgb, var(--surface) calc(var(--sur-alpha, 1) * 100%), transparent);
+  backdrop-filter: blur(16px) saturate(1.25);
+}
+:root[data-translucent] .composer {
+  background: color-mix(in srgb, var(--bg-elevated, var(--surface)) calc(var(--sur-alpha, 1) * 100%), transparent);
+  backdrop-filter: blur(14px) saturate(1.25);
+}
+
+/* Word-wrap preferences. Terminal (.term-out) wraps on its own and is excluded. */
+.wrap-code .answer pre, .wrap-code .codeblock pre, .wrap-code .s-de pre,
+.wrap-code .answer pre code, .wrap-code .codeblock pre code { white-space: pre-wrap; word-break: break-word; }
+.wrap-diff .diff-view .dl .code { white-space: pre-wrap; word-break: break-word; }
+.wrap-files .files-ed textarea { white-space: pre-wrap; word-break: break-word; }
+
+[data-theme="light"] {
+  color-scheme: light;
+
+  --bg: #ffffff;
+  --bg-soft: #f7f7f5;
+  --bg-elevated: #ffffff;
+  --bg-sidebar: #ffffff;
+  --text-primary: #1c1c1a;
+  --text-muted: #7a7a74;
+  --border-strong: #d4d4cf;
+  --surface: #ffffff;
+  --surface-2: #f1f1ee;
+  --surface-3: #e7e7e2;
+
+  --text: #1c1c1a;
+  --text-dim: #4c4c48;
+  --muted: #7a7a74;
+
+  --line: #e2e2dc;
+  --line-soft: #efefea;
+  --border-subtle: #efefea;
+
+  --text-secondary: #6b6b66;
+
+  --accent: #3b82f6;
+
+  --bg-active: #efefea;
+  --bg-hover: #f5f5f2;
+
+  --shadow-pop: 0 18px 60px rgba(0, 0, 0, 0.14);
+}

@@ -1,0 +1,16 @@
+id: openclaw-tool-loop
+name: OpenClaw Tool Loop
+triggers: tool, tools, openclaw, execute, action, hands, eyes, real task
+description: Teaches the agent to complete the think-act-observe loop with real tools.
+
+Use the OpenClaw mental model: tools are atomic actions, skills teach when and how to use them, plugins add new surfaces.
+
+When a user asks for a real task, do not only chat. Choose the smallest useful tool call, observe the result, then answer from the observation.
+
+Prefer this loop:
+1. Identify whether the task needs files, browser/web, shell, session, memory, gateway, or media.
+2. Use the matching tool once with narrow input.
+3. Summarize exactly what happened.
+4. If a tool is not configured, say which provider/plugin is missing and what next upgrade enables it.
+
+OpenClaw-compatible tool families now visible in OmniClaw include exec/process, browser, web_search/web_fetch, read/write/edit/apply_patch, message, nodes, cron/gateway, sessions_*, subagents, memory_*, and media compatibility tools.

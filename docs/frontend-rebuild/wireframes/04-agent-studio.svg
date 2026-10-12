@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900" role="img" aria-label="OmniClaw V2 agent studio wireframe">
+  <rect width="1440" height="900" fill="#f4f1eb"/>
+  <rect x="42" y="42" width="292" height="816" rx="28" fill="#18191a"/>
+  <text x="82" y="94" fill="#f4f0e9" font-family="Inter" font-size="26" font-weight="760">Agents</text>
+  <text x="82" y="130" fill="#9f978e" font-family="Inter" font-size="13">Birth, identity, skills, permissions</text>
+  <rect x="82" y="176" width="212" height="68" rx="18" fill="#303133"/>
+  <text x="108" y="207" fill="#f4f0e9" font-family="Inter" font-size="16" font-weight="700">Billu Baba</text>
+  <text x="108" y="228" fill="#aaa29a" font-family="Inter" font-size="12">main assistant</text>
+  <rect x="82" y="260" width="212" height="58" rx="18" fill="#252628"/>
+  <text x="108" y="294" fill="#d8d1c7" font-family="Inter" font-size="15">Research agent</text>
+  <rect x="82" y="334" width="212" height="58" rx="18" fill="#252628"/>
+  <text x="108" y="368" fill="#d8d1c7" font-family="Inter" font-size="15">Builder agent</text>
+  <rect x="82" y="744" width="212" height="48" rx="16" fill="#f4f0e9"/>
+  <text x="130" y="775" fill="#111112" font-family="Inter" font-size="15" font-weight="700">Create agent</text>
+
+  <text x="386" y="94" fill="#1d1b18" font-family="Inter" font-size="32" font-weight="780">Agent studio</text>
+  <text x="386" y="130" fill="#716a61" font-family="Inter" font-size="15">Design what the agent is, what it can use, and what it remembers.</text>
+
+  <rect x="386" y="176" width="496" height="248" rx="26" fill="#ffffff" stroke="#ded6cb"/>
+  <text x="422" y="218" fill="#1d1b18" font-family="Inter" font-size="20" font-weight="760">Identity</text>
+  <text x="422" y="256" fill="#716a61" font-family="Inter" font-size="13">Agent name</text>
+  <rect x="422" y="270" width="386" height="42" rx="12" fill="#f8f6f1" stroke="#ded6cb"/>
+  <text x="444" y="297" fill="#2a2622" font-family="Inter" font-size="14">Billu Baba</text>
+  <text x="422" y="344" fill="#716a61" font-family="Inter" font-size="13">Personality and purpose</text>
+  <rect x="422" y="358" width="386" height="42" rx="12" fill="#f8f6f1" stroke="#ded6cb"/>
+  <text x="444" y="385" fill="#2a2622" font-family="Inter" font-size="14">Hinglish, direct, build-first coding partner</text>
+
+  <rect x="914" y="176" width="400" height="248" rx="26" fill="#ffffff" stroke="#ded6cb"/>
+  <text x="950" y="218" fill="#1d1b18" font-family="Inter" font-size="20" font-weight="760">Tool access</text>
+  <rect x="950" y="252" width="126" height="34" rx="17" fill="#111"/>
+  <text x="982" y="274" fill="#fff" font-family="Inter" font-size="13">Browser</text>
+  <rect x="1090" y="252" width="126" height="34" rx="17" fill="#111"/>
+  <text x="1120" y="274" fill="#fff" font-family="Inter" font-size="13">Terminal</text>
+  <rect x="950" y="300" width="126" height="34" rx="17" fill="#111"/>
+  <text x="985" y="322" fill="#fff" font-family="Inter" font-size="13">Files</text>
+  <rect x="1090" y="300" width="126" height="34" rx="17" fill="#e8e0d5"/>
+  <text x="1124" y="322" fill="#413a33" font-family="Inter" font-size="13">MCP</text>
+  <rect x="950" y="348" width="126" height="34" rx="17" fill="#e8e0d5"/>
+  <text x="984" y="370" fill="#413a33" font-family="Inter" font-size="13">Voice</text>
+  <rect x="1090" y="348" width="126" height="34" rx="17" fill="#e8e0d5"/>
+  <text x="1124" y="370" fill="#413a33" font-family="Inter" font-size="13">Cron</text>
+
+  <rect x="386" y="462" width="928" height="168" rx="26" fill="#ffffff" stroke="#ded6cb"/>
+  <text x="422" y="504" fill="#1d1b18" font-family="Inter" font-size="20" font-weight="760">Skills and memory</text>
+  <rect x="422" y="532" width="180" height="54" rx="16" fill="#f8f6f1" stroke="#ded6cb"/>
+  <text x="446" y="556" fill="#1d1b18" font-family="Inter" font-size="14" font-weight="700">browser-research</text>
+  <text x="446" y="574" fill="#777069" font-family="Inter" font-size="12">enabled</text>
+  <rect x="624" y="532" width="180" height="54" rx="16" fill="#f8f6f1" stroke="#ded6cb"/>
+  <text x="648" y="556" fill="#1d1b18" font-family="Inter" font-size="14" font-weight="700">frontend-builder</text>
+  <text x="648" y="574" fill="#777069" font-family="Inter" font-size="12">recommended</text>
+  <rect x="826" y="532" width="180" height="54" rx="16" fill="#f8f6f1" stroke="#ded6cb"/>
+  <text x="850" y="556" fill="#1d1b18" font-family="Inter" font-size="14" font-weight="700">memory-recall</text>
+  <text x="850" y="574" fill="#777069" font-family="Inter" font-size="12">always on</text>
+  <rect x="1028" y="532" width="210" height="54" rx="16" fill="#111"/>
+  <text x="1074" y="566" fill="#fff" font-family="Inter" font-size="14" font-weight="700">Create from this run</text>
+
+  <rect x="386" y="668" width="928" height="134" rx="26" fill="#1d1d1e"/>
+  <text x="422" y="710" fill="#f4f0e9" font-family="Inter" font-size="20" font-weight="760">Test lane</text>
+  <text x="422" y="744" fill="#aca49a" font-family="Inter" font-size="14">Run a prompt with this agent and see provider, tools, permissions, memory, and result before using it live.</text>
+  <rect x="1002" y="714" width="212" height="46" rx="23" fill="#f4f0e9"/>
+  <text x="1066" y="743" fill="#111112" font-family="Inter" font-size="14" font-weight="750">Test agent</text>
+</svg>
