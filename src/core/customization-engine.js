@@ -169,6 +169,7 @@ export class CustomizationEngine {
     const reasoning = input.reasoning !== undefined ? input.reasoning : p.reasoning;
     if (reasoning !== undefined) {
       if (reasoning === null || reasoning === false) {
+        // null = "no preference" -> the shipped default applies.
         patch.provider = { ...(patch.provider || {}), reasoning: null };
       } else {
         const effort = typeof reasoning === "object" && reasoning !== null
@@ -177,7 +178,7 @@ export class CustomizationEngine {
         const level = String(effort || "").trim().toLowerCase();
         if (!REASONING_EFFORTS.includes(level)) {
           throw new Error(
-            `provider.reasoning must be one of: ${REASONING_EFFORTS.join(", ")} (or null to turn it off).`,
+            `provider.reasoning must be one of: ${REASONING_EFFORTS.join(", ")} (or null to fall back to the default).`,
           );
         }
         patch.provider = { ...(patch.provider || {}), reasoning: level };

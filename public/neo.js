@@ -2374,10 +2374,10 @@ async function renderSettings(box) {
       <p>Model ko jawab dene se pehle kitna sochna hai. Jitna zyada, utna accurate aur utna slow. Ye har chat par lagta hai. Default: High.</p>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px">
         <select id="set-reasoning" class="agent-select" style="width:220px">
-          ${["off:Off", "low:Low", "medium:Medium", "high:High", "xhigh:Extra high", "max:Max"].map((o) => {
+          ${["default:Default", "off:Off", "low:Low", "medium:Medium", "high:High", "xhigh:Xhigh", "max:Max"].map((o) => {
             const [v, label] = o.split(":");
             const cur = config.config?.provider?.reasoning;
-            const curLevel = cur === null || cur === undefined || cur === false ? "off" : String((typeof cur === "object" ? cur.effort : cur) || "high");
+            const curLevel = cur === null || cur === undefined || cur === false ? "default" : String((typeof cur === "object" ? cur.effort : cur) || "default");
             return `<option value="${esc(v)}"${v === curLevel ? " selected" : ""}>${esc(label)}</option>`;
           }).join("")}
         </select>
@@ -2506,7 +2506,7 @@ async function renderSettings(box) {
     try {
       await api("/api/config", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ provider: { reasoning: value === "off" ? null : value } }),
+        body: JSON.stringify({ provider: { reasoning: value === "default" ? null : value } }),
       });
       reasoningStatus.textContent = "✓ Saved.";
     } catch (error) {

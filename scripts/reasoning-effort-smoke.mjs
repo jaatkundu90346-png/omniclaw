@@ -25,7 +25,9 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const {
   REASONING_EFFORTS,
+  REASONING_OFF,
   DEFAULT_REASONING_EFFORT,
+  resolveReasoningEffort,
   normalizeReasoningEffort,
   reasoningRequestFragment,
   isUnsupportedReasoningError,
@@ -46,6 +48,54 @@ try {
     "config/default.json still ships reasoning: null, so nobody gets a default");
   console.log("ok: config/default.json agrees with the code default");
 
+  step = "'Default' and 'Off' must never collapse into each other";
+  // These two look identical at the call site (both "don't send an effort") and
+  // mean OPPOSITE things to the user. Default = "I have no preference, use the
+  // shipped setting". Off = "actively do not ask the model to think". If one
+  // entry can express both, picking one silently performs the other.
+  assert.equal(resolveReasoningEffort(null), DEFAULT_REASONING_EFFORT,
+    "no preference must fall back to the shipped default, NOT to off");
+  assert.equal(resolveReasoningEffort(undefined), DEFAULT_REASONING_EFFORT,
+    "an absent key must fall back to the shipped default");
+  assert.equal(resolveReasoningEffort(REASONING_OFF), null,
+    "an explicit 'off' must send no reasoning param at all");
+  assert.equal(resolveReasoningEffort(false), null, "the false sentinel must mean off");
+  assert.equal(resolveReasoningEffort("low"), "low", "an explicit level must be honoured");
+  assert.equal(resolveReasoningEffort({ effort: "max" }), "max", "the object form must be honoured");
+  assert.equal(resolveReasoningEffort("banana"), DEFAULT_REASONING_EFFORT,
+    "garbage must degrade to the default, never to off and never outbound");
+  assert.ok(REASONING_EFFORTS.includes(REASONING_OFF),
+    "'off' must be a storable value, otherwise it cannot be told apart from unset");
+  console.log("ok: three states (unset / off / level) stay distinct");
+
+  step = "the composer pill writes each row to the right value";
+  const composer = fs.readFileSync(path.join(root, "web-next/js/ui/composer.js"), "utf8");
+  assert.match(composer, /class: "model-pill effort-pill"/,
+    "the composer has no reasoning effort pill next to the model pill");
+  assert.match(composer, /row\.append\([^)]*effortPill/,
+    "the effort pill is built but never mounted in the composer row");
+  assert.match(composer, /\["default", "Default"/,
+    "the pill must offer a Default row");
+  assert.match(composer, /id === "default" \? null : id/,
+    'Default must clear the preference (null), not write "off" — writing off would silently downgrade the user');
+  assert.match(composer, /\["off", "Off"/,
+    "the pill must offer an explicit Off row");
+  assert.match(composer, /paintEffort\(\);\s*\n\s*loadDraft\(\)/,
+    "the pill must be painted on first render, not only after a config change");
+  console.log("ok: composer pill wired, Default and Off map to different values");
+
+  step = "the effort row is visible without scrolling in Settings";
+  const settings = fs.readFileSync(path.join(root, "web-next/js/ui/settings.js"), "utf8");
+  // The invariant that matters is "before the provider list is painted", not
+  // "before the loading spinner" (the spinner is created before the fetch, so
+  // anchoring there would pass even with the row at the bottom again).
+  const listAt = settings.indexOf("\n  paintList();");
+  const effortCallAt = settings.indexOf("paintReasoning(page,");
+  assert.ok(effortCallAt > -1, "paintReasoning is never called");
+  assert.ok(listAt > -1 && effortCallAt > -1 && effortCallAt < listAt,
+    "the reasoning row must render ABOVE the provider list, not after it — appended last it sat below several screens of scroll and nobody found it");
+  console.log("ok: reasoning row renders at the top of the providers page");
+
   step = "wire shape follows the provider dialect";
   assert.deepEqual(reasoningRequestFragment({ effort: "high", baseUrl: "https://openrouter.ai/api/v1" }),
     { reasoning: { effort: "high" } }, "OpenRouter takes the nested reasoning object");
@@ -57,6 +107,20 @@ try {
   assert.deepEqual(reasoningRequestFragment({ effort: { effort: "max" }, baseUrl: "https://openrouter.ai/api/v1" }),
     { reasoning: { effort: "max" } }, "object form on OpenRouter stays the nested shape");
   console.log("ok: OpenRouter vs OpenAI wire shapes, and explicit object shapes");
+
+  step = "'off' is storable but never sendable";
+  // A provider that receives reasoning_effort:"off" has been handed a level that
+  // does not exist. This is the exact 400 the strip-and-remember fallback exists
+  // to absorb, and it would cost a failed round on every single message.
+  assert.equal(reasoningRequestFragment({ effort: REASONING_OFF, baseUrl: "https://api.openai.com/v1" }), null,
+    '"off" must produce NO reasoning param, not reasoning_effort:"off"');
+  assert.equal(reasoningRequestFragment({ effort: REASONING_OFF, baseUrl: "https://openrouter.ai/api/v1" }), null,
+    '"off" must produce no param on OpenRouter either');
+  assert.equal(normalizeReasoningEffort(REASONING_OFF), null,
+    'normalizeReasoningEffort must collapse "off" to null');
+  assert.equal(normalizeReasoningEffort("high"), "high", "a real level must survive normalization");
+  assert.equal(normalizeReasoningEffort({ effort: "low" }), "low", "the object form must normalize to its level");
+  console.log("ok: off is storable but never goes on the wire");
 
   step = "off / bogus values send no param rather than garbage";
   for (const off of [null, false, undefined, "", "banana"]) {

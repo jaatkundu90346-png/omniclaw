@@ -178,6 +178,9 @@ async function renderProviders(page) {
     return;
   }
   loading.remove();
+  // Reasoning sits directly under the intro, above the provider list, so it is
+  // visible without scrolling past several screens of provider forms.
+  paintReasoning(page, (config && config.config && config.config.provider) || {});
   const provider = (health && health.provider) || {};
   const profiles = (config && config.providerProfiles) || {};
   const secrets = (config && config.providerSecrets) || [];
@@ -559,7 +562,6 @@ async function renderProviders(page) {
 
   paintList();
   paintForm();
-  paintReasoning(page, provider);
 }
 
 // Reasoning effort — how hard the model should think on every reply.
@@ -571,7 +573,13 @@ async function renderProviders(page) {
 // can drop it, and providers that reject the parameter are handled in the
 // provider layer (one stripped retry, remembered), so this can never wedge a
 // non-reasoning provider.
+//
+// WHY IT SITS AT THE TOP: it was originally appended after the provider list and
+// the connection form, which put it below several screens of scroll. It was
+// there and nobody found it. A control nobody can find is the same as a control
+// that does not exist, so it now renders directly under the page intro.
 const REASONING_LEVELS = [
+  ["default", "Default"],
   ["off", "Off"],
   ["low", "Low"],
   ["medium", "Medium"],
@@ -580,14 +588,18 @@ const REASONING_LEVELS = [
   ["max", "Max"],
 ];
 
-function currentReasoningLevel(provider) {
-  const raw = provider?.reasoning;
-  if (raw === false || raw === null || raw === undefined) return "high";
+// Read the SAVED value from the config, not from the health payload.
+// /api/health's `provider` block only carries {id, ready, source} — it has no
+// `reasoning` field at all, so reading it there meant this row ALWAYS showed
+// the shipped default and silently ignored whatever the user had picked.
+function currentReasoningLevel(configProvider) {
+  const raw = configProvider?.reasoning;
+  if (raw === false || raw === null || raw === undefined) return "default";
   const value = typeof raw === "object" ? raw.effort : raw;
-  return String(value || "high").toLowerCase();
+  return String(value || "default").toLowerCase();
 }
 
-async function paintReasoning(page, provider) {
+async function paintReasoning(page, configProvider) {
   const group = h("div", { class: "set-group" },
     h("div", { class: "set-label", text: "Reasoning effort" }),
     h("p", {
@@ -610,7 +622,7 @@ async function paintReasoning(page, provider) {
       level = id;
       mark();
       try {
-        const cfg = await setConfig({ provider: { reasoning: id === "off" ? null : id } });
+        const cfg = await setConfig({ provider: { reasoning: id === "default" ? null : id } });
         store.set({ config: cfg || store.get().config || {} });
         toast(`Reasoning effort: ${label}`, "success");
       } catch (e) {

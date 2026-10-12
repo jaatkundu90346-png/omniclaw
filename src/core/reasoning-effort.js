@@ -19,29 +19,59 @@
 // fallback a non-reasoning endpoint would 400 on EVERY message — a far worse
 // failure than thinking less, which is why the default alone is not enough.
 
-// Ordered low -> high. "off" is not a level; it is the null/off state.
+// Ordered low -> high, plus the two non-level states.
 //
-// "minimal"/"none" are included even though the Settings UI does not offer
-// them: /fast emits "minimal" and some models accept only "minimal". Dropping
-// them here would silently turn Fast mode into "no reasoning param at all",
-// which is a different (and slower) request than the one the user asked for.
+// "off" IS a stored value, not the absence of one. That distinction is the whole
+// reason this function exists. There are THREE states a user can be in:
+//   unset / null -> "use whatever OmniClaw ships"  (the Default row in the UI)
+//   "off"        -> "actively do not ask the model to think"
+//   "low".."max" -> a specific effort
+// Collapsing "Default" and "Off" into one value means a user who picks Default
+// silently DOWNGRADES themselves, or a user who picks Off silently gets high
+// again. Both are worse than having one more enum member.
+//
+// "minimal"/"none" are included even though the UI does not offer them: /fast
+// emits "minimal" and some models accept only "minimal".
+export const REASONING_OFF = "off";
 export const REASONING_EFFORTS = Object.freeze([
-  "none", "minimal", "low", "medium", "high", "xhigh", "max",
+  REASONING_OFF, "none", "minimal", "low", "medium", "high", "xhigh", "max",
 ]);
 
-/** What OmniClaw ships with. Override per user from Settings > Providers. */
+/** What OmniClaw ships with. Used when the user has expressed no preference. */
 export const DEFAULT_REASONING_EFFORT = "high";
 
 /**
- * Normalize any stored/incoming value to a valid level string.
- * Returns null for "off" (absent, false, null, or an unrecognised value) so a
- * typo in config degrades to "don't send a reasoning param" rather than
- * forwarding garbage into a request body.
+ * Resolve the effort to actually SEND for one request.
+ *
+ * Returns a level string, or null when no reasoning param should be sent.
+ * Keeping this in one place is what stops "off" and "default" from being
+ * confused at the call site — they look identical (`null`) and mean opposite
+ * things.
+ */
+export function resolveReasoningEffort(value) {
+  if (value === REASONING_OFF || value === false) return null;
+  // null / undefined / unrecognised = no expressed preference -> ship default.
+  const effort = typeof value === "object" && value !== null ? value.effort : value;
+  const level = String(effort ?? "").trim().toLowerCase();
+  if (!level) return DEFAULT_REASONING_EFFORT;
+  if (level === REASONING_OFF) return null;
+  return REASONING_EFFORTS.includes(level) ? level : DEFAULT_REASONING_EFFORT;
+}
+
+/**
+ * Normalize any stored/incoming value to a storable level string.
+ * Returns null for "off"/false, and the level itself otherwise. Used by the
+ * settings writer to validate before persisting.
  */
 export function normalizeReasoningEffort(value) {
   if (value === null || value === undefined || value === false) return null;
   const effort = typeof value === "object" ? value.effort : value;
   const level = String(effort || "").trim().toLowerCase();
+  // "off" is a STORED level but not a SENDABLE one. Returning it here would
+  // produce `reasoning_effort: "off"` on the wire — asking the provider for
+  // something that is not a level, which is exactly the 400 this whole module
+  // exists to avoid.
+  if (level === REASONING_OFF) return null;
   return REASONING_EFFORTS.includes(level) ? level : null;
 }
 

@@ -1,7 +1,7 @@
 // Full composer island (Phase 3):
 // Row 1: context strip (workspace · env · branch? · agent?) — real data only.
 // Row 2: attach tray + textarea (draft per session, Enter/Ctrl+Enter send).
-// Row 3: [+] · permission pill ··· model pill · stop · send.
+// Row 3: [+] · permission pill ··· model pill · effort pill · stop · send.
 // Enter ordering: registered enterHooks (slash/mention) run BEFORE send.
 
 import { h } from "../utils/dom.js";
@@ -109,6 +109,11 @@ export function mountComposer(container, opts = {}) {
     class: "model-pill", type: "button", title: "",
     "aria-haspopup": "menu", "aria-expanded": "false",
   });
+  const effortPill = h("button", {
+    class: "model-pill effort-pill", type: "button",
+    title: "Reasoning effort — how hard the model thinks before answering",
+    "aria-haspopup": "menu", "aria-expanded": "false",
+  });
   const stopBtn = h("button", {
     class: "send-btn stop", type: "button", title: "Stop (Esc)", "aria-label": "Stop",
     html: '<svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><rect x="3" y="3" width="8" height="8" rx="1.5"/></svg>',
@@ -117,7 +122,7 @@ export function mountComposer(container, opts = {}) {
   const sendBtn = h("button", {
     class: "send-btn", type: "button", title: "Send (Enter)", "aria-label": "Send", html: SEND_SVG,
   });
-  row.append(plusBtn, modePill, spacer, modelPill, stopBtn, sendBtn);
+  row.append(plusBtn, modePill, spacer, modelPill, effortPill, stopBtn, sendBtn);
   island.append(strip, tray, input, row);
   box.append(island);
   container.append(box);
@@ -342,6 +347,88 @@ export function mountComposer(container, opts = {}) {
     e.stopPropagation();
     openModelMenu(modelPill, (busy) => modelPill.classList.toggle("busy", !!busy), { running });
   });
+
+  // ── Reasoning effort pill ──
+  // Sits right next to the model pill on purpose: "which model" and "how hard
+  // should it think" are one decision, and burying effort in Settings meant it
+  // was set once and then never touched again.
+  //
+  // "Default" is NOT "Off", and the two must never collapse into one value.
+  // Default means "whatever OmniClaw ships" (high); Off means "actively do not
+  // ask the model to think". Mapping Default to "off" would silently DOWNGRADE
+  // anyone who picked it, and mapping Off to the default would silently hand
+  // back the thinking they just turned off. So Default writes null and Off
+  // writes the literal string "off".
+  const EFFORT_LEVELS = [
+    ["default", "Default", "Use OmniClaw's setting (High)"],
+    ["off", "Off", "Never ask the model to think"],
+    ["low", "Low", "Quick and cheap"],
+    ["medium", "Medium", "Balanced"],
+    ["high", "High", "Thorough"],
+    ["xhigh", "Xhigh", "Very thorough, slow"],
+    ["max", "Max", "Slowest, most careful"],
+  ];
+  const EFFORT_LABEL = new Map(EFFORT_LEVELS.map(([id, label]) => [id, label]));
+  const EFFORT_WIRE = new Map(EFFORT_LEVELS.map(([id]) => [id, id === "default" ? null : id]));
+
+  function currentEffort() {
+    const raw = store.get().config?.provider?.reasoning;
+    const level = typeof raw === "object" && raw !== null ? raw.effort : raw;
+    const v = String(level ?? "").trim().toLowerCase();
+    return EFFORT_LABEL.has(v) ? v : "default";
+  }
+
+  function paintEffort() {
+    const cur = currentEffort();
+    effortPill.innerHTML = "";
+    effortPill.append(
+      h("span", { class: "truncate", text: EFFORT_LABEL.get(cur) }),
+      h("span", { html: icons.chevronDown }),
+    );
+    const def = EFFORT_LEVELS.find(([id]) => id === cur);
+    effortPill.title = `Reasoning effort: ${def?.[1] || cur}${def?.[2] ? ` — ${def[2]}` : ""}`;
+  }
+
+  function openEffortMenu() {
+    const cur = currentEffort();
+    const body = h("div", null, h("div", { class: "pop-label", text: "Reasoning effort" }));
+    for (const [id, label, desc] of EFFORT_LEVELS) {
+      const b = h("button", {
+        class: "pop-item effort-row", role: "menuitemradio", "aria-checked": String(cur === id),
+      }, h("span", { class: "effort-text" }, h("strong", { text: label }), h("small", { text: desc })));
+      if (cur === id) b.append(h("span", { class: "check", html: icons.check }));
+      b.addEventListener("click", () => applyEffort(id));
+      body.append(b);
+    }
+    body.append(h("div", { class: "pop-sep" }));
+    body.append(h("div", { class: "pop-label", text: "Applies to all chats" }));
+    openPopover(effortPill, body);
+  }
+
+  async function applyEffort(id) {
+    if (id === currentEffort()) { closePopover(); return; }
+    const wire = EFFORT_WIRE.get(id);
+    // Optimistic paint, like the permission pill: the menu closes and the label
+    // moves immediately. Waiting for the round trip reads as "the click did
+    // nothing". If the write fails the value is re-read rather than guessed.
+    store.set({ config: { ...(store.get().config || {}), provider: { ...(store.get().config?.provider || {}), reasoning: wire } } });
+    paintEffort();
+    closePopover();
+    try {
+      const cfg = await setConfig({ provider: { reasoning: wire } });
+      store.set({ config: cfg || store.get().config || {} });
+      paintEffort();
+    } catch (e) {
+      toast(`Effort change failed: ${e.message}`, "error");
+      try {
+        const cfg = await getConfig();
+        store.set({ config: cfg || store.get().config || {} });
+      } catch { /* keep the optimistic value; the next poll will correct it */ }
+      paintEffort();
+    }
+  }
+
+  effortPill.addEventListener("click", (e) => { e.stopPropagation(); openEffortMenu(); });
 
   // ── Sub-agent model ──
   // REMOVED. This pill let you point sub-agents at a different model/provider
@@ -618,6 +705,7 @@ export function mountComposer(container, opts = {}) {
     }
     paintStrip();
     paintModel();
+    paintEffort();
     const wsPath = store.get().workspace.activePath || "";
     if (wsPath !== branchFor) {
       branchFor = wsPath;
@@ -652,6 +740,7 @@ export function mountComposer(container, opts = {}) {
   paintStrip();
   paintPill();
   paintModel();
+  paintEffort();
   loadDraft();
   refreshBranch();
 

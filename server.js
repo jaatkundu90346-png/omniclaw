@@ -3233,9 +3233,30 @@ if (req.method === "GET" && pathname === "/api/workspace") {
   }
 
   if (req.method === "POST" && pathname === "/api/config") {
+    // This IS the operator surface. update_runtime_settings is an OPERATOR tool —
+    // it is defined to be reachable from the UI/API and refused to the MODEL
+    // (EOPERATOR). Without `{operator:true}` the gate fired here too and every
+    // Settings write came back 200 {blocked:true, code:"EOPERATOR"}: theme,
+    // panel width, provider label, reasoning effort — all silently discarded
+    // while the UI reported success. ws-gateway.js:741 already passes it.
+    //
+    // Loopback is re-checked here rather than relying on the bind address: this
+    // route predates the R12 per-route gate, and a config write is the most
+    // consequential thing a caller can ask for.
+    if (!isLoopback(req)) { sendErr(res, 403, "EPERM", "Local only."); return; }
     try {
       const body = await parseBody(req);
-      const result = await agent.tools.run("update_runtime_settings", body);
+      const result = await agent.tools.run("update_runtime_settings", body, { operator: true });
+      // A refused tool is a FAILED request, not a 200 with a body explaining it
+      // was refused. Forwarding it verbatim is what let a blocked write look
+      // like a successful one to the browser.
+      if (result && result.blocked) {
+        sendJson(res, 400, {
+          error: result.reason || "The configuration change was refused.",
+          code: result.code || "EBLOCKED",
+        });
+        return;
+      }
       sendJson(res, 200, result);
     } catch (error) {
       sendJson(res, 400, { error: error.message });

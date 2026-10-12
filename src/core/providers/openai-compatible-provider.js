@@ -530,18 +530,21 @@ export class OpenAICompatibleProvider {
     // the process and stop sending the param, so the user pays one failed
     // request once rather than forever. (Reasoning CAPTURE below works
     // regardless — thinking models stream reasoning without any request flag.)
-    // `??` CANNOT be used to fall back to the default here. `null` is the
-    // meaningful "off" value, and `x ?? y` treats null as absent — so an
-    // explicit "turn reasoning off" would silently resolve to the shipped high
-    // default, and the Settings row would appear to save while doing nothing.
-    // Presence of the KEY is the only thing that distinguishes "not configured"
-    // from "configured to off".
-    const configuredReasoning = providerConfig.provider.reasoning;
+    // `resolveReasoningEffort` owns the three-state logic (unset -> default,
+    // "off" -> nothing, level -> level). It is deliberately NOT `??`-chained
+    // here: `x ?? y` treats null as absent, and null means "no preference",
+    // which must resolve to the shipped default rather than to "off".
+    const configured = input.reasoning !== undefined ? input.reasoning : providerConfig.provider.reasoning;
+    // Only the "did the user express a preference?" decision is resolved here.
+    // An OBJECT value is deliberately passed through UNRESOLVED: the object form
+    // is how a config states its own wire shape (`reasoning:{effort}`), and
+    // flattening it to a bare string first would silently rewrite that config
+    // into the OpenAI dialect and 400 on a gateway that only accepts the nested
+    // shape. normalizeReasoningEffort does that flattening, so it belongs
+    // INSIDE reasoningRequestFragment — not on the way to it.
     const reasoningOption = input.reasoning === false
       ? null
-      : (input.reasoning !== undefined
-        ? input.reasoning
-        : (configuredReasoning === undefined ? DEFAULT_REASONING_EFFORT : configuredReasoning));
+      : (configured === undefined || configured === null ? DEFAULT_REASONING_EFFORT : configured);
     const reasoningFragment = this.reasoningUnsupported
       ? null
       : reasoningRequestFragment({ effort: reasoningOption, baseUrl: providerConfig.provider.baseUrl });

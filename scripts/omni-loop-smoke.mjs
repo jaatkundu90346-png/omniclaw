@@ -441,20 +441,28 @@ const baseTools = [
   await providerStr.completeWithTools([{ role: "user", content: "hi" }], { tools: toolSchema, stream: false });
   assert(captured && captured.reasoning_effort === "high", "scenario6: string reasoning -> reasoning_effort");
 
-  const providerNone = new OpenAICompatibleProvider(makeConfigStore({ reasoning: null }), secretStore);
+  // Three states, not two. "off" is now an EXPLICIT stored value; null means
+  // "no preference" and resolves to the shipped default. Collapsing them is what
+  // made "turn reasoning off" silently turn itself back on.
+  const providerNone = new OpenAICompatibleProvider(makeConfigStore({ reasoning: "off" }), secretStore);
   await providerNone.completeWithTools([{ role: "user", content: "hi" }], { tools: toolSchema, stream: false });
-  assert(captured && !("reasoning" in captured) && !("reasoning_effort" in captured), "scenario6: no reasoning fields when explicitly off");
+  assert(captured && !("reasoning" in captured) && !("reasoning_effort" in captured), "scenario6: explicit off sends no reasoning field");
 
-  // With NOTHING configured the shipped default must still ask for effort —
-  // that is the whole point of the default. This case used to assert "no
-  // reasoning fields"; it is the behaviour that was silently costing quality.
-  const providerDefault = new OpenAICompatibleProvider(makeConfigStore(), secretStore);
+  // null = "no preference" -> the shipped default applies.
+  const providerDefault = new OpenAICompatibleProvider(makeConfigStore({ reasoning: null }), secretStore);
   await providerDefault.completeWithTools([{ role: "user", content: "hi" }], { tools: toolSchema, stream: false });
+  assert(captured && captured.reasoning_effort === "high",
+    `scenario6: null means 'no preference' -> high, not off (got ${JSON.stringify(captured?.reasoning_effort)})`);
+
+  // And with NOTHING configured at all, the default must still ask for effort —
+  // that is the whole point of shipping a default.
+  const providerUnset = new OpenAICompatibleProvider(makeConfigStore(), secretStore);
+  await providerUnset.completeWithTools([{ role: "user", content: "hi" }], { tools: toolSchema, stream: false });
   assert(captured && captured.reasoning_effort === "high",
     `scenario6: unconfigured provider still asks for high effort (got ${JSON.stringify(captured?.reasoning_effort)})`);
 
   // The "/no-think" sentinel must beat the shipped default.
-  await providerDefault.completeWithTools([{ role: "user", content: "hi" }], { tools: toolSchema, stream: false, reasoning: false });
+  await providerUnset.completeWithTools([{ role: "user", content: "hi" }], { tools: toolSchema, stream: false, reasoning: false });
   assert(captured && !("reasoning_effort" in captured) && !("reasoning" in captured),
     "scenario6: input.reasoning=false beats the shipped default");
 

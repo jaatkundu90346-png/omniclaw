@@ -29,6 +29,7 @@
     "test:shortcut": "node scripts/windows-shortcut-smoke.mjs",
     "test:image-vision": "node scripts/image-attachment-vision-smoke.mjs",
     "test:reasoning": "node scripts/reasoning-effort-smoke.mjs",
+    "test:config-gate": "node scripts/config-operator-gate-smoke.mjs",
     "test:subagent-inherit": "node scripts/subagent-inherit-model-smoke.mjs",
     "shots:readme": "node scripts/capture-readme-shots.mjs",
     "test:omni-loop": "node scripts/omni-loop-smoke.mjs",
