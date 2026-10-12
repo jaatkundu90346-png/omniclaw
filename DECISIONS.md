@@ -1,5 +1,17 @@
 # DECISIONS — Why-we-did-it log
 
+## 2026-10-12 — Fresh history instead of cleaning the old one; binaries only in Releases
+- **Decision A:** republish on a fresh single-commit history (555 files / 11.3 MB) instead of untracking the junk in place.
+  - **Reason:** the old repo was 2.5 GB of `.git` with ~80 committed copies of a 62 MB binary and a full Python `.venv`. Untracking them stops the bleeding but leaves the history — every future clone still pays for it, and a public repo that takes 2.5 GB to clone reads as abandoned before anyone sees the code. Preserved on the local `archive-before-cleanup` branch so it stays recoverable. Deliberately **not** pushed: pushing the archive would re-inflate the remote to the very size this change exists to remove.
+- **Decision B:** EXEs never go into git, only into Releases.
+  - **Reason:** they are build output that changes every build; committing them is what produced the 2.5 GB. `.gitignore` now excludes `*.exe`, and `npm run portable:build` is the single reproducible source of the binary.
+- **Decision C:** the desktop shortcut is written synchronously and the launcher exits non-zero when it fails.
+  - **Reason:** the original `spawn().unref()` + `process.exit()` race killed PowerShell before `.Save()` ran, while the launcher still printed success. For an installer, "exited 0" must mean the shortcut really exists — otherwise every silent failure is someone else's bug report.
+- **Decision D:** verify the release by doing the user's journey, not just by building it.
+  - **Reason:** a green build is not a working app. The ZIP was extracted to `C:\Apps\OmniClaw` and the exe actually double-clicked, because that is the only way to catch "the build succeeds but the shortcut never appears" — which is precisely the bug this release had to fix.
+- **Decision E:** the other projects stay on disk.
+  - **Reason:** they are the user's other work. The task was to publish OmniClaw, not to delete unrelated code. Only their *git tracking* was removed.
+
 ## 2026-10-10 — Bots feature deleted, agent-to-agent delegation kept
 - **Decision A:** the Bots product is gone from UI and backend, but `delegation-bridge.js` + `delegate_task`'s agent-handoff mode stay.
   - **Reason:** a delegation record is created by `delegate_task` with a `targetAgentId`, which works for ANY agent. Deleting the bridge would have removed a coding-agent capability (hand a self-contained subtask to another agent) that has nothing to do with bots. Only the *vocabulary* said "bot"; it now says "agent". The bots-only entry points (`/api/bots/:id/tasks`, `/api/bots/:id/tasks/omniclaw`, the composer `@Bot ...` prefix and `ask_omniclaw`) are gone with the feature.
