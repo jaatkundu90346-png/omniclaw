@@ -322,6 +322,10 @@ export function mountSidebar(root) {
     { icon: "diff", label: "Changes", href: "#/changes" },
     { icon: "clock", label: "Scheduled", href: "#/scheduled" },
     { icon: "puzzle", label: "Plugins", href: "#/plugins" },
+    // Settings used to be reachable ONLY from the brand dropdown (and by typing
+    // #/settings). Nothing in the nav pointed at it, so a new user had no way to
+    // discover it — the single most-asked "where is settings?" path.
+    { icon: "settings", label: "Settings", href: "#/settings" },
   ];
   const navBtns = navDefs.map((d) => {
     const a = h("a", { class: "nav-row", href: d.href }, h("span", { html: icons[d.icon] }), h("span", { text: d.label }));
@@ -333,11 +337,19 @@ export function mountSidebar(root) {
   const projWrap = h("div", { class: "proj" });
   const projScroll = h("div", { class: "proj-scroll" }, projTitle, projWrap);
 
-  const foot = h("div", { class: "sb-foot" });
+  // The footer ("OC · Local · ●") is the app's own identity strip and it sits at
+  // the very bottom, next to the connection light. Making it open Settings puts
+  // the entry point exactly where people look for "local / app settings", and it
+  // is a real button (tab-focusable, Enter/Space activated) rather than a
+  // click handler on a div.
+  const foot = h("button", {
+    class: "sb-foot", type: "button", title: "Settings", "aria-label": "Open settings",
+  });
   const avatar = h("span", { class: "avatar", text: "OC" });
-  const local = h("span", { text: "Local" });
+  const local = h("span", { class: "sb-foot-label", text: "Local" });
   const dot = h("span", { class: "gw-dot down", title: "Connecting…" });
   foot.append(avatar, local, dot);
+  foot.addEventListener("click", () => { window.location.hash = "#/settings"; });
 
   root.append(top, searchWrap, nav, projScroll, foot);
   function paintNav(route) {

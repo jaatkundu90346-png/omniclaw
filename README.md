@@ -13,6 +13,8 @@ OmniClaw runs entirely on your own PC. It reads and writes your real project fil
 
 Sidebar with your projects and chats on the left, the conversation in the middle, and a work panel on the right (**Review · Files · Terminal · Browser · Walkthrough**) that opens with a keyboard shortcut. Press `Ctrl+T` and you are looking at the browser the agent is driving.
 
+**Settings** are in the sidebar (**Settings**, bottom of the list) or behind the **OC · Local** button in the very bottom-left corner.
+
 ---
 
 ## Download and run (Windows)
@@ -88,6 +90,8 @@ Talk to the same agent from the dashboard, from **Telegram**, or from a schedule
 ### Settings
 
 ![Settings](docs/images/settings.png)
+
+Open it from the **Settings** row at the bottom of the sidebar, or by clicking **OC · Local** in the bottom-left corner.
 
 Providers, appearance, permissions and runtime configuration — all local, all editable without touching a config file by hand.
 

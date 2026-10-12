@@ -188,6 +188,8 @@
 
 .show-more:hover { background: var(--bg-hover); color: var(--text); }
 
+/* The footer is a real <button> now (it opens Settings), so it needs the button
+   reset — otherwise the UA gives it a background, border and font. */
 .sb-foot {
   flex: 0 0 auto;
   display: flex;
@@ -197,7 +199,22 @@
   border-top: 1px solid var(--border-subtle);
   font-size: 12px;
   color: var(--muted);
+  background: none;
+  border-left: 0;
+  border-right: 0;
+  border-bottom: 0;
+  font-family: inherit;
+  text-align: left;
+  width: 100%;
+  cursor: pointer;
 }
+.sb-foot:hover { background: var(--bg-hover); color: var(--text); }
+.sb-foot:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+/* The label is the clickable affordance; the status dot stays at the end. */
+.sb-foot-label { flex: 1; text-align: left; }
 
 .avatar {
   width: 24px; height: 24px;
