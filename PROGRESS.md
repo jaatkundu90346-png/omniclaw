@@ -1,5 +1,12 @@
 # PROGRESS
 
+## 2026-11-10 — Release 1.1.0: the parity work shipped to GitHub + rebuilt Windows build
+- **Pushed to `origin/main`** (local branch `fresh-publish`, upstream set to `origin/main`): `cc82f97` (Claude Code / Codex parity: vision, effort picker, bootstrap language, browser live view), `a4b11f8` (Code workspace UI, Tauri desktop wrapper, landing page, release tooling), `9b34987` (version bump 1.0.0 → 1.1.0). Fast-forward, 0 divergence.
+- **Scratch deliberately NOT committed**: 30+ session audit/report/plan notes, `output/`, `reports/`, `screenshots/`, `test-output/`, one-off patch scripts. `.gitignore` gained ROOT-scoped rules for them; tracked `docs/*_PLAN.md` is untouched (the rules are anchored to the repo root).
+- **Gates before pushing:** `npm test` **87/87**; `test:packaged` **PASSED** (the shipped gateway bundle really carries `buildUserMessage` / `readableImageParts` / `DEFAULT_REASONING_EFFORT` / `REASONING_OFF` / `operator: true` / `checkpointProgress`); `test:browser-live-view` ALL PASSED; `test:vision-e2e` 17/17; `test:bootstrap-language` 29/29; `test:arch-scan` clean.
+- **Rebuilt Windows build**: `npm run portable:build` → fresh `OmniClaw.exe` + `omniclaw-gateway.exe` + release ZIP. Packaged behaviour is verified against the BUNDLE (`dist/sidecar`), never against the source tree, because a source-only test passes even when the exe is broken.
+- **Release publish**: `scripts/publish-release-v1.mjs` (create tag → create release → upload asset → verify the asset is actually downloadable → only then remove the old release). The token file it consumes is deleted by the script, so it was backed up first and restored afterwards.
+
 ## 2026-11-05 (4) — Fresh-install first message was PASTED, not written; English-first language
 - **Reported bug:** on a brand-new install the assistant's first message is pre-coded text ("hey i am just online", a name, etc.) — the AI agent writes no question of its own, and the model's real, thought-out question gets cut.
 - **Root causes (all confirmed at HEAD):**
