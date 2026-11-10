@@ -72,6 +72,15 @@ const SEND_SVG = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" st
 const STEER_SVG = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 8h10M8.5 4.5L12.5 8l-4 3.5"/></svg>';
 const DRAFT_KEY = "omniclaw.next.drafts.v1";
 const UPLOAD_EXTS = ["png", "jpg", "jpeg", "gif", "webp", "svg", "pdf", "txt", "md", "csv", "json", "log", "mp3", "wav", "m4a", "ogg", "webm"];
+// Product ceiling on attachments per message. Kept in ONE place and matched by
+// the server (server.js MAX_CHAT_ATTACHMENTS) and the loop
+// (omni-loop.js readableImageParts) so the UI can never promise a send the
+// backend then truncates.
+const MAX_ATTACHMENTS = 5;
+// Raster image types the model can be shown as real pixels. SVG is deliberately
+// excluded: it is markup, not a raster, so it rides as a normal file reference
+// (a vision part for it would be mislabelled, and the server agrees).
+const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "webp", "gif", "bmp", "avif"]);
 
 function readDrafts() {
   try { return JSON.parse(localStorage.getItem(DRAFT_KEY) || "{}"); } catch { return {}; }
@@ -359,17 +368,64 @@ export function mountComposer(container, opts = {}) {
   // anyone who picked it, and mapping Off to the default would silently hand
   // back the thinking they just turned off. So Default writes null and Off
   // writes the literal string "off".
-  const EFFORT_LEVELS = [
+  // The two non-level states, then the real effort levels a model MAY support.
+  // The menu shows only the levels the active model declares (see loadModelCaps),
+  // so a model that tops out at "high" never advertises "max".
+  const LEVEL_STATES = [
     ["default", "Default", "Use OmniClaw's setting (High)"],
     ["off", "Off", "Never ask the model to think"],
+  ];
+  const LEVEL_EFFORTS = [
+    ["minimal", "Minimal", "Fastest"],
     ["low", "Low", "Quick and cheap"],
     ["medium", "Medium", "Balanced"],
     ["high", "High", "Thorough"],
     ["xhigh", "Xhigh", "Very thorough, slow"],
     ["max", "Max", "Slowest, most careful"],
   ];
+  const EFFORT_LEVELS = [...LEVEL_STATES, ...LEVEL_EFFORTS];
   const EFFORT_LABEL = new Map(EFFORT_LEVELS.map(([id, label]) => [id, label]));
   const EFFORT_WIRE = new Map(EFFORT_LEVELS.map(([id]) => [id, id === "default" ? null : id]));
+
+  // The active model's OWN reasoning capability, read lazily from /api/models
+  // (the provider catalog parsed `supported_parameters`/`reasoning`). When it
+  // declares levels, the menu offers only those and "Default" says what the
+  // model's own default is; when unknown (offline / a text-only endpoint) the
+  // full list is shown, exactly as before. Never blocks: any failure → null.
+  let modelCaps = null;
+  let modelCapsFor = "";
+  let modelCapsAt = 0;
+  async function loadModelCaps() {
+    const model = String(store.get().config?.provider?.model || "");
+    if (!model) return null;
+    if (modelCapsFor === model && Date.now() - modelCapsAt < 300000) return modelCaps;
+    try {
+      const res = await fetch("/api/models").then((r) => r.json());
+      const entry = (Array.isArray(res?.models) ? res.models : [])
+        .find((m) => (typeof m === "string" ? m : m.id) === model);
+      const r = entry && typeof entry === "object" ? entry.reasoning : null;
+      const persisted = store.get().config?.provider || {};
+      modelCaps = r && typeof r === "object"
+        ? {
+            efforts: Array.isArray(r.efforts) ? r.efforts : [],
+            defaultEffort: r.defaultEffort || null,
+            maxEffort: r.maxEffort || null,
+            mandatory: r.mandatory === true,
+          }
+        : (Array.isArray(persisted.reasoningEfforts) && persisted.reasoningEfforts.length
+            // The catalog did not list this model, but its capabilities were
+            // persisted WITH it on selection — use those rather than the full list.
+            ? {
+                efforts: persisted.reasoningEfforts,
+                defaultEffort: persisted.reasoningDefault || null,
+                maxEffort: persisted.reasoningEfforts[persisted.reasoningEfforts.length - 1] || null,
+                mandatory: false,
+              }
+            : null);
+    } catch { modelCaps = null; }
+    modelCapsFor = model; modelCapsAt = Date.now();
+    return modelCaps;
+  }
 
   function currentEffort() {
     const raw = store.get().config?.provider?.reasoning;
@@ -389,10 +445,27 @@ export function mountComposer(container, opts = {}) {
     effortPill.title = `Reasoning effort: ${def?.[1] || cur}${def?.[2] ? ` — ${def[2]}` : ""}`;
   }
 
-  function openEffortMenu() {
+  async function openEffortMenu() {
     const cur = currentEffort();
-    const body = h("div", null, h("div", { class: "pop-label", text: "Reasoning effort" }));
-    for (const [id, label, desc] of EFFORT_LEVELS) {
+    const caps = await loadModelCaps();
+    const supported = caps && caps.efforts.length ? caps.efforts : LEVEL_EFFORTS.map(([id]) => id);
+    const maxEffort = caps?.maxEffort || supported[supported.length - 1] || "";
+    const body = h("div", null,
+      h("div", { class: "pop-label", text: "Reasoning effort" }),
+      h("div", { class: "pop-label", text: caps
+        ? `Model supports: ${supported.join(", ")}${maxEffort ? ` · max ${maxEffort}` : ""}`
+        : "Model levels unknown — showing all" }),
+    );
+    const states = LEVEL_STATES.map(([id, label, desc]) => [
+      id,
+      id === "default" && caps?.defaultEffort ? `Default (${caps.defaultEffort})` : label,
+      // When the model declares its own default, "Default" stores THAT level, so
+      // the old "Use OmniClaw's setting (High)" description would be a lie.
+      id === "default" && caps?.defaultEffort ? "The model's own default" : desc,
+    ]);
+    const levels = LEVEL_EFFORTS.filter(([id]) => supported.includes(id));
+    for (const [id, label, desc] of [...states, ...levels]) {
+      if (id === "off" && caps?.mandatory) continue; // model requires reasoning
       const b = h("button", {
         class: "pop-item effort-row", role: "menuitemradio", "aria-checked": String(cur === id),
       }, h("span", { class: "effort-text" }, h("strong", { text: label }), h("small", { text: desc })));
@@ -407,7 +480,14 @@ export function mountComposer(container, opts = {}) {
 
   async function applyEffort(id) {
     if (id === currentEffort()) { closePopover(); return; }
-    const wire = EFFORT_WIRE.get(id);
+    let wire = EFFORT_WIRE.get(id);
+    if (id === "default") {
+      // "Default" means the MODEL's own default when it declares one (so the
+      // menu label "(medium)" is truthful), and OmniClaw's shipped setting
+      // otherwise. Storing the level explicitly is what makes the label honest.
+      const caps = await loadModelCaps();
+      wire = caps?.defaultEffort || null;
+    }
     // Optimistic paint, like the permission pill: the menu closes and the label
     // moves immediately. Waiting for the round trip reads as "the click did
     // nothing". If the write fails the value is re-read rather than guessed.
@@ -415,8 +495,13 @@ export function mountComposer(container, opts = {}) {
     paintEffort();
     closePopover();
     try {
-      const cfg = await setConfig({ provider: { reasoning: wire } });
-      store.set({ config: cfg || store.get().config || {} });
+      await setConfig({ provider: { reasoning: wire } });
+      // Re-read through getConfig(), which UNWRAPS {config:...}. The POST response
+      // is the update_runtime_settings tool result, not a config object; trusting
+      // it left the pill showing a stale level even though the write succeeded —
+      // a label that lies right after a successful write.
+      const fresh = await getConfig();
+      store.set({ config: fresh || store.get().config || {} });
       paintEffort();
     } catch (e) {
       toast(`Effort change failed: ${e.message}`, "error");
@@ -577,6 +662,10 @@ export function mountComposer(container, opts = {}) {
 
   async function addFiles(files) {
     for (const file of files || []) {
+      if (attachments.length >= MAX_ATTACHMENTS) {
+        toast(`Max ${MAX_ATTACHMENTS} attachments per message`, "error");
+        break;
+      }
       const ext = (file.name.split(".").pop() || "").toLowerCase();
       if (!UPLOAD_EXTS.includes(ext)) {
         toast(`.${ext || "?"} not allowed — images, pdf, text, audio only`, "error");
@@ -595,7 +684,7 @@ export function mountComposer(container, opts = {}) {
         });
         // backend: server.js:2487 POST /api/uploads {name, dataBase64}
         const res = await uploadFile(file.name, dataBase64);
-        attachments.push({ relPath: res.relPath, name: file.name, isImage: res.isImage, bytes: res.bytes });
+        attachments.push({ relPath: res.relPath, name: file.name, isImage: IMAGE_EXTS.has(ext), bytes: res.bytes });
         paintTray();
       } catch (e) {
         toast(`Upload failed (${file.name}): ${e.message}`, "error");
@@ -755,6 +844,13 @@ export function mountComposer(container, opts = {}) {
     getMode: () => mode,
     refreshMode() { mode = detectMode(store.get().config); paintPill(); },
     openPlus,
-    drainAttachments() { return attachments.splice(0, attachments.length); },
+    drainAttachments() {
+      const taken = attachments.splice(0, attachments.length);
+      // Removing them from the model array is NOT enough: the tray is DOM that
+      // only paintTray() rebuilds, so without this the sent image sat in the
+      // composer forever (visible in the live UI).
+      paintTray();
+      return taken;
+    },
   };
 }

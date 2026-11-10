@@ -51,6 +51,18 @@ async function boot() {
   window.__ocNext.openPanel = (kind, arg) => {
     try { return panelCtl.open(kind, arg || {}); } catch { return null; }
   };
+  let panelWasOpenBeforeCode = false;
+  window.addEventListener("oc:code-mode-toggle", () => {
+    const entering = !store.get().codeMode;
+    if (entering) {
+      panelWasOpenBeforeCode = !!store.get().panel.open;
+      store.set({ codeMode: true });
+      panelCtl.open("files", {});
+    } else {
+      store.set({ codeMode: false });
+      if (!panelWasOpenBeforeCode) panelCtl.close();
+    }
+  });
 
   let thread = null;
   let threadSession = "";
@@ -266,11 +278,15 @@ function agentIdForSession(sessionId) {
     setTimeout(() => { if (thread && threadSession === sid && !thread.running) thread.send("continue"); }, 100);
   });
 
-  // Attachment note: EXACT neo format (public/neo.js:712-715). /api/chat/stream
-  // takes no attachments[] — uploads go via POST /api/uploads first.
+  // Attachment note. Images are attached NATIVELY (their pixels go to a vision
+  // model) or, for a blind model, handled by the harness — either way the user's
+  // chat should just show the image, not a "[Attached by user — … uploads/x.png]"
+  // line. So this note now carries ONLY non-image files (which cannot be sent as
+  // pixels and must be referenced by path).
   function attachNote(atts) {
-    if (!atts.length) return "";
-    return `\n\n[Attached by user — files saved in the project root:${atts.map((att) => `\n- ${att.relPath}${att.isImage ? " (image — analyze/view it)" : ""}`).join("")}]`;
+    const docs = (atts || []).filter((att) => att && !att.isImage);
+    if (!docs.length) return "";
+    return `\n\n[Attached file: ${docs.map((att) => att.relPath).join(", ")}]`;
   }
 
   // Slash ctx: backend routes + client actions (slash.js).

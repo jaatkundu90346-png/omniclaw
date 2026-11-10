@@ -20,6 +20,7 @@ import { APPROVAL_TTL_MS, APPROVAL_TOOL_TIMEOUT_MS } from "./src/core/gateway-st
 import { TOOLSETS, CORE_ORDER, ALIAS_OF, DROP_IDS } from "./src/core/tool-layers.js";
 import { loadModelRegistry } from "./src/core/model-registry.js";
 import { describeCacheSupport } from "./src/core/providers/openai-compatible-provider.js";
+import { resolveRuntimeDirs, migrateLegacyDataDir } from "./src/core/data-dir.js";
 
 // ─── CORS ──────────────────────────────────────────────────────────
 const CORS_HEADERS = {
@@ -112,16 +113,29 @@ process.on("exit", () => {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const sourceDir = __dirname;
-const runtimeDir = process.pkg
-  ? process.cwd()
-  : path.resolve(process.env.OMNICLAW_ROOT_DIR || sourceDir);
+// Assets AND state are pinned to the install folder (the dir holding the exe),
+// never to process.cwd(). A packaged build that keyed its state off the working
+// directory created a brand-new empty state folder every time the launch folder
+// changed — a desktop shortcut with a different "Start in" made every session,
+// memory entry and API key look deleted while the originals sat untouched in
+// the old folder. See src/core/data-dir.js for the full story.
+const { runtimeDir, appDir, dataDir, isolated, cwdDir } = resolveRuntimeDirs({
+  pkg: Boolean(process.pkg),
+  execPath: process.execPath,
+  cwd: process.cwd(),
+  sourceDir,
+});
 const publicDir = path.join(process.pkg ? runtimeDir : sourceDir, "public");
 const webNextDir = path.join(process.pkg ? runtimeDir : sourceDir, "web-next");
 
-// R11: isolated verification instances set OMNICLAW_DATA_DIR to a scratch dir
-// (e.g. ./.tmp-test-data) so tests never touch live config/sessions/secrets.
-// publicDir/webNextDir stay on the source tree; only agent state moves.
-const appDir = path.resolve(process.env.OMNICLAW_DATA_DIR || runtimeDir);
+// One-shot recovery of state written by an older build into the cwd-based
+// folder. Runs BEFORE the agent is constructed (the agent creates missing state
+// files on start, which would make the destination look non-seed and block the
+// copy). Never runs for an isolated instance (R11) and never overwrites a file
+// that holds real content.
+if (process.pkg && !isolated && cwdDir && path.resolve(cwdDir) !== path.resolve(appDir)) {
+  migrateLegacyDataDir({ dataDir, legacyDirs: [cwdDir], log: (msg) => console.log(msg) });
+}
 const agent = new OmniClawAgent({
   rootDir: appDir,
   sourceDir,
@@ -213,12 +227,15 @@ function isLoopback(req) {
  * dropped silently — the text note still names the file, so a blind model can
  * still call describe_image through the normal, permission-checked path.
  */
-const MAX_CHAT_ATTACHMENTS = 6;
+const MAX_CHAT_ATTACHMENTS = 5;
 const CHAT_ATTACHMENT_IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "webp", "gif", "bmp", "avif"]);
 
 function sanitizeAttachmentRefs(list) {
   if (!Array.isArray(list)) return [];
-  const root = path.resolve(runtimeDir);
+  // Root at appDir (not runtimeDir): uploads live under appDir and the loop
+  // resolves the same relPath against agent.rootDir === appDir. Using runtimeDir
+  // here let an isolated instance accept a path the loop could never read.
+  const root = path.resolve(appDir);
   const out = [];
   for (const item of list.slice(0, MAX_CHAT_ATTACHMENTS)) {
     const relPath = String(item?.relPath || "").trim();
@@ -3003,6 +3020,25 @@ if (req.method === "GET" && pathname === "/api/workspace") {
   if (req.method === "GET" && pathname === "/api/models") {
     try {
       const result = await agent.provider.listModels({});
+      // Self-heal the capability cache: persist the ACTIVE model's catalog facts
+      // (vision + reasoning levels). The run recreates the provider on every
+      // message (agent.js handleMessage), so an in-memory cache is wiped before
+      // the loop ever reads it — only persisted config survives.
+      try {
+        const activeModel = String(agent.config.getConfig()?.provider?.model || "");
+        const entry = (result.models || []).find((m) => (typeof m === "string" ? m : m.id) === activeModel);
+        if (entry && typeof entry === "object") {
+          const cur = agent.config.getConfig()?.provider || {};
+          const patch = {};
+          if (typeof entry.vision === "boolean" && entry.vision !== cur.vision) patch.vision = entry.vision;
+          const efforts = entry.reasoning && Array.isArray(entry.reasoning.efforts) ? entry.reasoning.efforts : [];
+          if (efforts.length && JSON.stringify(efforts) !== JSON.stringify(cur.reasoningEfforts)) {
+            patch.reasoningEfforts = efforts;
+            patch.reasoningDefault = entry.reasoning.defaultEffort || null;
+          }
+          if (Object.keys(patch).length) agent.config.updateUserConfig({ provider: patch });
+        }
+      } catch { /* capability self-heal is best-effort */ }
       sendJson(res, result.ok === false ? 400 : 200, {
         ok: result.ok !== false,
         models: result.models || [],
@@ -3564,14 +3600,21 @@ if (req.method === "GET" && pathname === "/api/workspace") {
           sendJson(res, 400, { error: "dataBase64 is required." });
           return;
         }
-        const dir = path.join(runtimeDir, "uploads");
+        // Uploads are APP state, so they belong under appDir — the same root the
+        // loop resolves attachment paths against (omni-loop.readableImageParts
+        // uses agent.rootDir === appDir). Writing them under runtimeDir instead
+        // meant an isolated instance dropped uploads into the source tree AND
+        // could never read them back (relPath resolved to a file that was not
+        // there). In a normal/packaged run appDir === runtimeDir, so this is a
+        // no-op there and a fix for every R11 isolated instance.
+        const dir = path.join(appDir, "uploads");
         fs.mkdirSync(dir, { recursive: true });
         const stamp = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14);
         const fileName = `${stamp}-${safeBase}`;
         fs.writeFileSync(path.join(dir, fileName), data);
         const relPath = `uploads/${fileName}`;
         agent.gateway.addEvent("upload.saved", { relPath, bytes: data.length });
-        sendJson(res, 200, { ok: true, relPath, bytes: data.length, isImage: ["png", "jpg", "jpeg", "gif", "webp", "svg"].includes(ext) });
+        sendJson(res, 200, { ok: true, relPath, bytes: data.length, isImage: CHAT_ATTACHMENT_IMAGE_EXTS.has(ext) });
       } catch (error) {
         sendJson(res, 400, { error: error.message });
       }
@@ -3695,6 +3738,33 @@ if (req.method === "GET" && pathname === "/api/workspace") {
           : {}),
       });
     }
+    return;
+  }
+
+  // Audit trail + per-session origin allowlist (Codex browser/sessions/*.toml).
+  if (req.method === "GET" && pathname === "/api/browser/audit") {
+    if (!isLoopback(req)) { sendErr(res, 403, "EPERM", "Local only."); return; }
+    try {
+      const browser = agent.tools?.requireBrowserPlaywright?.();
+      const trail = browser ? browser.getAuditTrail(url.searchParams.get("sessionId") || "", Number(url.searchParams.get("limit")) || 100) : { actions: [] };
+      sendJson(res, 200, trail);
+    } catch (error) { sendJson(res, 500, { error: error.message, code: "EINTERNAL" }); }
+    return;
+  }
+  if ((req.method === "GET" || req.method === "POST") && pathname === "/api/browser/origins") {
+    if (!isLoopback(req)) { sendErr(res, 403, "EPERM", "Local only."); return; }
+    try {
+      const { BrowserOrigins } = await import("./src/core/browser-origins.js");
+      const o = new BrowserOrigins(appDir);
+      if (req.method === "GET") {
+        const sid = url.searchParams.get("sessionId") || "default";
+        sendJson(res, 200, o.load(sid));
+      } else {
+        const body = await parseBody(req);
+        const r = o.add(body.sessionId || "default", body.origin);
+        sendJson(res, r.error ? 400 : 200, r);
+      }
+    } catch (error) { sendJson(res, 500, { error: error.message, code: "EINTERNAL" }); }
     return;
   }
 
@@ -4377,7 +4447,7 @@ if (req.method === "POST" && pathname === "/api/chat") {
       sendSSEHeaders(res);
       const startedMs = Date.now();
       streamSessionId = String(body.sessionId || "").trim();
-      const interesting = /^(agent|assistant|tool|toolset|model_tool_loop|auto_verification|provider|context|shell|terminal|approval|run|plan|subagent)\./;
+      const interesting = /^(agent|assistant|tool|toolset|model_tool_loop|auto_verification|provider|context|shell|terminal|approval|run|plan|subagent|vision)\./;
      writeSSE(res, {
        type: "start",
        timestamp: new Date(startedMs).toISOString(),
@@ -4526,8 +4596,13 @@ if (req.method === "POST" && pathname === "/api/chat") {
   // so the dashboard can open them in an iframe instead of the OS browser.
   if ((req.method === "GET" || req.method === "HEAD") && pathname.startsWith("/preview/")) {
     const relative = decodeURIComponent(pathname.slice("/preview/".length)).replace(/\\/g, "/").replace(/^\/+/, "");
-    const target = path.resolve(runtimeDir, relative);
-    const relFromRoot = path.relative(runtimeDir, target).replace(/\\/g, "/");
+    // Uploads are app state written under appDir; every other preview path is a
+    // project file under runtimeDir (the workspace). Resolving uploads against
+    // the data dir is what lets an isolated instance serve its own uploads
+    // instead of 404ing on them.
+    const previewRoot = /^uploads\//i.test(relative) ? appDir : runtimeDir;
+    const target = path.resolve(previewRoot, relative);
+    const relFromRoot = path.relative(previewRoot, target).replace(/\\/g, "/");
     // Local-first preview: serve any file UNDER the project root (the agent
     // builds sites both at the root, e.g. pillow-store/, AND under output/),
     // EXCEPT clearly sensitive locations (secrets, vcs, deps, internal state).

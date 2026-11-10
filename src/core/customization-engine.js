@@ -368,8 +368,20 @@ export class CustomizationEngine {
       }
       let committed;
       try {
+        // Persist the model's catalog capabilities WITH the model, exactly like
+        // contextTokens. `vision` is authoritative for "can this model see
+        // images?"; clearing it (null) when the catalog did not say prevents a
+        // stale `true` from the PREVIOUS model leaking onto a blind one.
+        const visionPatch = typeof input.vision === "boolean" ? { vision: input.vision } : { vision: null };
+        const efforts = Array.isArray(input.reasoningEfforts)
+          ? input.reasoningEfforts.map((e) => String(e || "").toLowerCase()).filter((e) => REASONING_EFFORTS.includes(e))
+          : [];
+        const defaultEffort = input.reasoningDefault ? String(input.reasoningDefault).toLowerCase() : "";
+        const capsPatch = efforts.length
+          ? { reasoningEfforts: efforts, reasoningDefault: efforts.includes(defaultEffort) ? defaultEffort : null }
+          : { reasoningEfforts: null, reasoningDefault: null };
         committed = this.configStore.updateUserConfig({
-          provider: { model, ...(contextTokens > 0 ? { contextTokens } : {}) },
+          provider: { model, ...(contextTokens > 0 ? { contextTokens } : {}), ...visionPatch, ...capsPatch },
         });
       } catch (err) {
         return fail("apply-model", err.message);

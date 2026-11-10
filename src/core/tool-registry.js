@@ -3108,6 +3108,9 @@ export class ToolRegistry {
             profileId: { type: "string", description: "Saved provider profile id to switch to first. Omit to keep the current connection." },
             model: { type: "string", description: "Exact model ID to use on that connection." },
             contextTokens: { type: "number", description: "Optional model context window (tokens) from the provider /models catalog. Persisted alongside the model so the context budget follows the real model size." },
+            vision: { type: "boolean", description: "Optional: does this model accept image input? The provider /models catalog's architecture.input_modalities fact. Persisted with the model so an image-capable model is not misread as blind by the id heuristic." },
+            reasoningEfforts: { type: "array", items: { type: "string" }, description: "Optional: the reasoning effort levels this model declares (from the catalog), so the UI offers only real levels." },
+            reasoningDefault: { type: "string", description: "Optional: the model's own default reasoning effort (from the catalog)." },
           },
         },
         run: async (input) => this.customizationEngine.selectProviderConnection(input),
@@ -3812,7 +3815,7 @@ export class ToolRegistry {
           this.runBrowserOperation("browser_console", () => this.requireBrowserPlaywright().console(input), context),
       },
       browser_cdp: {
-        description: "Hermes-compatible raw Chrome DevTools Protocol escape hatch for the active page.",
+        description: "Raw Chrome DevTools Protocol for the active page. Send a method, or use method='readEvents' with afterSequence to read buffered CDP events (cursor-based observe, Codex-style).",
         permission: "allowBrowserEvaluate",
         group: "hermes-browser",
         schema: {
@@ -3820,12 +3823,47 @@ export class ToolRegistry {
           required: ["method"],
           properties: {
             sessionId: { type: "string" },
-            method: { type: "string", description: "CDP method, e.g. Runtime.evaluate or Browser.getVersion." },
+            method: { type: "string", description: "CDP method, e.g. Runtime.evaluate, or 'readEvents' to read buffered events." },
             params: { type: "object", description: "CDP method parameters." },
+            afterSequence: { type: "number", description: "For readEvents: cursor from previous call." },
+            limit: { type: "number", description: "For readEvents: max events (1-1000)." },
           },
         },
         run: async (input = {}, context) =>
           this.runBrowserOperation("browser_cdp", () => this.requireBrowserPlaywright().cdp(input), context),
+      },
+      browser_allow_origin: {
+        description: "Add an origin (e.g. https://example.com) to this browser session's allowlist so browser_open can navigate there. First remote origin is auto-allowed; a second new origin needs this.",
+        permission: "allowBrowserControl",
+        group: "hermes-browser",
+        schema: {
+          type: "object",
+          required: ["origin"],
+          properties: {
+            sessionId: { type: "string" },
+            origin: { type: "string", description: "Origin to allow, e.g. https://example.com" },
+          },
+        },
+        run: async (input = {}) => {
+          const { BrowserOrigins } = await import("./browser-origins.js");
+          const o = new BrowserOrigins(this.rootDir || process.cwd());
+          const r = o.add(input.sessionId || "default", input.origin);
+          return { success: true, ...r };
+        },
+      },
+      browser_audit: {
+        description: "Audit trail: what the browser did, in order (Codex management.getAuditTrail equivalent). Use to verify or revert browser/computer-use actions.",
+        permission: "allowBrowserControl",
+        group: "hermes-browser",
+        schema: {
+          type: "object",
+          properties: {
+            sessionId: { type: "string" },
+            limit: { type: "number" },
+          },
+        },
+        run: async (input = {}) =>
+          this.runBrowserOperation("browser_audit", () => this.requireBrowserPlaywright().getAuditTrail(input.sessionId || "", input.limit || 100), {}),
       },
       browser_dialog: {
         description: "Hermes-compatible browser dialog control. Pre-arm accept/dismiss/type for the next alert/confirm/prompt or list handled dialogs.",

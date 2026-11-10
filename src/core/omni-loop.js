@@ -2235,9 +2235,12 @@ export class OmniLoop {
   // vision-capable, attach the screenshot as a real image part so the agent
   // inspects the actual rendering (layout, colors, missing assets).
   modelSupportsVision() {
+    const info = this.runtime.provider?.getInfo?.() || {};
     return resolveVisionSupport({
       configured: this.getSettings().vision,
-      modelId: this.runtime.provider?.getInfo?.()?.model || "",
+      modelId: info.model || "",
+      // The catalog is authoritative when it knows; the regex is the fallback.
+      catalogVision: typeof info.vision === "boolean" ? info.vision : null,
     });
   }
 
@@ -2341,10 +2344,12 @@ export class OmniLoop {
   readableImageParts(attachments = []) {
     const parts = [];
     // A flood of images is a context bomb, and the model can usually only act on
-    // the few that matter. Newest-first would drop what the user sent most
-    // recently, so keep the FIRST few in the order they were attached.
+    // the few that matter. 5 is the product ceiling (composer + server enforce
+    // the same number), and images are kept in the order attached so the user
+    // gets exactly what they chose.
+    const MAX_VISION_IMAGES = 5;
     for (const att of Array.isArray(attachments) ? attachments : []) {
-      if (parts.length >= 4) break;
+      if (parts.length >= MAX_VISION_IMAGES) break;
       const rel = String(att?.relPath || att?.path || "");
       if (!rel) continue;
       const ext = String(rel).split(".").pop().toLowerCase();
@@ -4938,6 +4943,19 @@ export class OmniLoop {
       allowedToolIds = new Set(schemas.map((schema) => schema.function.name));
       toolParamSchemas = new Map(schemas.map((schema) => [schema.function.name, schema.function.parameters || {}]));
     }
+    // A model that can SEE must never be handed `describe_image`: routing an
+    // image it can already see through a DIFFERENT vision model returns a lossy
+    // text description, and where no vision backend is configured the tool just
+    // fails. Live: the model received the pixels natively yet called
+    // describe_image four times and reported "vision tool fail" while holding
+    // the actual image. Drop it from the menu AND the admissible set so it
+    // cannot return through admitMenuMissTool.
+    if (visionOk && schemas.some((s) => s.function?.name === "describe_image")) {
+      schemas = schemas.filter((s) => s.function?.name !== "describe_image");
+      allowedToolIds.delete("describe_image");
+      toolParamSchemas?.delete?.("describe_image");
+      report.visionToolSuppressed = true;
+    }
     // The capped menu is a FOCUS aid, not a permission boundary. A model that
     // names a real, installed, model-callable tool the menu happened to omit
     // used to get a hard "Tool X is not available" — which is exactly how
@@ -4945,6 +4963,8 @@ export class OmniLoop {
     // and working. Keep the full surface so such a call can be admitted and
     // advertised from the next round on. See admitMenuMissTool below.
     const availableToolIds = new Set(tools.map((tool) => tool?.id).filter(Boolean));
+    // A seeing model must not be able to re-admit describe_image via a menu-miss.
+    if (visionOk) availableToolIds.delete("describe_image");
     const promptContextBundle = { ...contextBundle, tools };
     // Hybrid memory recall (keyword+semantic) runs async — race it against a
     // short budget so a slow embeddings provider can never delay run start.
@@ -4991,6 +5011,29 @@ export class OmniLoop {
       attachments,
       canSee: this.modelSupportsVision(),
     });
+    // Tell the UI what ACTUALLY happened to the user's images, so "did the agent
+    // see my picture?" has a truthful answer instead of a guess. `delivered` is
+    // the count of real image parts on the wire: >0 = the model is looking at
+    // pixels; 0 with images attached = the model is blind and the text note +
+    // describe_image path applies. Counts only — no pixels, no paths.
+    try {
+      const atts = Array.isArray(attachments) ? attachments : [];
+      const imageRefs = atts.filter((a) => {
+        const rel = String(a?.relPath || a?.path || "");
+        return rel && IMAGE_FILE_EXTS.has(rel.split(".").pop().toLowerCase());
+      });
+      if (imageRefs.length) {
+        const delivered = Array.isArray(userMessage?.content)
+          ? userMessage.content.filter((p) => p?.type === "image_url").length
+          : 0;
+        gateway?.emitTransient?.(delivered ? "vision.images_attached" : "vision.images_blind", {
+          runId: run.id, sessionId: session.id, agentId: agent.id,
+          count: imageRefs.length, delivered,
+          model: providerModel || provider?.getInfo?.().model || "",
+          mode: delivered ? "native" : "tool",
+        });
+      }
+    } catch { /* telemetry only — never fail the run over an event */ }
     const messages = [
       { role: "system", content: systemPrompt },
       ...this.loadHistoryMessages(session, settings.historyMessages),
@@ -5542,6 +5585,15 @@ export class OmniLoop {
       if (reasoningText) {
         report.reasoningRounds += 1;
         report.reasoningChars += reasoningText.length;
+        // Bounded digest of WHAT the model thought, kept on the report so a
+        // reload can replay it. The live `assistant.reasoning` event above is
+        // transient (gateway-store emits it to live listeners only) and the
+        // persisted `model_tool_loop.reasoning` event carries only a CHAR COUNT,
+        // so without this the user's insight into "why" vanishes the moment the
+        // tab reloads or reconnects. Tail-biased: the latest reasoning is the
+        // one still relevant to the current state of the work.
+        report.reasoningDigest = [report.reasoningDigest, reasoningText]
+          .filter(Boolean).join("\n\n").slice(-6000);
         if (!deltaEmitter && typeof gateway?.emitTransient === "function") {
           gateway.emitTransient("assistant.reasoning", {
             runId: run.id,
@@ -6414,6 +6466,42 @@ export class OmniLoop {
       report.finalAnswer = classified.userMessage;
       report.stoppedReason = classified.stopReason;
       report.finalReady = true;
+    }
+    // R16: EVERY stop is a handoff. max_rounds and cancel stamp resumable state
+    // above; a `stuck-no-progress` or provider-error stop writes an honest final
+    // answer but — before this — NO resume state, so the next "continue"
+    // re-explored from scratch. That is the exact cost R16 exists to remove.
+    // Cover every remaining non-clean stop in ONE place instead of growing a
+    // fourth copy of the block.
+    {
+      const cleanFinishes = new Set(["finish-tool", "model-final-ready", "completed", "final"]);
+      const alreadyHandedOff = report.budgetHandoffWritten || report.maxRoundsHandoff || report.cancelHandoff;
+      if (!alreadyHandedOff && report.stoppedReason && !cleanFinishes.has(report.stoppedReason)) {
+        try {
+          // The RUN plan can be empty (the model never called update_plan). The
+          // SESSION plan is the durable source of truth, so fall back to it —
+          // otherwise a stuck run that only ever had a session plan hands off
+          // nothing, which is the failure this block exists to prevent.
+          const runSteps = this.runtime.tools?.getRunPlan?.(run.id)?.steps;
+          const planSteps = (Array.isArray(runSteps) && runSteps.length > 0)
+            ? runSteps
+            : (this.runtime.tools?.getSessionPlan?.(session.id)?.steps || []);
+          const openSteps = planSteps.filter((s) => s && s.status !== "completed" && s.status !== "skipped");
+          if (openSteps.length > 0) {
+            this.writeBudgetHandoff({
+              message, run, session, agent, report, toolOutputs,
+              effectiveTotal: report.usage?.totalTokens || 0,
+            });
+            report.stopHandoff = true;
+            report.openStepsAtStop = openSteps.length;
+            gateway?.addEvent?.("omni_loop.stop_handoff", {
+              runId: run.id, sessionId: session.id, agentId: agent.id, engine: "omni-loop",
+              reason: report.stoppedReason, openSteps: openSteps.length,
+              message: `run stopped (${report.stoppedReason}) with ${openSteps.length} open plan step(s) — resume state saved so the next run continues instead of re-exploring`,
+            });
+          }
+        } catch { /* handoff is best-effort */ }
+      }
     }
     if (!report.finalReady && !report.finalAnswer && toolOutputs.length > 0) {
       // Budget exhausted mid-task: ask for one final no-tools summary so the

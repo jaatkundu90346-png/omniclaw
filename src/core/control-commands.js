@@ -138,5 +138,13 @@ export function reasoningOptionFor(state = {}) {
   const effort = state.reasoningEffort || (state.fast ? "minimal" : undefined);
   if (!effort) return undefined;       // leave provider/config default in place
   if (effort === "off") return false;  // explicit disable (sentinel)
-  return { effort };
+  // Return a bare LEVEL STRING, never an object. An object is a config's
+  // explicit statement of its wire shape (`reasoning: { effort }`, honoured
+  // verbatim); a session slash command is not a config, so it must let the
+  // ENDPOINT pick the dialect. Returning `{ effort }` here forced the nested
+  // OpenRouter shape on every endpoint: `/reasoning high` against an
+  // OpenAI-compatible endpoint 400s, and that 400 trips the provider's one-shot
+  // "unsupported reasoning" latch — silently disabling reasoning for the rest
+  // of the process even for endpoints that do support it.
+  return effort;
 }

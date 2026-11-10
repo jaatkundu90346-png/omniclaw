@@ -33,11 +33,18 @@ export function modelLooksVisionCapable(modelId) {
  * `configured` is `runtime.omniLoop.vision`:
  *   false -> never (the user turned image input off)
  *   true  -> always (the user knows better than a regex; they may be on a proxy)
- *   "auto" (default/undefined) -> ask the model id
+ *   "auto" (default/undefined) -> the CATALOG if it knows, else the model id
+ *
+ * `catalogVision` is the provider's declared `architecture.input_modalities`
+ * capability (boolean) or null when unknown. It WINS over the id regex because
+ * the catalog is authoritative: a model like `stealth/crouton-alpha` accepts
+ * images but the regex has never heard of "crouton" — trusting the regex there
+ * made OmniClaw hand a seeing model a text note and route it through a tool.
  */
-export function resolveVisionSupport({ configured, modelId } = {}) {
+export function resolveVisionSupport({ configured, modelId, catalogVision } = {}) {
   if (configured === false) return false;
   if (configured === true) return true;
+  if (catalogVision === true || catalogVision === false) return catalogVision;
   return modelLooksVisionCapable(modelId);
 }
 

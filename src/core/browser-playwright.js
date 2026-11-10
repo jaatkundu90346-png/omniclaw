@@ -4,8 +4,9 @@ import os from "node:os";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { normalizeBrowserScript } from "./browser-script.js";
-import { publishBrowserAction } from "./browser-activity-bus.js";
+import { publishBrowserAction, recentBrowserActions } from "./browser-activity-bus.js";
 import { probeCdp } from "./browser-launcher.js";
+import { BrowserOrigins } from "./browser-origins.js";
 
 // Gate file:// targets so a browser tool can't exfiltrate arbitrary local files
 // (secrets, source, anything outside the project). Local HTML the agent built
@@ -859,6 +860,13 @@ export class BrowserPlaywright {
     }
     const normalizedUrl = hasScheme ? targetUrl : `https://${targetUrl}`;
 
+    // Per-session origin allowlist (Codex ~/.codex/browser/sessions/*.toml).
+    // First remote origin is auto-recorded; a second NEW origin in the same
+    // session is blocked until explicitly allowed (browser_allow_origin).
+    this._origins = this._origins || new BrowserOrigins(this.rootDir || process.cwd());
+    const oc = this._origins.check(sid, normalizedUrl);
+    if (!oc.allowed) return { error: oc.reason, sessionId: sid, code: "EORIGIN" };
+
     // Local dev servers (vite/next/serve) race their own startup: the model
     // starts the server and opens the URL in the same breath, so the first
     // goto often lands before the port listens (ERR_CONNECTION_REFUSED — the
@@ -1492,21 +1500,56 @@ export class BrowserPlaywright {
     };
   }
 
-  async cdp({ sessionId, method, params = {} } = {}) {
+  async cdp({ sessionId, method, params = {}, afterSequence = 0, limit = 100 } = {}) {
     const sid = sessionId || this.defaultSessionId;
     const revival = await this.reviveSession(sid);
     if (revival.error) return { error: revival.error };
     const session = revival.session;
     session.lastUsed = Date.now();
 
+    // Codex-style cursor read: readEvents returns buffered CDP events AFTER a
+    // cursor sequence, so the agent can observe what happened between calls
+    // without polling screenshots. Frame: {seq, method, params}.
+    if (String(method).trim() === "readEvents") {
+      session.cdpEventSeq = session.cdpEventSeq || 0;
+      const buf = Array.isArray(session.cdpEventBuffer) ? session.cdpEventBuffer : [];
+      const after = Number(afterSequence) || 0;
+      const lim = Math.max(1, Math.min(1000, Number(limit) || 100));
+      const events = buf.filter((e) => e.seq > after).slice(0, lim);
+      return {
+        success: true,
+        sessionId: sid,
+        method: "readEvents",
+        afterSequence: after,
+        cursor: events.length ? events[events.length - 1].seq : after,
+        events,
+        buffered: buf.length,
+      };
+    }
+
     const cdpMethod = String(method || "").trim();
     if (!cdpMethod) {
-      return { error: "CDP method is required, e.g. Runtime.evaluate." };
+      return { error: "CDP method is required, e.g. Runtime.evaluate. Use method='readEvents' with afterSequence to read buffered events." };
     }
     try {
       const client = session.cdpSession || await session.context.newCDPSession(session.page);
       session.cdpSession = client;
+      // Attach a buffer once so readEvents has something to return.
+      if (client && typeof client.on === "function" && !session._cdpBuffered) {
+        session._cdpBuffered = true;
+        session.cdpEventSeq = session.cdpEventSeq || 0;
+        session.cdpEventBuffer = session.cdpEventBuffer || [];
+        client.on("Event", (ev) => {
+          try {
+            session.cdpEventSeq += 1;
+            session.cdpEventBuffer.push({ seq: session.cdpEventSeq, method: ev?.method || "", params: ev?.params || {}, at: Date.now() });
+            if (session.cdpEventBuffer.length > 2000) session.cdpEventBuffer.splice(0, session.cdpEventBuffer.length - 2000);
+          } catch {}
+        });
+      }
       const result = await client.send(cdpMethod, params && typeof params === "object" ? params : {});
+      // Audit trail: every raw CDP call is recorded (Codex management.getAuditTrail).
+      try { publishBrowserAction({ source: "playwright", type: "cdp", method: cdpMethod, sessionId: sid, tabId: `pw:${sid}` }); } catch {}
       return {
         success: true,
         sessionId: sid,
@@ -1516,6 +1559,13 @@ export class BrowserPlaywright {
     } catch (error) {
       return { error: error.message, sessionId: sid, method: cdpMethod };
     }
+  }
+
+  /** Codex-style audit trail: what the browser did, in order (revertable). */
+  getAuditTrail(sessionId = "", limit = 100) {
+    const all = recentBrowserActions(Number(limit) || 100);
+    const filtered = sessionId ? all.filter((a) => String(a.sessionId || "") === String(sessionId)) : all;
+    return { sessionId: String(sessionId || ""), count: filtered.length, actions: filtered };
   }
 
   async dialog({ sessionId, action = "list", text, promptText } = {}) {

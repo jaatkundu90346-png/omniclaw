@@ -169,7 +169,12 @@ export function openModelMenu(anchor, onBusy = () => {}, opts = {}) {
       row.append(h("span", { class: "check", html: icons.check }));
       row.dataset.selected = "1";
     }
-    row.addEventListener("click", () => applySelection({ modelId, conn, contextTokens: rowOpts.contextTokens || 0 }));
+    row.addEventListener("click", () => applySelection({
+      modelId, conn,
+      contextTokens: rowOpts.contextTokens || 0,
+      vision: rowOpts.vision,
+      reasoning: rowOpts.reasoning,
+    }));
     const favBtn = h("button", {
       class: "row-icon", type: "button", title: fav ? "Remove favorite" : "Add favorite",
       "aria-label": `${fav ? "Remove" : "Add"} favorite ${modelId}`,
@@ -204,7 +209,7 @@ export function openModelMenu(anchor, onBusy = () => {}, opts = {}) {
 
   // Single atomic commit. busy serializes; the button set is disabled during
   // the transition so no second selection can race it.
-  async function applySelection({ modelId, conn, contextTokens = 0 }) {
+  async function applySelection({ modelId, conn, contextTokens = 0, vision, reasoning }) {
     if (busy) return;
     busy = true;
     onBusy(true);
@@ -216,6 +221,13 @@ export function openModelMenu(anchor, onBusy = () => {}, opts = {}) {
         model: modelId,
         ...(Number.isFinite(Number(contextTokens)) && Number(contextTokens) > 0
           ? { contextTokens: Math.round(Number(contextTokens)) }
+          : {}),
+        // Persist the catalog's capability facts WITH the model: `vision` so an
+        // image-capable model is not misread as blind, and the declared effort
+        // levels so the picker offers only real ones.
+        ...(typeof vision === "boolean" ? { vision } : {}),
+        ...(reasoning && Array.isArray(reasoning.efforts) && reasoning.efforts.length
+          ? { reasoningEfforts: reasoning.efforts, reasoningDefault: reasoning.defaultEffort || undefined }
           : {}),
       });
       const fresh = (await getConfig()) || {};
@@ -297,7 +309,7 @@ export function openModelMenu(anchor, onBusy = () => {}, opts = {}) {
       if (st.state === "loading") { pending++; continue; }
       if (st.state === "failed") { failed++; continue; } // retry lives in Manage models
       const brand = providerBrand(c);
-      const ids = [...(st.models || []).map((m) => ({ id: m.id, name: m.name, manual: false, contextTokens: m.contextTokens || 0 })),
+      const ids = [...(st.models || []).map((m) => ({ id: m.id, name: m.name, manual: false, contextTokens: m.contextTokens || 0, vision: m.vision, reasoning: m.reasoning })),
         ...manualModels(key).map((id) => ({ id, name: id, manual: true, contextTokens: 0 }))];
       const rows = [];
       for (const m of ids) {
@@ -310,7 +322,7 @@ export function openModelMenu(anchor, onBusy = () => {}, opts = {}) {
         rows.push(rowButton({
           modelId: m.id, modelName: m.name !== m.id ? m.name : prettyModel(m.id),
           conn: c, connKey: key, selected: isActiveRow,
-          opts: { ...(m.manual ? { manual: true } : {}), ...(dup && !retired ? { sub: c.name } : {}), ...(retired ? { sub: "retired on this endpoint — pick another" } : {}), ...(m.contextTokens ? { contextTokens: m.contextTokens } : {}) },
+          opts: { ...(m.manual ? { manual: true } : {}), ...(dup && !retired ? { sub: c.name } : {}), ...(retired ? { sub: "retired on this endpoint — pick another" } : {}), ...(m.contextTokens ? { contextTokens: m.contextTokens } : {}), ...(typeof m.vision === "boolean" ? { vision: m.vision } : {}), ...(m.reasoning ? { reasoning: m.reasoning } : {}) },
         }));
       }
       if (!rows.length) continue; // hide empty groups — never a wall of headings

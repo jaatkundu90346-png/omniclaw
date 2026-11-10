@@ -142,6 +142,8 @@ try {
     "the loop must ask the ACTIVE model whether it can see, not assume yes");
   assert.match(loopSrc, /resolveVisionSupport\(\{/,
     "the loop must use the shared capability table, not a private copy of the regex");
+  assert.match(loopSrc, /visionOk && schemas\.some\(\(s\) => s\.function\?\.name === "describe_image"\)/,
+    "a VISION model must not be offered describe_image (it would route the pixels it already sees through a tool)");
   // No duplicated regex left behind: two copies drift and disagree about eyes.
   const mediaSrc = fs.readFileSync(path.join(root, "src/core/media-engine.js"), "utf8");
   assert.ok(!/const VISION_MODEL_RE = \/gpt-4o/.test(mediaSrc),
@@ -158,6 +160,12 @@ try {
     "an explicit false must override the regex");
   assert.equal(resolveVisionSupport({ configured: true, modelId: "whatever" }), true,
     "an explicit true must override the regex (proxy on a known model)");
+  assert.equal(resolveVisionSupport({ modelId: "stealth/crouton-alpha", catalogVision: true }), true,
+    "a CATALOG-declared vision model wins over the id regex (the regex has never heard of 'crouton')");
+  assert.equal(resolveVisionSupport({ modelId: "gpt-4o", catalogVision: false }), false,
+    "the catalog can also say NO for a model the regex would match");
+  assert.equal(resolveVisionSupport({ configured: false, modelId: "stealth/crouton-alpha", catalogVision: true }), false,
+    "an explicit OFF override still beats the catalog");
   assert.equal(guessImageMime("a.JPEG"), "image/jpeg");
   assert.equal(guessImageMime("a.png"), "image/png");
   console.log("ok: capability table behaves");

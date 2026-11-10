@@ -40,6 +40,9 @@ export function basicMarkdown(text) {
   src = esc(src)
     .replace(/`([^`\n]+)`/g, "<code>$1</code>")
     .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
+    // Codex-style proof-of-work: ![screenshot](/preview/x.jpg) must render as an
+    // image, not as literal text (fallback had no image rule at all).
+    .replace(/!\[([^\]\n]*)\]\((\/?preview\/[^)\s]+|https?:[^)\s]+|data:image\/[^)\s]+)\)/g, '<img src="$2" alt="$1" loading="lazy" style="max-width:100%;border-radius:8px;margin:6px 0;display:block">')
     .replace(/\[([^\]\n]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
     .replace(/^#{1,4} (.+)$/gm, "<strong>$1</strong>")
     .replace(/^[-*] (.+)$/gm, "&bull; $1")
@@ -395,7 +398,23 @@ export function mountThread(container, opts = {}) {
 
   function pushUser(text, attachments) {
     const turn = { id: `t${++seq}`, role: "user", text };
-    const el = h("div", { class: "turn-user" }, h("div", { class: "user-bubble", text }));
+    const bubble = h("div", { class: "user-bubble", text });
+    const el = h("div", { class: "turn-user" }, bubble);
+    // Show the images the user actually sent (raster images only), so the chat
+    // is a faithful record instead of just a path note. Served from /preview/.
+    const imgs = (Array.isArray(attachments) ? attachments : [])
+      .filter((a) => a && a.isImage && a.relPath);
+    if (imgs.length) {
+      const strip = h("div", { class: "user-atts", style: "display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;" });
+      for (const att of imgs) {
+        const img = h("img", { alt: att.name || "attachment" });
+        img.src = previewUrl(att.relPath);
+        img.title = att.name || att.relPath;
+        img.style.cssText = "max-width:120px;max-height:120px;border-radius:8px;object-fit:cover;border:1px solid var(--line,#333);";
+        strip.append(img);
+      }
+      el.append(strip);
+    }
     turn.els = { el };
     turns.push(turn);
     root.append(el);
@@ -548,8 +567,9 @@ function setStepDetail(rec, detail) {
     const node = renderDetailNode(rec.detail);
     if (node) de.append(node);
     // Edit/write/exec detail IS the user-facing context — open it so the
-    // thread never shows only "Edited … ✓" / "Ran … ✓" with no body.
-    const wantsOpen = rec.kind === "edit" || rec.kind === "exec"
+    // thread never shows only "Edited … ✓" / "Ran … ✓" with no body. A
+    // screenshot is the same contract: the point of the row is the image.
+    const wantsOpen = rec.kind === "edit" || rec.kind === "exec" || rec.kind === "screenshot"
       || (typeof rec.detail === "string" && looksLikeDiff(rec.detail));
     if (wantsOpen && de.hidden) {
       de.hidden = false;
@@ -745,10 +765,22 @@ function setStepDetail(rec, detail) {
     return null;
   }
 
-  function screenshotImg(url) {
+  // The servable URL for a screenshot. The `tool.screenshot` event carries TWO
+  // strings: `path` (the project-relative screenshot file, e.g.
+  // `data/browser-screenshots/…png`) and `url` (the PAGE the shot was taken of).
+  // Only the path names a file on disk; `url` is HTML, so pointing an <img> at it
+  // renders a broken image. `/preview/` serves files under the project root
+  // (server.js), and the per-segment encoding matches the composer thumbnails.
+  function previewUrl(relPath) {
+    const p = String(relPath || "").replace(/\\/g, "/").replace(/^\/+/, "");
+    if (!p) return "";
+    return `/preview/${p.split("/").map(encodeURIComponent).join("/")}`;
+  }
+
+  function screenshotImg(src) {
     const wrap = document.createElement("div");
     const img = document.createElement("img");
-    img.src = url;
+    img.src = src;
     img.alt = "agent screenshot";
     img.loading = "lazy";
     img.style.cssText = "max-width:220px;border-radius:8px;margin-top:4px;";
@@ -1048,11 +1080,11 @@ function setStepDetail(rec, detail) {
         break;
       }
       case "tool.screenshot": {
-        const url = p.url || "";
         const path = p.path || "";
         const np = normPath(path);
         let rec = matchTransient(turn, p.tool || "screenshot", (r) => r.pathNorm && r.pathNorm === np, p.toolCallId);
-        const extra = /^https?:/.test(url) ? screenshotImg(url) : null;
+        const src = previewUrl(path);
+        const extra = src ? screenshotImg(src) : null;
         if (rec) {
           if (path) retitle(rec, `Screenshot ${dispPath(path)}`, fullPath(path));
           if (extra) setStepDetail(rec, extra);
@@ -1077,6 +1109,16 @@ function setStepDetail(rec, detail) {
           path: (p.input && (p.input.path || p.input.file)) || p.path || "",
           command: (p.input && (p.input.command || p.input.cmd)) || p.command || "",
         });
+        // Codex-style visibility: when the agent starts browsing, SHOW the browser.
+        // Previously the panel only opened on step click, so live work was
+        // invisible unless the user manually opened Browser. Open once per turn
+        // (first browser tool), then leave it to the user.
+        if (/^browser(_|-|$)/i.test(tool) || tool === "browser_open" || /browser_(open|navigate|click|type|snapshot|screenshot|press|scroll|evaluate|launch)/i.test(tool)) {
+          if (!turn._browserAutoOpened) {
+            turn._browserAutoOpened = true;
+            try { window.__ocNext?.openPanel?.("browser"); } catch {}
+          }
+        }
         break;
       }
       case "model_tool_loop.tool_started": {
@@ -1538,8 +1580,9 @@ function setStepDetail(rec, detail) {
     const msg = String(text || "").trim();
     if (!msg || liveAbort) return null;
     pokeActivity();
-    pushUser(msg);
+    const userTurn = pushUser(msg, opts.attachments);
     const turn = newAssistantTurn();
+    turn.userEl = userTurn.els.el;
     liveTurn = turn;
     setStage(turn, "PLANNING");
     turn.timer = setInterval(() => { if (turn.status === "running") paintHead(turn); }, 1000);
@@ -1754,7 +1797,11 @@ function setStepDetail(rec, detail) {
     if (/exec|run|shell|command/i.test(tool) && output.exitCode != null) {
       meta = `exit ${output.exitCode}${output.durationMs != null ? ` · ${fmtDur(output.durationMs)}` : ""}`;
     }
-    return { kind, title, full, meta, status: failed ? "fail" : "done", detail: item };
+    const shotPath = output.screenshotRelPath || output.screenshotPath || "";
+    // A screenshot has no inline body — its `detail` is the whole item object,
+    // which would otherwise render as a JSON <pre>. Flag the path so replay can
+    // draw the actual image instead of a blob of JSON.
+    return { kind, title, full, meta, status: failed ? "fail" : "done", detail: shotPath ? null : item, shotPath };
   }
 
   // toolSummary-style strings ("Wrote 138 bytes…") are used verbatim.
@@ -1828,6 +1875,29 @@ function setStepDetail(rec, detail) {
           });
           el.append(head, ctx, steps, answer);
           turn.els = { el, head, ctx, steps, answer };
+          // Persisted reasoning: a bounded digest rides the report (already in
+          // the transcript as `modelToolLoop`). Replay it as a collapsible
+          // "Thinking…" row so a reload keeps the model's reasoning — the live
+          // `assistant.reasoning` event is transient and would otherwise be lost.
+          if (e.modelToolLoop && e.modelToolLoop.reasoningDigest) {
+            const li = h("li", { class: "step step-thinking" });
+            const ic = h("span", { class: "s-ic", html: icons[KIND_ICON.thinking] || icons.wrench });
+            const ti = h("span", { class: "s-ti", text: "Thinking…" });
+            const me = h("span", { class: "s-me" });
+            const detBtn = h("button", { class: "det-btn", type: "button", text: "Details" });
+            me.append(detBtn);
+            const st = h("span", { class: "s-st" });
+            const de = h("div", { class: "s-de" });
+            de.hidden = true;
+            de.append(h("pre", { text: String(e.modelToolLoop.reasoningDigest).slice(0, 6000) }));
+            detBtn.addEventListener("click", (ev) => {
+              ev.stopPropagation();
+              de.hidden = !de.hidden;
+              li.classList.toggle("open", !de.hidden);
+            });
+            li.append(ic, ti, me, st, de);
+            steps.append(li);
+          }
           for (const item of e.toolOutputs || []) {
             const s = historyStep(item);
             const output = item.output || {};
@@ -1837,7 +1907,7 @@ function setStepDetail(rec, detail) {
               title: guardTitle(item.tool || "tool", s.title),
               full: s.full || s.title, meta: s.meta || "",
               status: s.status, detail: null,
-              path: output.path || (item.input && (item.input.path || item.input.file)) || "",
+              path: output.path || output.screenshotRelPath || output.screenshotPath || (item.input && (item.input.path || item.input.file)) || "",
               command: output.command || (item.input && (item.input.command || item.input.cmd)) || "",
             };
             const li = h("li", { class: "step" });
@@ -1861,13 +1931,18 @@ function setStepDetail(rec, detail) {
             if (s.status === "done") st.append(h("span", { class: "st-ok", text: "✓" }));
             else if (s.status === "fail") st.append(h("span", { class: "st-fail", text: "✗" }));
             const de = h("div", { class: "s-de" });
-            const detailNode = renderDetailNode(s.detail);
-            const hasDetail = s.detail != null && String(typeof s.detail === "string" ? s.detail : JSON.stringify(s.detail)).length > 0;
-            de.hidden = !(hasDetail && (s.kind === "edit" || s.kind === "exec"));
-            if (detailNode) de.append(detailNode);
-            if (hasDetail && de.hidden) {
-              // still keep Details toggle available for non-auto kinds
+            let detailNode = renderDetailNode(s.detail);
+            // Replay the screenshot image inline: the run showed it live, so a
+            // reload must not silently drop it.
+            if (!detailNode && s.kind === "screenshot" && rec.path) {
+              const src = previewUrl(rec.path);
+              if (src) detailNode = screenshotImg(src);
             }
+            const hasDetail = detailNode != null
+              || (s.detail != null && String(typeof s.detail === "string" ? s.detail : JSON.stringify(s.detail)).length > 0);
+            const autoOpen = s.kind === "edit" || s.kind === "exec" || (s.kind === "screenshot" && detailNode != null);
+            de.hidden = !(hasDetail && autoOpen);
+            if (detailNode) de.append(detailNode);
             detBtn.hidden = !hasDetail;
             detBtn.addEventListener("click", (ev) => {
               ev.stopPropagation();

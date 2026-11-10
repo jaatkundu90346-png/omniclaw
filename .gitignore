@@ -103,3 +103,21 @@ agents/
 !requirements*.txt
 !LICENSE
 !README.md
+
+# ── Session scratch (root only; docs/*_PLAN.md stays tracked) ───────────────
+# Audit / report / plan notes written during past sessions. They were never
+# product docs, and 30+ of them in the repo root made every sweep look like
+# new work.
+/*_AUDIT.md
+/*_REPORT.md
+/*_NOTES.md
+/*_PLAN.md
+/*_SUMMARY.md
+/*_FIX_*.md
+# Local run output. Never source.
+/output/
+/reports/
+/test-output/
+/screenshots/
+# One-off scripts that rewrite source files in place.
+/patch_*.cjs

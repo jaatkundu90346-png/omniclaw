@@ -149,6 +149,58 @@ function pickMaxTokens(item = {}) {
   return 0;
 }
 
+// Canonical low->high reasoning levels a compatible endpoint may advertise.
+const REASONING_EFFORT_ORDER = ["minimal", "low", "medium", "high", "xhigh", "max"];
+
+// What reasoning levels does this model declare? OpenRouter/compatible catalogs
+// signal support either via `supported_parameters` (lists "reasoning" /
+// "reasoning_effort") or a `reasoning` object (sometimes with
+// `supported_efforts` / `default_effort`). Returns null when the model says
+// nothing, so the UI keeps its full fallback list rather than guessing.
+function pickReasoning(item = {}) {
+  const params = Array.isArray(item?.supported_parameters)
+    ? item.supported_parameters.map((p) => String(p).toLowerCase())
+    : [];
+  const r = item && typeof item.reasoning === "object" && item.reasoning !== null ? item.reasoning : null;
+  let efforts = [];
+  if (r) {
+    const list = Array.isArray(r.supported_efforts) ? r.supported_efforts
+      : Array.isArray(r.efforts) ? r.efforts
+        : Array.isArray(r.parameters) ? r.parameters : [];
+    efforts = list
+      .map((e) => String(e && typeof e === "object" ? (e.effort ?? e.id ?? "") : e).toLowerCase())
+      .filter(Boolean);
+  }
+  const supported = Boolean(r)
+    || params.includes("reasoning")
+    || params.includes("reasoning_effort")
+    || params.includes("include_reasoning");
+  if (!supported && !efforts.length) return null;
+  const ordered = REASONING_EFFORT_ORDER.filter((e) => efforts.includes(e));
+  const finalEfforts = ordered.length ? ordered : (efforts.length ? efforts : [...REASONING_EFFORT_ORDER]);
+  const defaultEffort = r && (r.default_effort || r.default)
+    ? String(r.default_effort || r.default).toLowerCase()
+    : null;
+  return {
+    efforts: finalEfforts,
+    defaultEffort,
+    maxEffort: finalEfforts[finalEfforts.length - 1] || null,
+    mandatory: Boolean(r && r.mandatory === true),
+  };
+}
+
+// Does this model accept image input? Only reported when the catalog actually
+// says so; null means "unknown", never "no".
+function pickVision(item = {}) {
+  const mods = item?.architecture?.input_modalities
+    || item?.input_modalities
+    || item?.modalities
+    || item?.architecture?.modality;
+  if (Array.isArray(mods)) return mods.map((m) => String(m).toLowerCase()).includes("image");
+  if (typeof mods === "string") return /image/.test(mods.toLowerCase());
+  return null;
+}
+
 function normalizeModelList(data) {
   const rawModels = Array.isArray(data)
     ? data
@@ -166,12 +218,16 @@ function normalizeModelList(data) {
       }
       const contextTokens = pickContextTokens(item);
       const maxTokensOut = pickMaxTokens(item);
+      const reasoning = pickReasoning(item);
+      const vision = pickVision(item);
       return {
         id: item?.id || item?.name || item?.model || "",
         ownedBy: item?.owned_by || item?.ownedBy || item?.provider || "",
         created: item?.created || item?.created_at || null,
         ...(contextTokens > 0 ? { contextTokens } : {}),
         ...(maxTokensOut > 0 ? { maxTokens: maxTokensOut } : {}),
+        ...(reasoning ? { reasoning } : {}),
+        ...(vision === null ? {} : { vision }),
       };
     })
     .filter((item) => item.id);
@@ -220,6 +276,10 @@ export class OpenAICompatibleProvider {
     // Set once, the first time this endpoint 400s on the reasoning param, so we
     // stop sending it. Per-provider instance, so switching providers re-tests it.
     this.reasoningUnsupported = false;
+    // modelId -> vision boolean, learned from the last /models fetch. The
+    // catalog KNOWS which models accept images; the static regex only guesses.
+    // The loop prefers this when present (an explicit user override still wins).
+    this._modelVisionById = new Map();
   }
 
   getApiKeyReadiness(config = this.configStore.getConfig()) {
@@ -270,6 +330,12 @@ export class OpenAICompatibleProvider {
       model: config.provider.model,
       apiKeyEnv: config.provider.apiKeyEnv,
       apiKeyProviderId: config.provider.apiKeyProviderId,
+      // Catalog-declared image capability for the ACTIVE model. Cache from this
+      // process first, then the value persisted with the model on selection
+      // (durable across restarts), else null = unknown. The loop trusts this over
+      // the id regex; an explicit runtime.omniLoop.vision override still wins.
+      vision: this._modelVisionById?.get(String(config.provider.model || ""))
+        ?? (typeof config.provider.vision === "boolean" ? config.provider.vision : null),
       ...readiness,
     };
   }
@@ -442,6 +508,14 @@ export class OpenAICompatibleProvider {
 
     const data = await response.json();
     const models = normalizeModelList(data);
+    // Remember each model's image capability so the run can trust the catalog
+    // over the id regex (e.g. stealth/crouton-alpha accepts images but the
+    // regex has never heard of "crouton").
+    try {
+      for (const m of models) {
+        if (typeof m.vision === "boolean") this._modelVisionById.set(String(m.id), m.vision);
+      }
+    } catch { /* capability cache is best-effort */ }
     return {
       ok: true,
       endpoint: this.getModelsUrl(providerConfig),

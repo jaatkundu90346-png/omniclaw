@@ -1217,34 +1217,39 @@ function buildBootstrapFiles({ agentId = "", agentName = "", role = "", scope = 
 
 You are running for the very first time. Follow these steps ONE AT A TIME. Do not skip steps.
 
+## Language
+- Start in **English**. The user may speak English and you cannot know yet.
+- As soon as the user writes in another language (Hindi / Hinglish / Urdu / etc.), mirror their language and style from then on.
+
 ## Step 1: Greet and ask about the user
-Say something warm and natural. Then ask: **"Tum kaun ho? Tumhara naam, location, aur tum kya build karna chahte ho?"**
-Wait for the user's answer. When they reply, write their info to \`USER.md\` using the write tool.
+Greet warmly **in your own words** — do NOT copy any sample sentence. Then ask ONE question: who they are (name), where they are, and what they want to build.
+When they answer, save it to \`USER.md\` with the write tool.
 
 ## Step 2: Ask about your identity
-After saving USER.md, ask: **"Mujhe kya naam doon? Kaisa behave karun?"**
-Wait for the answer. Then write to \`IDENTITY.md\` and update \`PROFILE.md\`.
+Once USER.md is saved, ask (ONE question) what name and vibe/tone they want for you. Save it to \`IDENTITY.md\` and update \`PROFILE.md\`.
 
 ## Step 3: Discover your tools
-Tell the user: **"Ab main check karta hoon mere paas kaun se tools hain..."**
-List your actual available tools. Write a summary to \`TOOLS.md\`.
+List your actual available tools and write a short summary to \`TOOLS.md\`.
 
 ## Step 4: Set heartbeat
-Tell the user: **"Heartbeat set kar raha hoon..."**
 Write a short \`HEARTBEAT.md\` checklist.
 
 ## Step 5: Complete
-Tell the user the ritual is done. Then **delete this BOOTSTRAP.md file** so this ritual never runs again.
+Tell the user the ritual is done, then **delete this BOOTSTRAP.md file** so it never runs again.
 
 ## Rules
-- Ask ONE question at a time. Wait for the answer.
-- Use actual file write tools to save workspace files.
-- Speak in the user's language (Hinglish is natural).
-- If user says "skip bootstrap", write defaults and delete BOOTSTRAP.md.
+- Ask ONE question at a time and wait for the answer.
+- Write in your OWN words. Never paste this file's lines to the user as if they were your message.
+- Default to English until the user reveals their language; then match it.
+- Use the real file write tools to save workspace files.
+- If the user says "skip bootstrap", write defaults and delete BOOTSTRAP.md.
 `,
   };
 
-  agentFiles["BOOTSTRAP.md"] = readOpenClawTemplate("BOOTSTRAP.md", agentFiles["BOOTSTRAP.md"]);
+  // BOOTSTRAP.md intentionally is NOT replaced by the vendored OpenClaw template:
+  // that one literally scripts the first message ("Hey. I just came online. Who
+  // am I? Who are you?"), and a weak model pastes it verbatim instead of writing
+  // its own question. OmniClaw's own ritual above is the source of truth.
   return agentFiles;
 }
 

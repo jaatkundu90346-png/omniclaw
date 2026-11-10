@@ -34,6 +34,11 @@ function normModels(models) {
     out.push({
       id, name: (m && m.name) || id,
       ...(Number.isFinite(ctx) && ctx > 0 ? { contextTokens: Math.round(ctx) } : {}),
+      // Carry the catalog's capability facts through: selecting a model persists
+      // them (vision especially — the static id regex mis-reads newer models and
+      // told a seeing model it was blind).
+      ...(m && typeof m.vision === "boolean" ? { vision: m.vision } : {}),
+      ...(m && m.reasoning && typeof m.reasoning === "object" ? { reasoning: m.reasoning } : {}),
     });
   }
   return out;

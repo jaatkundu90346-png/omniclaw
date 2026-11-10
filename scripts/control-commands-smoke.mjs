@@ -50,12 +50,14 @@ ok(state.fast === true, "session state remembers fast");
 state = applySessionControls(state, parseControlCommands("/think hard").controls);
 ok(state.fast === true && state.reasoningEffort === "high", "session state accumulates think over fast");
 
-// reasoningOptionFor mapping.
-ok(reasoningOptionFor({ reasoningEffort: "high" })?.effort === "high", "reasoningOptionFor high -> {effort:high}");
+// reasoningOptionFor mapping. A bare level STRING (not `{effort}`) so the
+// endpoint chooses the reasoning dialect; an object is reserved for explicit
+// config that states its own wire shape.
+ok(reasoningOptionFor({ reasoningEffort: "high" }) === "high", "reasoningOptionFor high -> bare level string");
 ok(reasoningOptionFor({ reasoningEffort: "off" }) === false, "reasoningOptionFor off -> false (disable sentinel)");
 ok(reasoningOptionFor({}) === undefined, "no effort -> undefined (keep config default)");
-ok(reasoningOptionFor({ fast: true })?.effort === "minimal", "fast implies minimal reasoning");
-ok(reasoningOptionFor({ fast: true, reasoningEffort: "high" })?.effort === "high", "explicit effort overrides fast");
+ok(reasoningOptionFor({ fast: true }) === "minimal", "fast implies minimal reasoning");
+ok(reasoningOptionFor({ fast: true, reasoningEffort: "high" }) === "high", "explicit effort overrides fast");
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

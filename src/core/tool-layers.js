@@ -31,7 +31,7 @@ export const TOOLSETS = {
       "browser_remote_navigate", "browser_remote_disconnect",
       "browser_scroll", "browser_back",
       "browser_forward", "browser_press", "browser_get_images", "browser_console",
-      "browser_cdp", "browser_dialog", "browser_tap", "browser_automate", "browser_sessions",
+      "browser_cdp", "browser_dialog", "browser_tap", "browser_automate", "browser_sessions", "browser_allow_origin", "browser_audit",
     ],
     keywords: ["browser", "youtube", "website", "webpage", "click", "login", "scrape", "page", "tab", "screenshot"],
   },

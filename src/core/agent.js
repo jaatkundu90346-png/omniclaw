@@ -22,6 +22,7 @@ import { GatewayStore } from "./gateway-store.js";
 import { RunGate, resolveMaxConcurrentRuns } from "./run-gate.js";
 import { DelegationBridge } from "./delegation-bridge.js";
 import { WorkspaceBootstrap } from "./workspace-bootstrap.js";
+import { detectUserLanguage } from "./language.js";
 import { WorkspaceStore, workspaceIdFor } from "./workspace-store.js";
 import { PluginRegistry } from "./plugin-registry.js";
 import { redactSecrets } from "./secret-redact.js";
@@ -2871,6 +2872,7 @@ export class OmniClawAgent {
             agentId: routedAgent.id,
             intents,
             session,
+            message,
             profileUpdated: Boolean(profileUpdate?.updated),
             hasBootstrap,
           }) ||
@@ -4037,12 +4039,11 @@ export class OmniClawAgent {
       // have echoed into its answer (e.g. read from a file/env and repeated).
       response = redactSecrets(response);
 
-      // Process bootstrap ritual: extract profile info from conversation and update files
+      // Process bootstrap ritual: extract profile facts and update workspace
+      // files ONLY. It deliberately does not touch `response` — the model's own
+      // answer stands. (A canned reply here used to overwrite it.)
       if (this.hasBootstrapRitual(routedAgent.id)) {
-        const bootstrapResult = this.processBootstrapStep(routedAgent.id, message, response);
-        if (bootstrapResult.reply) {
-          response = bootstrapResult.reply;
-        }
+        const bootstrapResult = this.processBootstrapStep(routedAgent.id, message);
         if (bootstrapResult.updated && bootstrapResult.updates) {
           this.gateway.addEvent("bootstrap.progress", {
             runId: run.id,
@@ -7714,14 +7715,22 @@ export class OmniClawAgent {
     }
   }
 
-  processBootstrapStep(agentId = "main", message = "", reply = "") {
+  // Runs AFTER the model has answered a bootstrap turn. It ONLY extracts facts
+  // and writes workspace files (USER/IDENTITY/PROFILE/TOOLS), then deletes
+  // BOOTSTRAP.md when the ritual is done.
+  //
+  // It must NEVER return a `reply`. It used to, and handleMessage did
+  // `response = bootstrapResult.reply` — which THREW AWAY the model's own,
+  // context-aware question and pasted a fixed template instead ("Theek <name>,
+  // main <agent> hoon. Meri vibe/tone kaisi rakhu…"). The model owns the
+  // conversation; the harness only persists facts and marks progress.
+  processBootstrapStep(agentId = "main", message = "") {
     if (!this.hasBootstrapRitual(agentId)) {
       return { updated: false, step: "none" };
     }
     const facts = this.extractBootstrapFacts(message);
     const updates = [];
     const before = this.readAgentProfileFacts(agentId);
-    const wantsHinglish = /\b(?:ma|main|mai|hu|hun|hoon|ha|hai|tera|tara|tum|mujhe|naam)\b/i.test(String(message || ""));
 
     if (facts.skip) {
       this.writeBootstrapWorkspaceState(agentId, {
@@ -7734,7 +7743,6 @@ export class OmniClawAgent {
         updated: true,
         step: "bootstrap_skipped",
         updates: ["bootstrap_skipped"],
-        reply: "Bootstrap skip kar diya. Main default identity ke saath normal mode me aa gaya hoon. Tum baad me Profile/Identity settings update kar sakte ho.",
       };
     }
 
@@ -7788,9 +7796,6 @@ export class OmniClawAgent {
         updated: updates.length > 0,
         step: "ask_user",
         updates,
-        reply: wantsHinglish
-          ? "Main first-run setup me hoon. Tumhara naam kya hai, aur OmniClaw se kya build/automate karna chahte ho?"
-          : "I am in first-run setup. What should I call you, and what do you want to build or automate with OmniClaw?",
       };
     }
 
@@ -7799,9 +7804,6 @@ export class OmniClawAgent {
         updated: true,
         step: "ask_identity",
         updates,
-        reply: wantsHinglish
-          ? `Theek ${currentFacts.userName || "friend"}, main ${currentFacts.assistantName || "tumhara agent"} hoon. Meri vibe/tone kaisi rakhu - warm, direct, funny, formal, ya kuch aur?`
-          : `Got it${currentFacts.userName ? `, ${currentFacts.userName}` : ""}. I am ${currentFacts.assistantName || "your agent"}. What vibe or tone should I have - warm, direct, funny, formal, or something else?`,
       };
     }
 
@@ -7825,19 +7827,6 @@ export class OmniClawAgent {
       updated: true,
       step: "bootstrap_completed",
       updates,
-      reply: wantsHinglish
-        ? [
-            "Bootstrap complete.",
-            `Tumhara profile save ho gaya: ${currentFacts.userName || "user"}.`,
-            `Meri identity save ho gayi: ${currentFacts.assistantName || "agent"}.`,
-            "BOOTSTRAP.md delete ho gaya; ab normal agent mode start hai.",
-          ].join(" ")
-        : [
-            "Bootstrap complete.",
-            `Your profile is saved${currentFacts.userName ? `: ${currentFacts.userName}` : ""}.`,
-            `My identity is saved: ${currentFacts.assistantName || "agent"}.`,
-            "BOOTSTRAP.md is deleted; normal agent mode is active now.",
-          ].join(" "),
     };
   }
 
@@ -7878,10 +7867,12 @@ export class OmniClawAgent {
     const profileFacts = this.readAgentProfileFacts(agent.id || "main");
     const assistantName = (profileFacts.assistantName && profileFacts.assistantName.length > 1) ? profileFacts.assistantName : "OmniClaw";
     const userName = (profileFacts.userName && profileFacts.userName.length > 1 && !profileFacts.userName.includes(":")) ? profileFacts.userName : "";
-    const lowered = message.toLowerCase();
-    const isUrduHindi = /\b(hlo|helo|hi|hey|salam|namaste|kaise|kya|tum|tera|main|ho|hai)\b/i.test(lowered);
+    // English by DEFAULT; mirror the user's language only when they actually use
+    // one. The old regex listed `hi|hey`, so an English "hi" was answered in
+    // Hinglish — the exact bug this replaces.
+    const nonEnglish = detectUserLanguage(message) !== "english";
 
-    if (isUrduHindi) {
+    if (nonEnglish) {
       const greeting = userName ? `Haan ${userName}!` : "Haan!";
       return [
         `${greeting} Main ${assistantName} hoon, tumhara local AI assistant.`,
@@ -7898,7 +7889,7 @@ export class OmniClawAgent {
     ].join(" ");
   }
 
-  buildOnboardingReply({ agentId = "main", intents = [], session = {}, profileUpdated = false, hasBootstrap = false } = {}) {
+  buildOnboardingReply({ agentId = "main", intents = [], session = {}, profileUpdated = false, hasBootstrap = false, message = "" } = {}) {
     if (hasBootstrap) {
       return "";
     }
@@ -7915,16 +7906,29 @@ export class OmniClawAgent {
       return "";
     }
 
+    // English by DEFAULT (the user may speak English); mirror only if they do.
+    if (detectUserLanguage(message) !== "english") {
+      return [
+        "Hey, main OmniClaw runtime ke andar ek fresh agent ke roop me online aaya hoon.",
+        "Main apni identity aur tumhari preferences setup karna chahta hoon, taaki plain chatbot ki tarah nahi balki real workspace agent ki tarah kaam karun.",
+        "",
+        "Mujhe do cheezein batao:",
+        "1. Main kaun hoon? Mera naam, vibe/personality, aur kaise baat karni hai.",
+        "2. Tum kaun ho? Tumhara naam, location/timezone, aur tum AI se kya build karna chahte ho.",
+        "",
+        "Jo tum bataoge main PROFILE.md aur memory me save kar lunga, phir next messages me yaad rakhunga.",
+      ].join("\n");
+    }
+
     return [
-      "Hey, main OmniClaw runtime ke andar abhi ek fresh agent ke roop me online aaya hoon.",
-      "OmniClaw platform hai jo agents ko birth/run karta hai; main active agent hoon jise identity, memory, tools, aur skills milte hain.",
-      "Main apni identity aur tumhari preferences setup karna chahta hoon, taaki main plain chatbot ki tarah nahi balki real workspace agent ki tarah kaam karun.",
+      "Hey — I'm a fresh agent inside the OmniClaw runtime, coming online for the first time.",
+      "I'd like to set up my identity and your preferences so I work like a real workspace agent, not a generic chatbot.",
       "",
-      "Mujhe do cheezein batao:",
-      "1. Main kaun hoon? Mera naam, vibe/personality, aur kaise baat karni hai.",
-      "2. Tum kaun ho? Tumhara naam, location/timezone, kaam/interests, aur tum AI se kya build karna chahte ho.",
+      "Tell me two things:",
+      "1. Who am I? My name, vibe/personality, and how you want me to talk.",
+      "2. Who are you? Your name, location/timezone, and what you want to build with AI.",
       "",
-      "Jo tum bataoge main PROFILE.md aur memory me save kar lunga, phir next messages me yaad rakhunga.",
+      "Whatever you tell me I'll save to PROFILE.md and memory, so I remember it in later messages.",
     ].join("\n");
   }
 
@@ -7974,9 +7978,14 @@ export class OmniClawAgent {
 
     if (intents.includes("greeting") && intents.length === 1) {
       const profileFacts = this.readAgentProfileFacts(agent.id || "main");
-      const assistantName = profileFacts.assistantName || agent.name || "Main Agent";
-      const userName = profileFacts.userName || "Mankush";
-      return `Haan ${userName}, main online hoon. Main ${assistantName} agent hoon, OmniClaw runtime ke andar chal raha hoon. Agar provider brain auth fail bhi ho, local tools, memory, sessions, gateway, files aur terminal policy yahin available hain.`;
+      const assistantName = profileFacts.assistantName || agent.name || "OmniClaw";
+      const userName = profileFacts.userName || "";
+      if (detectUserLanguage(message) !== "english") {
+        const who = userName ? `Haan ${userName}` : "Haan";
+        return `${who}, main online hoon. Main ${assistantName} agent hoon, OmniClaw runtime ke andar chal raha hoon. Provider brain auth fail bhi ho jaye, local tools, memory, sessions, files aur terminal yahin available hain.`;
+      }
+      const greet = userName ? `Hey ${userName}` : "Hey";
+      return `${greet} — I'm online. I'm the ${assistantName} agent running inside the OmniClaw runtime. Even if the provider brain fails auth, local tools, memory, sessions, files and terminal are available here.`;
     }
 
     return "";

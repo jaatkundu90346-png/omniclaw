@@ -741,11 +741,22 @@ const baseTools = [
 
 // Scenario 16: stuck-detection ("stop if no improvement / escalate to human") —
 // 4 consecutive all-failing rounds stop the loop with an honest report instead
-// of burning the whole round budget.
+// of burning the whole round budget. R16: a stuck stop must ALSO stamp a durable
+// resume handoff, not only budget/max_rounds/cancel.
 {
   const mk = (n) => ({ text: "", toolCalls: [{ id: "f" + n, tool: "exec", input: { command: "cmd" + n } }], assistantMessage: { role: "assistant", content: null, tool_calls: [{ id: "f" + n, type: "function", function: { name: "exec", arguments: JSON.stringify({ command: "cmd" + n }) } }] } });
   const runtime = makeRuntime({ providerScript: [() => mk(1), () => mk(2), () => mk(3), () => mk(4), () => mk(5)] });
   runtime.tools.run = async () => ({ error: true, message: "boom: command failed" });
+  // R16: give the run durable state to hand off. The RUN plan stays empty (the
+  // model never called update_plan); the SESSION plan is the source of truth —
+  // the shape a naive run-plan-only check would miss.
+  const tmpStuck = fs.mkdtempSync(path.join(os.tmpdir(), "omni-stuck-"));
+  runtime.rootDir = tmpStuck;
+  const resumed = [];
+  runtime.sessions.appendSystemEvent = (sessionId, type, payload) => resumed.push({ sessionId, type, payload });
+  runtime.tools.getRunPlan = () => null;
+  runtime.tools.getSessionPlan = () => ({ steps: [{ title: "a", status: "completed" }, { title: "b", status: "pending" }, { title: "c", status: "pending" }] });
+  runtime.tools.setSessionPlan = () => {};
   const tools = [...baseTools, { id: "exec", description: "Run a command", schema: { type: "object", required: ["command"], properties: { command: { type: "string" } } } }];
   const loop = new OmniLoop({ agentRuntime: runtime });
   const { report } = await loop.run({ message: "fix the build", agent: { id: "main" }, profile: {}, session: { id: "s16" }, run: { id: "r16" }, tools, contextBundle: {} });
@@ -753,6 +764,11 @@ const baseTools = [
   assert(report.consecutiveFailingRounds === 4, `scenario16: 4 consecutive failing rounds (got ${report.consecutiveFailingRounds})`);
   assert(report.finalReady && /atak gaya/.test(report.finalAnswer), "scenario16: honest stuck report escalated to user");
   assert(runtime.events.some((e) => e.event === "model_tool_loop.stuck"), "scenario16: stuck event emitted");
+  assert(report.stopHandoff === true, "scenario16: stuck stop stamped a resume handoff (R16)");
+  assert(report.openStepsAtStop === 2, `scenario16: open steps counted from the session plan (got ${report.openStepsAtStop})`);
+  assert(resumed.some((e) => e.type === "run.resume"), "scenario16: durable run.resume written on a stuck stop");
+  assert(runtime.events.some((e) => e.event === "omni_loop.stop_handoff"), "scenario16: stop_handoff event emitted");
+  fs.rmSync(tmpStuck, { recursive: true, force: true });
 }
 
 // Scenario 17: continuous learning — instincts are extracted from a meaningful
@@ -831,6 +847,18 @@ const baseTools = [
   const menuEv = runtime.events.find((e) => e.event === "toolset.menu");
   assert(menuEv && menuEv.payload.size === 3 && menuEv.payload.tokens > 0, `scenario19: toolset.menu logged (got ${JSON.stringify(menuEv && menuEv.payload)})`);
   assert(report.menu && report.menu.size === 3, "scenario19: report.menu recorded");
+}
+
+// Scenario 20 (R16 companion): the model's reasoning must survive the run as a
+// bounded digest on the report — the live `assistant.reasoning` event is
+// transient, so without this a reload loses all thinking.
+{
+  const runtime = makeRuntime({ providerScript: [() => ({ text: "All done.", toolCalls: [], reasoning: "I reasoned about the login form border first, then checked the reset link." })] });
+  const loop = new OmniLoop({ agentRuntime: runtime });
+  const { report } = await loop.run({ message: "look at the login page", agent: { id: "main" }, profile: {}, session: { id: "s20" }, run: { id: "r20" }, tools: baseTools, contextBundle: {} });
+  assert(typeof report.reasoningDigest === "string" && /login form border/.test(report.reasoningDigest),
+    `scenario20: the model's reasoning is kept as a digest on the report (got ${JSON.stringify(report.reasoningDigest)})`);
+  assert(report.reasoningDigest.length <= 6000, "scenario20: the digest is bounded (6000 chars)");
 }
 
 console.log(process.exitCode ? "\nOMNI-LOOP SMOKE: FAILED" : "\nOMNI-LOOP SMOKE: PASSED");

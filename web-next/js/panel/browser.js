@@ -181,8 +181,14 @@ export function mountBrowserTab(el, ctx, arg = {}) {
   }
 
   async function loadTabs() {
-    const data = await bFetch("/tabs", { ep: epOf() });
-    const tabs = Array.isArray(data.tabs) ? data.tabs : [];
+    // Managed Chrome may be down (503) while the agent's Playwright page is
+    // live. Don't let that failure wipe the agent tabs — treat it as "no
+    // managed tabs" and still merge agent targets below.
+    let tabs = [];
+    try {
+      const data = await bFetch("/tabs", { ep: epOf() });
+      tabs = Array.isArray(data.tabs) ? data.tabs : [];
+    } catch { tabs = []; }
     // The agent usually drives its OWN Playwright Chromium, not the managed
     // window this panel lists. Without merging those in, the panel shows the
     // managed tabs (often none) while the agent works somewhere invisible —
@@ -286,14 +292,24 @@ export function mountBrowserTab(el, ctx, arg = {}) {
     try {
       st = await loadStatus();
     } catch (e) {
-      showErr(e, true);
-      showEmpty(false);
-      return;
+      st = null; // managed browser may be down; agent Playwright can still stream
     }
+    state.status = st || { running: false };
+    // Do NOT gate on managed Chrome alone. The agent drives its own Playwright
+    // Chromium (default), which lives behind /api/browser/agent-stream and is
+    // invisible here until we look. Previously: managed down → empty state
+    // forever, even while the agent was actively browsing → "kuch dikhta hi nahi".
+    let agentHasTabs = false;
     if (!st || !st.running) {
-      stopNet();
-      showEmpty(true);
-      return;
+      try { agentHasTabs = (await loadTabs()).some((t) => t.agent); } catch { agentHasTabs = false; }
+      if (!agentHasTabs) {
+        // No managed Chrome and no agent page YET (auto-open fires on
+        // tool.started, before open() finishes). Show empty state but KEEP
+        // polling — the moment the agent page appears, flip to live view.
+        showEmpty(true);
+        startNet();
+        return;
+      }
     }
     showEmpty(false);
     try {
@@ -565,6 +581,10 @@ export function mountBrowserTab(el, ctx, arg = {}) {
       let msg = null;
       try { msg = JSON.parse(ev.data); } catch { return; }
       if (!msg || typeof msg !== "object") return;
+      // The agent stream carries action messages (cursor log) alongside frames.
+      // openActionsFeed only opens the managed live feed, so without handling
+      // them here the "Action log" stayed at 0 while the agent was working.
+      if (msg.type === "action" && msg.action) { pushLog(msg.action); noteAgentAction(msg.action); return; }
       if (msg.type === "ready") {
         setLive(true);
         state.streamFails = 0;
@@ -874,9 +894,20 @@ export function mountBrowserTab(el, ctx, arg = {}) {
   function startNet() {
     stopNet();
     if (state.dead || state.paused) return;
-    state.pollTimer = setInterval(() => {
+    state.pollTimer = setInterval(async () => {
       if (state.dead || state.paused || document.hidden) return;
-      loadTabs().catch(() => {});
+      try {
+        const tabs = await loadTabs();
+        // Auto-open already fired on tool.started, but at boot time the agent
+        // page may not have existed yet (open() was in flight). When it
+        // appears, switch from "Start browsing" empty state to the live view.
+        const hasAgent = (tabs || []).some((t) => t.agent);
+        const isEmptyShown = !wrap.contains(mainEl) && wrap.contains(emptyEl);
+        if (hasAgent && isEmptyShown && !state.staticShot) {
+          showEmpty(false);
+          if (state.activeId) openStream(state.activeId);
+        }
+      } catch {}
     }, POLL_MS);
     openActionsFeed();
     if (state.activeId && !state.staticShot) openStream(state.activeId);
@@ -896,7 +927,7 @@ export function mountBrowserTab(el, ctx, arg = {}) {
     if (paused === state.paused) return;
     state.paused = paused;
     if (paused) stopNet();
-    else if (state.status && state.status.running) startNet();
+    else startNet(); // agent Playwright stream works even when managed Chrome is down
   };
   const unsubStore = store.subscribe(onStore);
   const onVis = () => onStore();
