@@ -22,6 +22,18 @@
   flex: 0 0 auto;
 }
 
+.panel-mode-exit {
+  flex: 0 0 auto;
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.panel-mode-exit:hover { background: var(--bg-hover); color: var(--text-primary); }
+.shell.code-mode #panel-host .panel { width: min(48vw, 740px) !important; }
+
 .panel-tabwrap { display: inline-flex; align-items: center; flex: 0 0 auto; }
 
 .panel-tab {

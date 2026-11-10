@@ -110,6 +110,14 @@ export function mountPanel(root) {
 
   function paintStrip() {
     tabsEl.innerHTML = "";
+    if (store.get().codeMode) {
+      const back = h("button", {
+        class: "panel-mode-exit", type: "button", title: "Return to chat",
+        "aria-label": "Return to chat", text: "← Chat",
+      });
+      back.addEventListener("click", () => window.dispatchEvent(new CustomEvent("oc:code-mode-toggle")));
+      tabsEl.append(back);
+    }
     for (const t of tabs) {
       const def = TAB_DEFS.find((d) => d.kind === t.kind) || {};
       const b = h("button", {
@@ -240,7 +248,13 @@ export function mountPanel(root) {
   // Workspace switch → load that workspace's tabs.
   let lastWs = wsKey();
   let lastCapsManaged = null;
+  let lastCodeMode = !!store.get().codeMode;
   store.subscribe(() => {
+    const codeMode = !!store.get().codeMode;
+    if (codeMode !== lastCodeMode) {
+      lastCodeMode = codeMode;
+      paintStrip();
+    }
     // Caps arrive after first paint (cold boot); the shortcut menu is static,
     // so repaint it when managed-browser support becomes known.
     const capsNow = (store.get().caps && store.get().caps.browser && store.get().caps.browser.managed) || false;

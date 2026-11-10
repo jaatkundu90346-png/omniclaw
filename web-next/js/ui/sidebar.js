@@ -318,6 +318,7 @@ export function mountSidebar(root) {
   const nav = h("nav", { class: "sb-nav", "aria-label": "Primary" });
   const navDefs = [
     { icon: "plus", label: "New chat", href: "#/" },
+    { icon: "code", label: "Code workspace", href: "#/code", action: "code" },
     { icon: "wrench", label: "Skills & Tools", href: "#/tools" },
     { icon: "diff", label: "Changes", href: "#/changes" },
     { icon: "clock", label: "Scheduled", href: "#/scheduled" },
@@ -329,6 +330,12 @@ export function mountSidebar(root) {
   ];
   const navBtns = navDefs.map((d) => {
     const a = h("a", { class: "nav-row", href: d.href }, h("span", { html: icons[d.icon] }), h("span", { text: d.label }));
+    if (d.action === "code") {
+      a.addEventListener("click", (e) => {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent("oc:code-mode-toggle"));
+      });
+    }
     nav.append(a);
     return { ...d, el: a };
   });
@@ -354,8 +361,14 @@ export function mountSidebar(root) {
   root.append(top, searchWrap, nav, projScroll, foot);
   function paintNav(route) {
     for (const n of navBtns) {
-      const active = (n.href === "#/" && (route.name === "home" || route.name === "thread")) || (`#${routePath(route)}` === n.href);
+      const active = n.action === "code"
+        ? !!store.get().codeMode
+        : (n.href === "#/" && (route.name === "home" || route.name === "thread")) || (`#${routePath(route)}` === n.href);
       n.el.classList.toggle("active", !!active);
+      if (n.action === "code") {
+        n.el.setAttribute("aria-pressed", String(!!store.get().codeMode));
+        n.el.title = store.get().codeMode ? "Exit Code workspace" : "Open Code workspace";
+      }
     }
   }
 
@@ -424,7 +437,7 @@ export function mountSidebar(root) {
     const sig = JSON.stringify([
       s.workspace.activePath, s.workspace.recents, s.sessions, s.activeSessionId,
       s.showSystem, s.collapsedProjects, [...expanded].sort(), [...expandedKids].sort(),
-      s.appr, filter, s.agentId,
+      s.appr, filter, s.agentId, s.codeMode,
     ]);
     if (sig !== lastSig) {
       lastSig = sig;

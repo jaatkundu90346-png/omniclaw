@@ -23,6 +23,7 @@ export const icons = {
   chevronRight: svg('<path d="M6 4l4 4-4 4"/>'),
   more: svg('<circle cx="3.5" cy="8" r="1" fill="currentColor"/><circle cx="8" cy="8" r="1" fill="currentColor"/><circle cx="12.5" cy="8" r="1" fill="currentColor"/>'),
   terminal: svg('<rect x="1.5" y="3" width="13" height="10" rx="1.5"/><path d="M4.5 6l2 2-2 2M8 10.5h3.5"/>'),
+  code: svg('<path d="M5.5 4.5L2 8l3.5 3.5M10.5 4.5L14 8l-3.5 3.5"/>'),
   globe: svg('<circle cx="8" cy="8" r="5.5"/><path d="M2.5 8h11M8 2.5c-3.5 3.5-3.5 7.5 0 11 3.5-3.5 3.5-7.5 0-11z"/>'),
   diff: svg('<path d="M3 3.5h4M3 8h7M3 12.5h4"/><path d="M11 5.5l3 3-3 3"/>'),
   settings: svg('<circle cx="8" cy="8" r="2"/><path d="M8 1.8v2M8 12.2v2M1.8 8h2M12.2 8h2M3.6 3.6l1.4 1.4M11 11l1.4 1.4M12.4 3.6L11 5M5 11l-1.4 1.4"/>'),

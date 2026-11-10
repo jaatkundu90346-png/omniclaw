@@ -34,6 +34,7 @@ export function mountShell(root) {
     const s = store.get();
     shell.classList.toggle("sidebar-closed", !s.sidebarOpen);
     shell.classList.toggle("panel-closed", !s.panel.open);
+    shell.classList.toggle("code-mode", !!s.codeMode);
   };
   store.subscribe(syncChrome);
   syncChrome();

@@ -1,29 +1,44 @@
 # Sprint Contract
-**Block:** Configure Claude Code with You.bot loopback adapter
-**Agreed:** 2026-08-03T04:02:52.437Z
+**Block:** Claude-Code-inspired OmniClaw Code workspace (Phase 1)
+**Agreed:** 2026-10-18
+
 ## Scope (will do)
-- Inspect the existing adapter's Claude configuration guidance
-- Configure local Claude Code to route Anthropic Messages requests through 127.0.0.1:8787
-- Start the existing adapter and perform a non-interactive Claude Code connection smoke test
-- Document verified setup and known native tool-calling limitation
+- Add a dedicated Code workspace mode to the existing `/next` UI.
+- Reuse existing workspace/session, files/editor, review, chat, and agent-run surfaces where possible.
+- Make the coding layout usable on narrow screens as well as desktop.
+- Be honest about capabilities: the current Terminal tab is an agent-output log, not an interactive terminal.
+- Add focused browser coverage for entering/leaving Code mode and the workspace layout.
+
 ## Files to change
-- Claude Code user settings or launcher environment only if present
-- you-bot-adapter documentation only if setup guidance requires correction
-- PROGRESS.md
+- `SPRINT.md`
+- `web-next/js/main.js`
+- `web-next/js/ui/shell.js`
+- `web-next/js/ui/sidebar.js`
+- `web-next/js/icons.js`
+- `web-next/js/store.js`
+- `web-next/js/ui/panel.js`
+- `web-next/css/layout.css`
+- `web-next/css/sidebar.css`
+- `web-next/css/panel.css` (only if needed for reuse)
+- `scripts/code-workspace-ui-smoke.mjs`
+- `PROGRESS.md`
+- `DECISIONS.md`
+
 ## Do NOT touch
-- src/core/**
-- server.js
-- computer-control/**
-- gta6-clone/**
-- neon-open-world/**
-- API keys or secret-store contents
+- `src/core/**`, `server.js`, provider/config/session data, and user workspaces
+- The unrelated tracked feature list for the game project
+- Existing dirty/untracked user files reported by `git status`
+- Claude Desktop binaries, installation, or settings
+
 ## Pass criteria (verifiable)
-- Claude CLI installation/version is observed
-- Claude Code base URL points to http://127.0.0.1:8787 without persisting the real You.bot key
-- Adapter /health returns success
-- A Claude Code non-interactive request reaches the adapter and returns a valid response, or an exact runtime blocker is recorded
+- Code mode is reachable from the existing UI and uses the selected workspace/session.
+- Returning to chat does not lose or cancel server-side work.
+- Existing file/editor/review flows remain capability-gated and usable.
+- The terminal is never presented as interactive while `caps.terminal` is false.
+- Focused browser smoke and `npm run build` pass.
+
 ## Exclusions (out of scope)
-- Claiming native tool calling support
-- Saving the exposed You.bot API key in source or settings
-- Changing OmniClaw provider/core configuration
-- Installing Claude Code without user approval if it is absent
+- Copying Claude's proprietary source, assets, or exact branded UI.
+- Building a PTY backend or claiming interactive terminal support.
+- Changes to agent-loop, memory, skills, MCP, or backend security in this UI slice.
+- Rebuilding the packaged executable; this slice is frontend-only.

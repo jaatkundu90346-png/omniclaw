@@ -65,6 +65,7 @@ const state = {
   appearance: { ...APPEARANCE_DEFAULTS },
   caps: null, // Phase 4: GET /api/capabilities (null = old server, all B1 false)
   sidebarOpen: true,
+  codeMode: false, // transient focused coding layout; does not replace the chat route
   panel: { open: true, width: 320, tabs: [], activeTab: null },
   workspace: { activePath: "", activeId: "", activeName: "", recents: [], isDefault: true },
   sessions: [],
