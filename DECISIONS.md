@@ -1,5 +1,13 @@
 # DECISIONS — Why-we-did-it log
 
+## 2026-11-12 — The ad is captured from the user's real browser, and a delay must fit its scene
+- **Decision:** marketing assets are captured from the USER'S REAL Chrome over raw CDP, never from a headless copy.
+  - **Reason:** the ad's central claim is a LIVE browser view. A headless capture would be a different product, and the CDP session also proves the feature works in the user's own window (the panel showed the mirrored page plus a real "Action log: open https://example.com"). Getting the live frame needed three non-obvious fixes: the panel is hidden by the SHELL class, not by its own width; the shortcut rows are `.shortcut-row`; and a background managed tab never paints — so the mirrored page must be the agent's HEADLESS browser, which always paints. That is why the feature reel can show a live frame while OmniClaw stays in the foreground.
+- **Decision:** the Remotion skills live in the repo's `skills/` folder (not only in a machine-local cache).
+  - **Reason:** the point of installing them is that the AGENT can use them later. The registry scans `skills/*/SKILL.md`, so a clone of the repo ships the capability.
+- **Decision:** every animation delay is declared per element and guarded by a smoke assertion.
+  - **Reason:** a spring that starts later than the scene it lives in never becomes visible — the first render shipped a 5-second feature card whose screenshot waited 6 seconds, so the whole reel showed empty frames and nothing looked wrong. The guard turns a silent visual failure into a failing test.
+
 ## 2026-11-05 — The harness never authors the conversation; English-first language
 - **Decision:** `processBootstrapStep` only PERSISTS facts; it returns no `reply`, and `handleMessage` no longer overwrites the model's answer with it.
   - **Reason:** the previous code did `response = bootstrapResult.reply`, so the model's own, context-aware question was discarded and a fixed template pasted instead. On a fresh install that is the entire first impression. The bootstrap ritual is a set of files + side-effects; the wording belongs to the model. If the model's answer is unusable, other guards handle that — not a hardcoded sentence.

@@ -119,5 +119,8 @@ agents/
 /reports/
 /test-output/
 /screenshots/
+# Rendered videos are build output; the Remotion project source is tracked.
+marketing/video/out/
+marketing/video/node_modules/
 # One-off scripts that rewrite source files in place.
 /patch_*.cjs
