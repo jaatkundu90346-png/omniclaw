@@ -34,6 +34,7 @@
     "test:screenshot-inline": "node scripts/screenshot-inline-smoke.mjs",
     "test:vision-e2e": "node scripts/vision-ux-e2e-smoke.mjs",
     "test:bootstrap-language": "node scripts/bootstrap-language-smoke.mjs",
+    "test:video-ad": "node scripts/video-ad-smoke.mjs",
     "video:studio": "npm --prefix marketing/video run dev",
     "video:render": "npm --prefix marketing/video exec -- remotion render OmniClawAd out/omniclaw-ad-vertical.mp4",
     "video:render:square": "npm --prefix marketing/video exec -- remotion render OmniClawAdSquare out/omniclaw-ad-square.mp4",
