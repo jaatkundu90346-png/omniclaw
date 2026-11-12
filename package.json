@@ -41,6 +41,7 @@
     "video:assets": "node scripts/capture-ad-assets.mjs",
     "video:assets:work": "node scripts/capture-work-shots.mjs",
     "video:assets:reset": "node scripts/reset-capture-chrome.mjs",
+    "video:assets:reset-zoom": "node scripts/reset-capture-zoom.mjs",
     "shots:readme": "node scripts/capture-readme-shots.mjs",
     "test:omni-loop": "node scripts/omni-loop-smoke.mjs",
     "test:provider-rotation": "node scripts/provider-rotation-smoke.mjs",
