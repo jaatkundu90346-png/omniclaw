@@ -10,6 +10,8 @@ import {
   Easing,
   spring,
 } from "remotion";
+import { Audio } from "@remotion/media";
+import voiceover from "./voiceover.json";
 
 /**
  * OmniClaw social ad.
@@ -21,6 +23,11 @@ import {
  *
  * Brand tokens are the app's own (web-next/css/tokens.css) so the video looks
  * like the product, not a stock template.
+ *
+ * Sound: a locally synthesised music bed (scripts/make-music.mjs) under a
+ * Windows-SAPI voiceover (scripts/make-voiceover.mjs), with burned-in captions
+ * timed from the SAME manifest that places the audio, so a caption can never
+ * drift from its line.
  */
 
 const C = {
@@ -40,6 +47,8 @@ const FONT = '"Segoe UI", Inter, system-ui, -apple-system, "Helvetica Neue", san
 
 const CLAMP = { extrapolateLeft: "clamp", extrapolateRight: "clamp" } as const;
 
+type VoiceLine = { id: string; file: string; text: string; startMs: number; endMs: number; durationMs: number };
+
 // ── shared pieces ────────────────────────────────────────────────────────────
 
 const Backdrop: React.FC<{ children: React.ReactNode; glow?: string }> = ({
@@ -55,7 +64,6 @@ const Backdrop: React.FC<{ children: React.ReactNode; glow?: string }> = ({
         overflow: "hidden",
       }}
     >
-      {/* soft brand glow + a faint grid so flat dark frames still read as depth */}
       <AbsoluteFill
         style={{
           background: `radial-gradient(120% 70% at 50% 8%, ${glow}22 0%, ${glow}00 60%)`,
@@ -122,36 +130,35 @@ const Shot: React.FC<{
     durationInFrames: 30,
   });
   return (
-    <div
-      style={{
-        // In flow, NOT absolute: an absolutely positioned screenshot paints over
-        // the headline that sits above it in the flex column.
-        width,
-        marginTop: 8,
-        borderRadius: radius,
-        overflow: "hidden",
-        border: `1px solid ${C.line}`,
-        boxShadow: `0 40px 120px #00000099, 0 0 90px ${C.accent}33`,
-        opacity: enter,
-        scale: String(0.94 + enter * 0.06),
-        translate: `0px ${(1 - enter) * 40}px`,
-        background: C.bgElevated,
-      }}
-    >
-      <Img src={staticFile(file)} style={{ width: "100%", display: "block" }} />
+    <div style={{ width }}>
+      <div
+        style={{
+          // In flow, NOT absolute: an absolutely positioned screenshot paints
+          // over the headline that sits above it in the flex column.
+          width,
+          marginTop: 8,
+          borderRadius: radius,
+          overflow: "hidden",
+          border: `1px solid ${C.line}`,
+          boxShadow: `0 40px 120px #00000099, 0 0 90px ${C.accent}33`,
+          opacity: enter,
+          scale: String(0.94 + enter * 0.06),
+          translate: `0px ${(1 - enter) * 40}px`,
+          background: C.bgElevated,
+        }}
+      >
+        <Img src={staticFile(file)} style={{ width: "100%", display: "block" }} />
+      </div>
       {label ? (
         <div
           style={{
-            position: "absolute",
-            left: 0,
-            right: 0,
-            bottom: 0,
-            padding: "10px 16px",
-            fontSize: 18,
-            letterSpacing: "0.08em",
+            marginTop: 16,
+            fontSize: 20,
+            letterSpacing: "0.16em",
             textTransform: "uppercase",
             color: C.muted,
-            background: "linear-gradient(transparent, #0f1011ee)",
+            fontWeight: 600,
+            textAlign: "center",
           }}
         >
           {label}
@@ -189,6 +196,79 @@ const Wordmark: React.FC<{ size: number; sub?: string }> = ({ size, sub }) => (
     ) : null}
   </div>
 );
+
+// ── sound ────────────────────────────────────────────────────────────────────
+
+/** The music bed plus every voice line, placed on its exact cue. */
+const Soundtrack: React.FC = () => {
+  const { fps } = useVideoConfig();
+  const lines = (voiceover as { lines: VoiceLine[] }).lines;
+  return (
+    <>
+      <Audio src={staticFile("music/bed.wav")} volume={1} />
+      {lines.map((line) => (
+        <Sequence key={line.id} from={Math.round((line.startMs / 1000) * fps)}>
+          <Audio src={staticFile(`vo/${line.file}`)} volume={1} />
+        </Sequence>
+      ))}
+    </>
+  );
+};
+
+/** Burned-in captions, timed from the same manifest that places the audio. */
+const Captions: React.FC = () => {
+  const frame = useCurrentFrame();
+  const { fps, height } = useVideoConfig();
+  const nowMs = (frame / fps) * 1000;
+  const lines = (voiceover as { lines: VoiceLine[] }).lines;
+  const active = lines.find((l) => nowMs >= l.startMs && nowMs <= l.endMs);
+  if (!active) return null;
+  const inMs = nowMs - active.startMs;
+  const outMs = active.endMs - nowMs;
+  const opacity =
+    Math.min(
+      interpolate(inMs, [0, 220], [0, 1], { ...CLAMP, easing: Easing.out(Easing.cubic) }),
+      interpolate(outMs, [0, 220], [0, 1], { ...CLAMP, easing: Easing.in(Easing.cubic) }),
+    );
+  const rise = interpolate(inMs, [0, 260], [14, 0], { ...CLAMP, easing: Easing.out(Easing.cubic) });
+  const tall = height >= 1600;
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: tall ? 70 : 40,
+        right: tall ? 70 : 40,
+        bottom: tall ? 96 : 34,
+        display: "flex",
+        justifyContent: "center",
+        pointerEvents: "none",
+      }}
+    >
+      <div
+        style={{
+          maxWidth: tall ? 900 : 880,
+          padding: tall ? "20px 30px" : "14px 22px",
+          borderRadius: tall ? 18 : 14,
+          background: "#0f1011e6",
+          border: `1px solid ${C.line}`,
+          color: C.text,
+          // The caption sits OUTSIDE the Backdrop, so it must name the font
+          // itself — otherwise it inherits the document's serif default.
+          fontFamily: FONT,
+          fontSize: tall ? 40 : 28,
+          fontWeight: 700,
+          lineHeight: 1.24,
+          textAlign: "center",
+          letterSpacing: "-0.01em",
+          opacity,
+          translate: `0px ${rise}px`,
+        }}
+      >
+        {active.text}
+      </div>
+    </div>
+  );
+};
 
 // ── scenes ───────────────────────────────────────────────────────────────────
 
@@ -332,7 +412,6 @@ const SceneProblem: React.FC = () => {
           </div>
           <ProblemRow what="Your code" where="on their server" delay={0.2} />
           <ProblemRow what="Your API keys" where="in their vault" delay={0.8} />
-          <ProblemRow what="Your memory" where="you never see it" delay={1.4} />
           <div
             style={{
               marginTop: 40,
@@ -376,19 +455,12 @@ const SceneProduct: React.FC = () => {
             </div>
           </Enter>
           <Enter delay={0.2}>
-            <div
-              style={{
-                marginTop: 14,
-                fontSize: 30,
-                color: C.muted,
-                fontWeight: 500,
-              }}
-            >
+            <div style={{ marginTop: 14, fontSize: 30, color: C.muted, fontWeight: 500 }}>
               Chat, tools, memory, skills, approvals — one app on your machine
             </div>
           </Enter>
           <Shot file="workspace.png" width={860} label="OmniClaw Next" delay={0.35} />
-          <Enter delay={0.9} style={{ position: "absolute", bottom: 150 }}>
+          <Enter delay={0.9} style={{ position: "absolute", bottom: 190 }}>
             <div style={{ fontSize: 34, color: C.textDim, fontWeight: 600 }}>
               It plans, it uses tools, it shows its work.
             </div>
@@ -399,14 +471,22 @@ const SceneProduct: React.FC = () => {
   );
 };
 
+/** A feature card: one real screenshot + a claim. */
 const FeatureCard: React.FC<{
   file: string;
   title: string;
   line: string;
   tint: string;
-}> = ({ file, title, line, tint }) => {
+  label?: string;
+  width?: number;
+}> = ({ file, title, line, tint, label, width = 820 }) => {
   const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
+  const { fps, height } = useVideoConfig();
+  // The square format is half as tall: the card has to shrink with it, or it
+  // overflows the frame.
+  const k = Math.min(1, (height - 160) / 1120);
+  // The square format has no room for the caption under the card: reserve it.
+  const captionSpace = height >= 1600 ? 0 : 190;
   const enter = spring({
     frame: frame - 0.15 * fps,
     fps,
@@ -422,16 +502,16 @@ const FeatureCard: React.FC<{
         flexDirection: "column",
         alignItems: "center",
         justifyContent: "center",
-        padding: 120,
+        padding: `${Math.round(110 * k)}px ${Math.round(110 * k)}px ${Math.round(110 * k + captionSpace)}px`,
         opacity: enter,
         translate: `0px ${(1 - enter) * 30}px`,
       }}
     >
-      <Shot file={file} width={820} delay={0.25} />
+      <Shot file={file} width={Math.round(width * k)} delay={0.25} label={label} />
       <div
         style={{
-          marginTop: 66,
-          fontSize: 62,
+          marginTop: 54 * k,
+          fontSize: Math.round(58 * k),
           fontWeight: 800,
           letterSpacing: "-0.03em",
           textAlign: "center",
@@ -441,8 +521,8 @@ const FeatureCard: React.FC<{
       </div>
       <div
         style={{
-          marginTop: 18,
-          fontSize: 34,
+          marginTop: Math.round(16 * k),
+          fontSize: Math.round(34 * k),
           color: tint,
           fontWeight: 600,
           textAlign: "center",
@@ -454,29 +534,11 @@ const FeatureCard: React.FC<{
   );
 };
 
-const SceneFeatures: React.FC = () => {
+const SceneFeatures: React.FC<{ cards: { file: string; title: string; line: string; tint: string; label?: string; width?: number }[]; each: number }> = ({
+  cards,
+  each,
+}) => {
   const { fps } = useVideoConfig();
-  const cards = [
-    {
-      file: "browser-live.png",
-      title: "It uses your browser",
-      line: "And you watch every click, live",
-      tint: C.accent,
-    },
-    {
-      file: "changes.png",
-      title: "Every edit, as a diff",
-      line: "Nothing changes without you seeing it",
-      tint: C.ok,
-    },
-    {
-      file: "tools.png",
-      title: "Skills and tools, locally",
-      line: "Your machine does the work",
-      tint: C.textDim,
-    },
-  ];
-  const each = 5 * fps;
   return (
     <AbsoluteFill>
       <Backdrop>
@@ -592,10 +654,47 @@ const SceneCta: React.FC = () => {
 
 // ── composition ──────────────────────────────────────────────────────────────
 
+/** The four feature cards: the toolbox, the task, the build, the report. */
+const FEATURE_CARDS = [
+  {
+    file: "tools.png",
+    title: "Two hundred tools",
+    line: "All running on your own machine",
+    tint: C.accent,
+    label: "Skills & Tools",
+    width: 860,
+  },
+  {
+    file: "working-session.png",
+    title: "Give it a task",
+    line: "It plans, calls tools, shows every step",
+    tint: C.text,
+    label: "A real OmniClaw session",
+    width: 800,
+  },
+  {
+    file: "built-output.png",
+    title: "Then it builds it",
+    line: "And you watch it live",
+    tint: C.ok,
+    label: "Written by the agent, on your machine",
+    width: 880,
+  },
+  {
+    file: "working-answer.png",
+    title: "And it reports",
+    line: "Exactly what it made",
+    tint: C.textDim,
+    label: "The agent's own report",
+    width: 790,
+  },
+];
+
 export const OmniClawAd: React.FC = () => {
   const { fps } = useVideoConfig();
   return (
     <AbsoluteFill>
+      <Soundtrack />
       <Sequence from={0 * fps} durationInFrames={4 * fps} premountFor={fps}>
         <SceneHook />
       </Sequence>
@@ -605,12 +704,14 @@ export const OmniClawAd: React.FC = () => {
       <Sequence from={9 * fps} durationInFrames={7 * fps} premountFor={fps}>
         <SceneProduct />
       </Sequence>
-      <Sequence from={16 * fps} durationInFrames={15 * fps} premountFor={fps}>
-        <SceneFeatures />
+      <Sequence from={16 * fps} durationInFrames={22 * fps} premountFor={fps}>
+        <SceneFeatures cards={FEATURE_CARDS} each={5.5 * fps} />
       </Sequence>
-      <Sequence from={31 * fps} durationInFrames={7 * fps} premountFor={fps}>
+      <Sequence from={38 * fps} durationInFrames={8 * fps} premountFor={fps}>
         <SceneCta />
       </Sequence>
+      {/* Captions LAST: a scene's background paints over anything before it. */}
+      <Captions />
     </AbsoluteFill>
   );
 };

@@ -39,7 +39,7 @@ console.log("step 2: compositions are registered for social sizes");
   ok(/id="OmniClawAdSquare"/.test(root), "the square composition id is registered");
   ok(/width=\{1080\}/.test(root) && /height=\{1920\}/.test(root), "vertical is 1080x1920");
   ok(/width=\{1080\}/.test(root) && /height=\{1080\}/.test(root), "square is 1080x1080");
-  ok(/durationInFrames=\{1200\}/.test(root), "the ad is 1200 frames (40s at 30fps)");
+  ok(/durationInFrames=\{1380\}/.test(root), "the ad is 1380 frames (46s at 30fps)");
   ok(/fps=\{30\}/.test(root), "30 fps");
 }
 
@@ -56,7 +56,36 @@ console.log("step 3: the scenes tile the timeline exactly");
     cursor += s.dur;
   }
   ok(contiguous, "scenes are contiguous — no gap, no overlap");
-  ok(cursor === 38, `the scenes cover 38s of the 40s timeline (got ${cursor})`);
+  ok(cursor === 46, `the scenes cover the whole 46s timeline (got ${cursor})`);
+}
+
+console.log("step 3b: the ad has sound, and the captions are timed from the audio");
+{
+  const src = read("src/OmniClawAd.tsx");
+  ok(/music\/bed\.wav/.test(src), "the music bed is in the composition");
+  ok(/vo\/\$\{line\.file\}/.test(src), "every voice line is placed from the manifest");
+  ok(/from=\{Math\.round\(\(line\.startMs \/ 1000\) \* fps\)\}/.test(src),
+    "a voice line starts on its manifest cue");
+  ok(/Captions/.test(src) && /active\.text/.test(src), "the caption text comes from the same manifest");
+  ok(/import voiceover from "\.\/voiceover\.json"/.test(src), "the manifest is imported, not re-typed");
+  // The manifest must exist and every referenced audio file must be there.
+  const manifestPath = path.join(VIDEO, "src", "voiceover.json");
+  ok(fs.existsSync(manifestPath), "src/voiceover.json exists");
+  if (fs.existsSync(manifestPath)) {
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+    const lines = manifest.lines || [];
+    ok(lines.length >= 8, `the voiceover has ${lines.length} lines`);
+    let overlap = false;
+    for (let i = 1; i < lines.length; i++) {
+      if (lines[i].startMs < lines[i - 1].endMs) overlap = true;
+    }
+    ok(!overlap, "no two voice lines overlap");
+    for (const line of lines) {
+      ok(fs.existsSync(path.join(VIDEO, "public", "vo", line.file)), `public/vo/${line.file} exists`);
+    }
+    const last = lines[lines.length - 1];
+    ok(last.endMs <= 1380 * 1000 / 30, "the voiceover finishes inside the composition");
+  }
 }
 
 console.log("step 4: Remotion motion rules are respected");
@@ -108,6 +137,23 @@ console.log("step 6: the brand tokens are the app's own");
   const bg = (tokens.match(/--bg:\s*(#[0-9a-fA-F]{6})/) || [])[1];
   ok(Boolean(accent && src.includes(accent)), `the accent matches the app token (${accent})`);
   ok(Boolean(bg && src.includes(bg)), `the background matches the app token (${bg})`);
+}
+
+console.log("step 7: the ad shows a REAL run — the frames are the agent's own session");
+{
+  const src = read("src/OmniClawAd.tsx");
+  // The run the ad shows: the task, the agent's tool calls, the page it built
+  // and the report it wrote about it. All four are captured from the user's
+  // real Chrome, so all four must exist.
+  for (const asset of ["working-session.png", "working-answer.png", "built-output.png", "tools.png"]) {
+    ok(fs.existsSync(path.join(VIDEO, "public", asset)), `public/${asset} exists (the real run)`);
+    ok(new RegExp(`file[:=]\\s*"${asset}"`).test(src), `the ad shows ${asset}`);
+  }
+  // The task the agent was given, and the report it wrote back.
+  const session = path.join(VIDEO, "public", "working-session.png");
+  const answer = path.join(VIDEO, "public", "working-answer.png");
+  ok(fs.statSync(session).size > 20000, "the session frame is a real screenshot, not a blank");
+  ok(fs.statSync(answer).size > 20000, "the report frame is a real screenshot, not a blank");
 }
 
 console.log(`\n${process.exitCode ? "video-ad: FAILED" : `video-ad: ALL PASS (${passed})`}`);

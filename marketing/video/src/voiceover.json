@@ -1,0 +1,86 @@
+{
+  "voice": "Microsoft David Desktop",
+  "rate": 2,
+  "lines": [
+    {
+      "id": "hook",
+      "file": "line-01.wav",
+      "text": "Your AI agent shouldn't live in someone else's cloud.",
+      "startMs": 600,
+      "endMs": 3448,
+      "durationMs": 2848
+    },
+    {
+      "id": "problem",
+      "file": "line-02.wav",
+      "text": "Your code on their server. Your keys in their vault.",
+      "startMs": 4300,
+      "endMs": 7585,
+      "durationMs": 3285
+    },
+    {
+      "id": "tab",
+      "file": "line-03.wav",
+      "text": "That's not an agent. That's a tab.",
+      "startMs": 7785,
+      "endMs": 10559,
+      "durationMs": 2774
+    },
+    {
+      "id": "product",
+      "file": "line-04.wav",
+      "text": "Meet OmniClaw. A local-first AI agent platform for Windows.",
+      "startMs": 10759,
+      "endMs": 14983,
+      "durationMs": 4224
+    },
+    {
+      "id": "tools",
+      "file": "line-05.wav",
+      "text": "Two hundred tools, all running on your own machine.",
+      "startMs": 16300,
+      "endMs": 19473,
+      "durationMs": 3173
+    },
+    {
+      "id": "task",
+      "file": "line-06.wav",
+      "text": "Give it a task. It plans, it calls tools, it shows every step.",
+      "startMs": 21800,
+      "endMs": 26839,
+      "durationMs": 5039
+    },
+    {
+      "id": "built",
+      "file": "line-07.wav",
+      "text": "Then it builds the thing, and you watch it live.",
+      "startMs": 27300,
+      "endMs": 30079,
+      "durationMs": 2779
+    },
+    {
+      "id": "report",
+      "file": "line-08.wav",
+      "text": "And it tells you exactly what it made.",
+      "startMs": 32800,
+      "endMs": 35039,
+      "durationMs": 2239
+    },
+    {
+      "id": "cta",
+      "file": "line-09.wav",
+      "text": "OmniClaw. Local-first. Yours. Windows.",
+      "startMs": 37600,
+      "endMs": 42434,
+      "durationMs": 4834
+    },
+    {
+      "id": "cta2",
+      "file": "line-10.wav",
+      "text": "Free download on GitHub.",
+      "startMs": 42634,
+      "endMs": 44518,
+      "durationMs": 1884
+    }
+  ]
+}

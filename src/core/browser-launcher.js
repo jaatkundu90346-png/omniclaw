@@ -101,10 +101,28 @@ export function findBrowser(preferred = "") {
 /**
  * Where the debug-enabled profile lives. Stable across runs — that stability is
  * the entire reason a one-time sign-in is enough.
+ *
+ * A TEST instance gets its OWN profile, inside its own data dir. The shared
+ * profile can be opened by only ONE Chrome process, so a test that starts a
+ * managed browser while the user's live OmniClaw holds that profile can never
+ * work: the spawn hands the launch to the running instance and exits, the port
+ * the test asked for never opens, and the launch fails with a 500 after 25 s.
+ * The test profile keeps the "OmniClaw" + "-debug-profile" markers so the stale
+ * browser reaper still recognises it.
  */
 export function debugProfileDir(browserName = "Chrome") {
+  const name = String(browserName).toLowerCase();
+  const testMode = String(process.env.OMNICLAW_TEST_HEADLESS || "").trim();
+  if (testMode) {
+    // A TEST profile lives OUTSIDE the instance's data dir on purpose: the
+    // test wipes that dir on every run, and a still-running Chrome holding
+    // files inside it makes the next run fail with EPERM before it starts.
+    const base = process.env.LOCALAPPDATA || os.tmpdir();
+    const slot = String(process.env.OMNICLAW_BROWSER_PORT || "default");
+    return path.join(base, "OmniClaw-test", slot, `${name}-debug-profile`);
+  }
   const base = process.env.LOCALAPPDATA || path.join(os.homedir(), ".local", "share");
-  return path.join(base, "OmniClaw", `${String(browserName).toLowerCase()}-debug-profile`);
+  return path.join(base, "OmniClaw", `${name}-debug-profile`);
 }
 
 // ── Stale-browser reaping ────────────────────────────────────────────────────
@@ -223,9 +241,36 @@ export async function reapStaleManagedBrowsers() {
   return result;
 }
 
+/**
+ * The debug port of a managed browser that is ALREADY running with our profile.
+ *
+ * The profile dir (`AppData\Local\OmniClaw\chrome-debug-profile`) is shared by
+ * every OmniClaw instance on this machine, and Chrome allows only ONE process
+ * per profile. A second instance that spawns its own managed browser therefore
+ * hands the launch to the running one and exits: the port it asked for never
+ * opens and the launch times out. Finding the running instance lets us REUSE
+ * it instead of spawning a doomed second browser.
+ *
+ * Returns 0 when nothing matching is running.
+ */
+async function findRunningManagedPort() {
+  if (process.platform !== "win32") return 0;
+  const ps = "$p=@(Get-CimInstance Win32_Process | Where-Object { " +
+    "($_.Name -match '^(chrome|msedge|brave)\\.exe$') -and " +
+    "($_.CommandLine -like '*-debug-profile*') -and " +
+    "($_.CommandLine -like '*--remote-debugging-port=*') }); " +
+    "foreach($x in $p){ if($x.CommandLine -match '--remote-debugging-port=(\\d+)'){ $matches[1]; break } }";
+  const stdout = await new Promise((resolve) => {
+    execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", ps],
+      { windowsHide: true, timeout: 15000 },
+      (error, out) => resolve(error ? "" : String(out || "")));
+  });
+  const port = Number((stdout.match(/\d{2,5}/) || [])[0] || 0);
+  return Number.isInteger(port) && port > 0 ? port : 0;
+}
+
 /** Has the user already signed in inside the OmniClaw profile? */
-export function profileHasSession(profileDir) {
-  try {
+export function profileHasSession(profileDir) {  try {
     return ["Default/Network/Cookies", "Default/Cookies"].some((rel) => {
       const file = path.join(profileDir, rel);
       return fs.existsSync(file) && fs.statSync(file).size > 20 * 1024;

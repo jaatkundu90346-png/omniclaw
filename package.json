@@ -39,6 +39,8 @@
     "video:render": "npm --prefix marketing/video exec -- remotion render OmniClawAd out/omniclaw-ad-vertical.mp4",
     "video:render:square": "npm --prefix marketing/video exec -- remotion render OmniClawAdSquare out/omniclaw-ad-square.mp4",
     "video:assets": "node scripts/capture-ad-assets.mjs",
+    "video:assets:work": "node scripts/capture-work-shots.mjs",
+    "video:assets:reset": "node scripts/reset-capture-chrome.mjs",
     "shots:readme": "node scripts/capture-readme-shots.mjs",
     "test:omni-loop": "node scripts/omni-loop-smoke.mjs",
     "test:provider-rotation": "node scripts/provider-rotation-smoke.mjs",

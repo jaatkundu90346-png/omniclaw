@@ -8,7 +8,7 @@ export const RemotionRoot: React.FC = () => {
       <Composition
         id="OmniClawAd"
         component={OmniClawAd}
-        durationInFrames={1200}
+        durationInFrames={1380}
         fps={30}
         width={1080}
         height={1920}
@@ -17,7 +17,7 @@ export const RemotionRoot: React.FC = () => {
       <Composition
         id="OmniClawAdSquare"
         component={OmniClawAd}
-        durationInFrames={1200}
+        durationInFrames={1380}
         fps={30}
         width={1080}
         height={1080}

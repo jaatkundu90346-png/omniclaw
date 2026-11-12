@@ -10,7 +10,8 @@
 // only opens a browser tab and writes an image into marketing/video/public/.
 import fs from "node:fs";
 import path from "node:path";
-import WebSocket from "ws";
+import { fileURLToPath } from "node:url";
+import { Cdp, sleep } from "./lib/cdp.mjs";
 
 const ROOT = process.cwd();
 const OUT_DIR = path.join(ROOT, "marketing", "video", "public");
@@ -18,75 +19,11 @@ const APP_URL = process.env.OC_APP_URL || "http://127.0.0.1:3147";
 const CDP_URL = process.env.OC_CDP_URL || "http://127.0.0.1:9222";
 const MIRROR_URL = process.env.OC_MIRROR_URL || "https://example.com";
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let step = "start";
 const deadline = setTimeout(() => {
   console.error(`TIMEOUT at ${step}`);
   process.exit(2);
 }, 120000);
-
-/** Minimal CDP client: one browser-level socket, flat sessions by sessionId. */
-class Cdp {
-  constructor(ws) {
-    this.ws = ws;
-    this.seq = 0;
-    this.pending = new Map();
-    this.events = [];
-    ws.on("message", (raw) => {
-      let msg;
-      try { msg = JSON.parse(String(raw)); } catch { return; }
-      if (msg.id && this.pending.has(msg.id)) {
-        const { resolve, reject } = this.pending.get(msg.id);
-        this.pending.delete(msg.id);
-        if (msg.error) reject(new Error(`${msg.error.message} (${msg.error.code})`));
-        else resolve(msg.result || {});
-        return;
-      }
-      if (msg.method) this.events.push(msg);
-    });
-  }
-
-  static async connect(url) {
-    const version = await (await fetch(`${url}/json/version`)).json();
-    if (!version.webSocketDebuggerUrl) throw new Error("no webSocketDebuggerUrl from /json/version");
-    const ws = new WebSocket(version.webSocketDebuggerUrl, {
-      perMessageDeflate: false,
-      maxPayload: 256 * 1024 * 1024,
-      handshakeTimeout: 15000,
-    });
-    await new Promise((resolve, reject) => {
-      ws.once("open", resolve);
-      ws.once("error", reject);
-      setTimeout(() => reject(new Error("CDP socket handshake timed out")), 15000);
-    });
-    return new Cdp(ws);
-  }
-
-  send(method, params = {}, sessionId = "") {
-    const id = ++this.seq;
-    const payload = { id, method, params };
-    if (sessionId) payload.sessionId = sessionId;
-    this.ws.send(JSON.stringify(payload));
-    return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
-      setTimeout(() => {
-        if (this.pending.has(id)) {
-          this.pending.delete(id);
-          reject(new Error(`CDP timeout: ${method}`));
-        }
-      }, 45000);
-    });
-  }
-
-  async evaluate(expression, sessionId) {
-    const res = await this.send("Runtime.evaluate", {
-      expression,
-      returnByValue: true,
-      awaitPromise: true,
-    }, sessionId);
-    return res?.result?.value;
-  }
-}
 
 async function main() {
   fs.mkdirSync(OUT_DIR, { recursive: true });
